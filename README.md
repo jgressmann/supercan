@@ -2,8 +2,8 @@
 
 What is this?
 
-This is project SuperCAN. An open source USB to CAN-FD interface under MIT license.
+This is project SuperCAN. An open source USB to CAN-FD interface.
 
 # License
 
-MIT
+SuperCAN is licenses under the MIT license. Supercan uses FreeRTOS and TinyUSB which are both available under the same license.
