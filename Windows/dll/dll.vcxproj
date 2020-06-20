@@ -171,7 +171,7 @@
     <ClInclude Include="..\inc\supercan_dll.h" />
     <ClInclude Include="..\inc\supercan_winapi.h" />
     <ClInclude Include="pch.h" />
-    <ClInclude Include="supercan_m1.h" />
+    <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="supercan_dll.c" />
@@ -182,6 +182,9 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="dll.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
