@@ -10,7 +10,6 @@ SuperCAN works on Windows 10. Linux drivers are being developed.
 
 To use a SuperCAN device on Windows, simply plug it in.
 
-#
 
 # Building
 
