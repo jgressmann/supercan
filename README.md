@@ -84,7 +84,7 @@ Build the SuperCAN DFU file
 
 ```
 $ cd Boards/examples/device/supercan
-$ VERBOSE=1 make V=1 BOARD=d5035-01 HWREV=2 APP=1 dfu
+$ VERBOSE=1 make V=1 BOARD=d5035-01 HWREV=2 APP=1 VID=4243 PID=1 dfu
 ```
 
 Ensure _HWREV_ matches the board you are using.
