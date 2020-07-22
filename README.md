@@ -25,9 +25,9 @@ $ git submodule update --init --recursive
 
 ## 1. Firmware
 
-SuperCAN uses (a customized) [TinyUSB](https://github.com/hathach/tinyusb) stack.
+SuperCAN uses a customized [TinyUSB](https://github.com/hathach/tinyusb) stack.
 
-I am assuming you are on Linux and are using a Debian derived distribution.
+This the following assumes you are on Linux.
 
 ### Options
 
@@ -104,4 +104,4 @@ The solution contains code for a demo application that sends and dumps CAN traff
 
 # License
 
-SuperCAN is licenses under the MIT license. Supercan uses FreeRTOS and TinyUSB which are both available under the same license.
+SuperCAN is licensed under the MIT license. Supercan uses FreeRTOS and TinyUSB which are both available under the same license.

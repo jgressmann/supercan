@@ -1,3 +1,28 @@
+/*
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ */
+
 #include "pch.h"
 
 #include <stdio.h>
@@ -18,7 +43,7 @@ int main(int argc, char** argv)
     int error = SC_DLL_ERROR_NONE;
     uint32_t count;
     sc_dev_t* dev = NULL;
-    
+
     PUCHAR cmd_tx_buffer = NULL;
     PUCHAR cmd_rx_buffer = NULL;
     HANDLE cmd_tx_event = NULL;
@@ -75,7 +100,7 @@ int main(int argc, char** argv)
         goto Exit;
     }
 
-    
+
     error = sc_dev_count(&count);
     if (error) {
         fprintf(stderr, "sc_dev_count failed: %s (%d)\n", sc_strerror(error), error);
@@ -123,7 +148,7 @@ int main(int argc, char** argv)
         goto Exit;
     }
 
-    
+
 
     cmd_tx_buffer = calloc(dev->cmd_buffer_size, 1);
     if (!cmd_tx_buffer) {
@@ -152,13 +177,13 @@ int main(int argc, char** argv)
     cmd_tx_ptr += info->len;
 
     ULONG bytes = (ULONG)(cmd_tx_ptr - cmd_tx_buffer);
-    
+
     error = sc_dev_write(dev, dev->cmd_pipe, cmd_tx_buffer, bytes, &cmd_tx_ov);
     if (SC_DLL_ERROR_IO_PENDING != error) {
         error = -1;
         goto Exit;
     }
-    
+
     error = sc_dev_result(dev, &transferred, &cmd_tx_ov, -1);
     if (error) {
         fprintf(stderr, "sc_dev_result failed: %s (%d)\n", sc_strerror(error), error);
@@ -190,7 +215,7 @@ int main(int argc, char** argv)
     dev_info.nmbt_tseg1_max = dev->dev_to_host16(dev_info.nmbt_tseg1_max);
 
     fprintf(stdout, "device has %u CAN channels\n", dev_info.channels);
-    
+
     cmd_tx_ptr = cmd_tx_buffer;
     // set bus off ch0
     struct sc_msg_config* bus_off = (struct sc_msg_config*)cmd_tx_ptr;
@@ -209,7 +234,7 @@ int main(int argc, char** argv)
 
     //REG_CAN0_NBTP = CAN_NBTP_NBRP(2) | CAN_NBTP_NTSEG1(62) | CAN_NBTP_NTSEG2(15) | CAN_NBTP_NSJW(15); /* 500kBit @ 120 / 3 = 40MHz, 80% */
     //REG_CAN0_DBTP = CAN_DBTP_DBRP(2) | CAN_DBTP_DTSEG1(12) | CAN_DBTP_DTSEG2(5) | CAN_DBTP_DSJW(5); /* 2MBit @ 120 / 3 = 40MHz, 70% */
-    
+
 
     bt->channel = 0;
     bt->nmbt_brp = dev->dev_to_host16(3);
@@ -332,7 +357,7 @@ int main(int argc, char** argv)
                     if (!(rx->flags & SC_CAN_FLAG_RTR)) {
                         bytes += len;
                     }
-                    
+
                     if (msg->len < len) {
                         fprintf(stderr, "malformed sc_msg_can_rx\n");
                         break;
