@@ -21,13 +21,11 @@ Clone this repository and initialize the submodules.
 $ git submodule update --init --recursive
 ```
 
-
+You will need the the ARM GNU toolchain. On Debian derived Linux distribution `apt-get install gcc-arm-none-eabi` will get you set up.
 
 ## 1. Firmware
 
 SuperCAN uses a customized [TinyUSB](https://github.com/hathach/tinyusb) stack.
-
-This the following assumes you are on Linux.
 
 ### Options
 
@@ -63,7 +61,7 @@ $ cd Boards/examples/device/atsame51_dfu
 $ VERBOSE=1 make V=1 BOARD=d5035-01 HWREV=2 BOOTLOADER=1 flash-jlink
 ```
 
-This creates and flashes the bootloader. Make sure to replace _HWREV=2_ with the version of the board you are using.
+This creates and flashes the bootloader. Make sure to replace _HWREV=2_ with the revision of the board you are using.
 
 Next, flash SuperCAN using these steps
 
