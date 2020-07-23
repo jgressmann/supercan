@@ -74,7 +74,7 @@ $ VERBOSE=1 make V=1 BOARD=d5035-01 HWREV=2 APP=1 flash-dfu
 
 #### Prequisites
 
-Ensure you have `python3` and `fwupd` installed. The latter provides `dfu-tool`.
+Ensure you have `python3` and `dfu-util` installed.
 
 #### Build
 
@@ -90,7 +90,7 @@ Ensure _HWREV_ matches the board you are using.
 Next, upload the DFU file to the board.
 ```
 $ cd Boards/examples/device/supercan
-$ sudo dfu-tool -v write _build/build-d5035-01/d5035-01-firmware.dfu
+$ sudo dfu-util -R -D _build/build-d5035-01/d5035-01-firmware.dfu
 ```
 
 ## 2. Windows API
