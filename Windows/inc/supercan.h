@@ -78,8 +78,8 @@ extern "C" {
 
 
 
-#define SC_MODE_FLAG_RX         0x00 // enable reception
-#define SC_MODE_FLAG_TX         0x01 // enable transmission
+#define SC_MODE_FLAG_RX         0x00 // enable reception (rx)
+#define SC_MODE_FLAG_TX         0x01 // enable transmission (tx)
 #define SC_MODE_FLAG_FD         0x02 // enable CAN-FD
 #define SC_MODE_FLAG_BRS        0x04 // enable CAN-FD bitrate switching
 #define SC_MODE_FLAG_AUTO_RE    0x08 // enable automatic retransmission (tx)
@@ -118,10 +118,10 @@ struct sc_msg_dev_info {
     uint32_t can_clk_hz;
     uint16_t nmbt_brp_max;
     uint16_t nmbt_tq_max;
+    uint16_t nmbt_tseg1_max; // keep here for alignment
     uint8_t nmbt_tq_min;
     uint8_t nmbt_tseg1_min;
     uint8_t nmbt_brp_min;
-    uint16_t nmbt_tseg1_max;
     uint8_t nmbt_sjw_min;
     uint8_t nmbt_sjw_max;
     uint8_t nmbt_tseg2_min;
@@ -137,6 +137,7 @@ struct sc_msg_dev_info {
     uint8_t dtbt_tseg2_min;
     uint8_t dtbt_tseg2_max;
     uint8_t unused[1];
+    uint32_t serial_number[4];
 } SC_PACKED;
 
 struct sc_msg_bittiming {
@@ -166,7 +167,7 @@ struct sc_msg_can_status {
 
 struct sc_msg_can_rx {
     uint8_t id;
-    uint8_t len;
+    uint8_t len;            // must be a multiple of 4
     uint8_t channel;
     uint8_t dlc;
     uint32_t can_id;
@@ -177,7 +178,7 @@ struct sc_msg_can_rx {
 
 struct sc_msg_can_tx {
     uint8_t id;
-    uint8_t len;
+    uint8_t len;            // must be a multiple of 4
     uint8_t channel;
     uint8_t dlc;
     uint32_t can_id;
