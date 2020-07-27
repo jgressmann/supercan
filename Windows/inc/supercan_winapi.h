@@ -39,5 +39,10 @@
 #   pragma pack(pop)
 #   pragma warning(pop)
 #else
-#   error Unsupported compiler
+#   ifdef __GNUC__
+#       define SC_PACKED __attribute__((packed))
+#       include "supercan.h"
+#   else
+#       error Unsupported compiler
+#   endif
 #endif

@@ -33,14 +33,20 @@
 #define SC_EXTERN_C extern
 #endif
 
-#ifdef _MSC_VER
-#   ifdef SC_DLL_EXPORTS
-#       define SC_DLL_API SC_EXTERN_C __declspec(dllexport)
+#ifdef SC_STATIC
+#   define SC_DLL_API SC_EXTERN_C
+#else
+#   ifdef _MSC_VER
+#       ifdef SC_DLL_EXPORTS
+#           define SC_DLL_API SC_EXTERN_C __declspec(dllexport)
+#       else
+#           define SC_DLL_API SC_EXTERN_C __declspec(dllimport)
+#       endif
 #   else
-#       define SC_DLL_API SC_EXTERN_C __declspec(dllimport)
+#       ifndef SC_DLL_API
+#           error Define SC_DLL_API
+#       endif
 #   endif
-#   else
-#       error Define SC_DLL_EXPORTS
 #endif
 
 
@@ -55,6 +61,8 @@
 #define SC_DLL_ERROR_VERSION_UNSUPPORTED    6
 #define SC_DLL_ERROR_IO_PENDING             7
 #define SC_DLL_ERROR_DEVICE_FAILURE         8
+#define SC_DLL_ERROR_DEVICE_BUSY            9
+#define SC_DLL_ERROR_ABORTED                10
 
 typedef uint16_t(*sc_dev_to_host16)(uint16_t value);
 typedef uint32_t(*sc_dev_to_host32)(uint32_t value);
@@ -71,12 +79,13 @@ typedef struct sc_dev {
 
 SC_DLL_API void sc_init(void);
 SC_DLL_API void sc_uninit(void);
+SC_DLL_API char const* sc_strerror(int error);
 SC_DLL_API int sc_dev_scan(void);
 SC_DLL_API int sc_dev_count(uint32_t* count);
 SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t** dev);
 SC_DLL_API void sc_dev_close(sc_dev_t* dev);
-SC_DLL_API char const* sc_strerror(int error);
 SC_DLL_API int sc_dev_read(sc_dev_t *dev, uint8_t pipe, uint8_t *buffer, ULONG bytes, OVERLAPPED* ov);
 SC_DLL_API int sc_dev_write(sc_dev_t *dev, uint8_t pipe, uint8_t const * buffer, ULONG bytes, OVERLAPPED* ov);
 SC_DLL_API int sc_dev_result(sc_dev_t *dev, DWORD* bytes, OVERLAPPED* ov, int timeout_ms);
+SC_DLL_API int sc_dev_cancel(sc_dev_t *dev, OVERLAPPED* ov);
 

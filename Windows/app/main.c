@@ -23,9 +23,21 @@
  *
  */
 
-#include "pch.h"
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#include "supercan_winapi.h"
+#include "supercan_dll.h"
+
 
 #include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+
+#ifndef _countof
+#   define _countof(x) (sizeof(x)/sizeof((x)[0]))
+#endif
+
 
 #define MAX_PENDING_READS 16
 
