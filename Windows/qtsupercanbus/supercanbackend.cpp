@@ -434,8 +434,6 @@ SuperCanBackend::SuperCanBackend(const QString &name, QObject *parent)
                 Q_ASSERT(m_Device.cmd_tx_buffer);
                 Q_ASSERT(m_Device.cmd_rx_buffer);
                 m_ChannelIndex = channel_index;
-                setNominalBitrate(500000);
-                setDataBitrate(2000000);
 
             }
         }
@@ -448,6 +446,7 @@ SuperCanBackend::SuperCanBackend(const QString &name, QObject *parent)
     setCanBusStatusGetter([this] { return m_BusStatus; });
 #endif
 
+    resetConfiguration();
 }
 
 
@@ -458,6 +457,12 @@ bool SuperCanBackend::open()
     }
 
 //    qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "Private @ %p", d);
+
+    //apply all stored configurations
+    const auto keys = configurationKeys();
+    for (int key : keys) {
+        applyConfigurationParameter(key,  configurationParameter(key));
+    }
 
     auto error = setBus(true);
     if (error) {
@@ -484,7 +489,79 @@ void SuperCanBackend::close()
     }
 }
 
-void SuperCanBackend::setConfigurationParameter(int key, const QVariant &value)
+//void SuperCanBackend::setConfigurationParameter(int key, const QVariant &value)
+//{
+//    if (Q_UNLIKELY(!deviceValid())) {
+//        return;
+//    }
+
+//    switch (key) {
+//    case QCanBusDevice::RawFilterKey:
+//        setError(SuperCanBackend::tr("RawFilterKey not implemented."), ConfigurationError);
+//        qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "RawFilterKey not implemented.");
+//        break;
+//    case QCanBusDevice::ErrorFilterKey:
+//        setError(SuperCanBackend::tr("ErrorFilterKey not implemented."), ConfigurationError);
+//        qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "ErrorFilterKey not implemented.");
+//        break;
+//    case QCanBusDevice::LoopbackKey:
+//        setError(SuperCanBackend::tr("LoopbackKey not implemented."), ConfigurationError);
+//        qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "LoopbackKey not implemented.");
+//        break;
+//    case QCanBusDevice::ReceiveOwnKey:
+//        setError(SuperCanBackend::tr("ReceiveOwnKey not implemented."), ConfigurationError);
+//        qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "ReceiveOwnKey not implemented.");
+//        break;
+//    case QCanBusDevice::BitRateKey:
+//        if (m_IsOnBus) {
+//            setError(SuperCanBackend::tr("Nominal bitrate cannot change when on bus."), ConfigurationError);
+//        } else {
+//            auto bitrate = value.toUInt();
+//            auto error = setNominalBitrate(bitrate);
+//            if (error) {
+//                setError(SuperCanBackend::tr("Failed to set nominal bitrate: %1 (%2).").arg(SC_CALL(strerror)(error)).arg(error), ConfigurationError);
+//            }
+//        }
+//        break;
+//    case QCanBusDevice::CanFdKey:
+//        if (m_IsOnBus) {
+//            setError(SuperCanBackend::tr("FD mode cannot change when on bus."), ConfigurationError);
+//        } else {
+//            auto on = value.toBool();
+//            if (m_Device.info.features & SC_FEATURE_FLAG_CAN_FD) {
+//                m_Fd = on;
+//            } else {
+//                setError(SuperCanBackend::tr("Device doesn't support flexible data rate."), ConfigurationError);
+//            }
+//        }
+//        break;
+//    case QCanBusDevice::DataBitRateKey:
+//        if (m_IsOnBus) {
+//            setError(SuperCanBackend::tr("Data bitrate cannot change when on bus."), ConfigurationError);
+//        } else {
+//            auto bitrate = value.toUInt();
+//            auto error = setDataBitrate(bitrate);
+//            if (error) {
+//                setError(SuperCanBackend::tr("Failed to set data bitrate: %1 (%2).").arg(SC_CALL(strerror)(error)).arg(error), ConfigurationError);
+//            }
+//        }
+//        break;
+//    case SuperCanBackend::UrbsPerChannelKey:
+//        if (m_IsOnBus) {
+//            setError(SuperCanBackend::tr("Number of Urbs cannot change when on bus."), ConfigurationError);
+//        } else {
+//            m_Urbs = value.toInt();
+//        }
+//        break;
+//    default:
+//        qCDebug(QT_CANBUS_PLUGINS_SUPERCAN, "Key %d not implemented.", key);
+//        break;
+//    }
+//}
+
+
+
+void SuperCanBackend::applyConfigurationParameter(int key, const QVariant &value)
 {
     if (Q_UNLIKELY(!deviceValid())) {
         return;
@@ -507,46 +584,30 @@ void SuperCanBackend::setConfigurationParameter(int key, const QVariant &value)
         setError(SuperCanBackend::tr("ReceiveOwnKey not implemented."), ConfigurationError);
         qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "ReceiveOwnKey not implemented.");
         break;
-    case QCanBusDevice::BitRateKey:
-        if (m_IsOnBus) {
-            setError(SuperCanBackend::tr("Nominal bitrate cannot change when on bus."), ConfigurationError);
-        } else {
-            auto bitrate = value.toUInt();
-            auto error = setNominalBitrate(bitrate);
-            if (error) {
-                setError(SuperCanBackend::tr("Failed to set nominal bitrate: %1 (%2).").arg(SC_CALL(strerror)(error)).arg(error), ConfigurationError);
-            }
+    case QCanBusDevice::BitRateKey: {
+        auto bitrate = value.toUInt();
+        auto error = setNominalBitrate(bitrate);
+        if (error) {
+            setError(SuperCanBackend::tr("Failed to set nominal bitrate: %1 (%2).").arg(SC_CALL(strerror)(error)).arg(error), ConfigurationError);
         }
-        break;
-    case QCanBusDevice::CanFdKey:
-        if (m_IsOnBus) {
-            setError(SuperCanBackend::tr("FD mode cannot change when on bus."), ConfigurationError);
+    } break;
+    case QCanBusDevice::CanFdKey: {
+        auto on = value.toBool();
+        if (m_Device.info.features & SC_FEATURE_FLAG_CAN_FD) {
+            m_Fd = on;
         } else {
-            auto on = value.toBool();
-            if (m_Device.info.features & SC_FEATURE_FLAG_CAN_FD) {
-                m_Fd = on;
-            } else {
-                setError(SuperCanBackend::tr("Device doesn't support flexible data rate."), ConfigurationError);
-            }
+            setError(SuperCanBackend::tr("Device doesn't support flexible data rate."), ConfigurationError);
         }
-        break;
-    case QCanBusDevice::DataBitRateKey:
-        if (m_IsOnBus) {
-            setError(SuperCanBackend::tr("Data bitrate cannot change when on bus."), ConfigurationError);
-        } else {
-            auto bitrate = value.toUInt();
-            auto error = setDataBitrate(bitrate);
-            if (error) {
-                setError(SuperCanBackend::tr("Failed to set data bitrate: %1 (%2).").arg(SC_CALL(strerror)(error)).arg(error), ConfigurationError);
-            }
+    } break;
+    case QCanBusDevice::DataBitRateKey: {
+        auto bitrate = value.toUInt();
+        auto error = setDataBitrate(bitrate);
+        if (error) {
+            setError(SuperCanBackend::tr("Failed to set data bitrate: %1 (%2).").arg(SC_CALL(strerror)(error)).arg(error), ConfigurationError);
         }
-        break;
+    } break;
     case SuperCanBackend::UrbsPerChannelKey:
-        if (m_IsOnBus) {
-            setError(SuperCanBackend::tr("Number of Urbs cannot change when on bus."), ConfigurationError);
-        } else {
-            m_Urbs = value.toInt();
-        }
+        m_Urbs = value.toInt();
         break;
     default:
         qCDebug(QT_CANBUS_PLUGINS_SUPERCAN, "Key %d not implemented.", key);
@@ -1174,5 +1235,21 @@ void SuperCanBackend::busCleanup()
     m_BusStatus = QCanBusDevice::CanBusStatus::Unknown;
 #endif
 }
+
+void SuperCanBackend::resetConfiguration()
+{
+    QCanBusDevice::setConfigurationParameter(QCanBusDevice::RawFilterKey, QVariant());
+    QCanBusDevice::setConfigurationParameter(QCanBusDevice::ErrorFilterKey, QVariant());
+    QCanBusDevice::setConfigurationParameter(QCanBusDevice::LoopbackKey, QVariant());
+    QCanBusDevice::setConfigurationParameter(QCanBusDevice::ReceiveOwnKey, QVariant());
+    QCanBusDevice::setConfigurationParameter(QCanBusDevice::BitRateKey, 500000);
+    QCanBusDevice::setConfigurationParameter(QCanBusDevice::CanFdKey, false);
+    QCanBusDevice::setConfigurationParameter(QCanBusDevice::DataBitRateKey, 2000000);
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
+    QCanBusDevice::setConfigurationParameter(QCanBusDevice::ProtocolKey, QVariant());
+#endif
+}
+
+
 
 QT_END_NAMESPACE

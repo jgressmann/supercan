@@ -93,7 +93,7 @@ public:
     bool open() override;
     void close() override;
 
-    void setConfigurationParameter(int key, const QVariant &value) override;
+//    void setConfigurationParameter(int key, const QVariant &value) override;
 
     bool writeFrame(const QCanBusFrame &newData) override;
 
@@ -116,6 +116,8 @@ private:
     int setBus(bool on);
     int setNominalBitrate(unsigned value);
     int setDataBitrate(unsigned value);
+    void resetConfiguration();
+    void applyConfigurationParameter(int key, const QVariant &value);
 
 private:
     QTimer m_Timer;
