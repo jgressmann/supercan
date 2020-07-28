@@ -36,8 +36,11 @@
 
 #include <qt_windows.h>
 
-#include "supercan_winapi.h"
-#include "supercan_dll.h"
+#ifndef SC_STATIC
+#   define SC_DLL_API __declspec(dllimport)
+#endif
+#include <supercan_winapi.h>
+#include <supercan_dll.h>
 
 QT_BEGIN_NAMESPACE
 

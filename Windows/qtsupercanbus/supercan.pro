@@ -3,10 +3,7 @@ TARGET = qtsupercanbus
 QT = core serialbus
 
 HEADERS += \
-    supercanbackend.h \
-    ../inc/supercan.h \
-    ../inc/supercan_dll.h \
-    ../inc/supercan_winapi.h \
+    supercanbackend.h
 
 
 
@@ -14,7 +11,7 @@ SOURCES += \
     main.cpp \
     supercanbackend.cpp
 
-INC += ../inc
+INCLUDEPATH += ../inc
 
 sc_static:{
     SOURCES += ../dll/supercan_dll.c

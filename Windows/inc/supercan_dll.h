@@ -33,19 +33,19 @@
 #define SC_EXTERN_C extern
 #endif
 
-#ifdef SC_STATIC
-#   define SC_DLL_API SC_EXTERN_C
-#else
-#   ifdef _MSC_VER
-#       ifdef SC_DLL_EXPORTS
-#           define SC_DLL_API SC_EXTERN_C __declspec(dllexport)
-#       else
-#           define SC_DLL_API SC_EXTERN_C __declspec(dllimport)
-#       endif
+#ifndef SC_DLL_API
+#   ifdef SC_STATIC
+#      define SC_DLL_API SC_EXTERN_C
 #   else
-#       ifndef SC_DLL_API
-#           error Define SC_DLL_API
-#       endif
+#      ifdef _MSC_VER
+#          ifdef SC_DLL_EXPORTS
+#              define SC_DLL_API SC_EXTERN_C __declspec(dllexport)
+#          else
+#              define SC_DLL_API SC_EXTERN_C __declspec(dllimport)
+#          endif
+#      else
+#          error Define SC_DLL_API
+#      endif
 #   endif
 #endif
 
