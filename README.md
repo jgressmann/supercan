@@ -102,4 +102,4 @@ The solution contains code for a demo application that sends and dumps CAN traff
 
 # License
 
-SuperCAN is licensed under the MIT license. Supercan uses FreeRTOS and TinyUSB which are both available under the same license.
+SuperCAN is available under the MIT license. Supercan uses FreeRTOS and TinyUSB which are both available under the same license.
