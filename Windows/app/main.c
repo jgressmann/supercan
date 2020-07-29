@@ -244,10 +244,7 @@ int main(int argc, char** argv)
     bt->len = sizeof(*bt);
     cmd_tx_ptr += bt->len;
 
-    //REG_CAN0_NBTP = CAN_NBTP_NBRP(2) | CAN_NBTP_NTSEG1(62) | CAN_NBTP_NTSEG2(15) | CAN_NBTP_NSJW(15); /* 500kBit @ 120 / 3 = 40MHz, 80% */
-    //REG_CAN0_DBTP = CAN_DBTP_DBRP(2) | CAN_DBTP_DTSEG1(12) | CAN_DBTP_DTSEG2(5) | CAN_DBTP_DSJW(5); /* 2MBit @ 120 / 3 = 40MHz, 70% */
-
-
+    // 500KBit/2MBit @120MHz CAN clock
     bt->channel = 0;
     bt->nmbt_brp = dev->dev_to_host16(3);
     bt->nmbt_sjw = 16;
@@ -392,9 +389,13 @@ int main(int argc, char** argv)
 
             // re-queue in token
             error = sc_dev_read(dev, dev->msg_pipe_ptr[0] | 0x80, in_beg, dev->msg_buffer_size, &msg0_read_ovs[index]);
-            if (error && error != SC_DLL_ERROR_IO_PENDING) {
-                fprintf(stderr, "sc_dev_read failed: %s (%d)\n", sc_strerror(error), error);
-                goto Exit;
+            if (error) {
+                if (error != SC_DLL_ERROR_IO_PENDING) {
+                    fprintf(stderr, "sc_dev_read failed: %s (%d)\n", sc_strerror(error), error);
+                    goto Exit;
+                }
+
+                error = 0;
             }
 
             goto send;
@@ -416,9 +417,11 @@ send:
             tx->data[3] = 0xef;
 
             error = sc_dev_write(dev, dev->msg_pipe_ptr[0], (uint8_t*)tx, tx->len, &msg0_tx_ov);
-            if (error && error != SC_DLL_ERROR_IO_PENDING) {
-                fprintf(stderr, "sc_dev_write failed: %s (%d)\n", sc_strerror(error), error);
-                goto Exit;
+            if (error) {
+                if (error != SC_DLL_ERROR_IO_PENDING) {
+                    fprintf(stderr, "sc_dev_write failed: %s (%d)\n", sc_strerror(error), error);
+                    goto Exit;
+                }
             }
 
             error = sc_dev_result(dev, &transferred, &cmd_tx_ov, -1);
@@ -435,13 +438,25 @@ send:
 
 Exit:
     if (dev) {
+        // cancel any pending I/O prior to event / buffer cleanup
+        for (size_t i = 0; i < _countof(msg0_read_events); ++i) {
+            if (msg0_read_ovs[i].hEvent) {
+                sc_dev_cancel(dev, &msg0_read_ovs[i]);
+            }
+        }
+
+        if (msg0_tx_ov.hEvent) {
+            sc_dev_cancel(dev, &msg0_tx_ov);
+        }
+
         sc_dev_close(dev);
     }
 
-    free(msg0_rx_buffers);
-    free(msg0_tx_buffer);
-    free(cmd_tx_buffer);
-    free(cmd_rx_buffer);
+    for (size_t i = 0; i < _countof(msg0_read_events); ++i) {
+        if (msg0_read_events[i]) {
+            CloseHandle(msg0_read_events[i]);
+        }
+    }
 
     if (msg0_tx_event) {
         CloseHandle(msg0_tx_event);
@@ -455,11 +470,10 @@ Exit:
         CloseHandle(cmd_rx_event);
     }
 
-    for (size_t i = 0; i < _countof(msg0_read_events); ++i) {
-        if (msg0_read_events[i]) {
-            CloseHandle(msg0_read_events[i]);
-        }
-    }
+    free(msg0_rx_buffers);
+    free(msg0_tx_buffer);
+    free(cmd_tx_buffer);
+    free(cmd_rx_buffer);
 
     sc_uninit();
     return error;
