@@ -1,5 +1,7 @@
 # SuperCAN
 
+[![Build status](https://ci.appveyor.com/api/projects/status/i398eskxl418rwf9?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-firmware) [master 1d7e842] readme: improve wording
+
 What is this?
 
 This is project SuperCAN. An open source USB to CAN-FD protocol. SuperCAN works with the open source [D5035-01](https://github.com/RudolphRiedel/USB_CAN-FD) hardware to form a working USB 2.0 to CAN-FD interface.
