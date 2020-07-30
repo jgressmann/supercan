@@ -97,11 +97,11 @@ $ sudo dfu-util -R -D _build/build-d5035-01/d5035-01-firmware.dfu
 
 ## 2. Windows API
 
-Simply build the Visual Studio solution in the Windows folder. I use Visual Studio Community 2019 available for free for non-commercial products (as of this writing).
+Simply build the Visual Studio solution in the Windows folder. I use Visual Studio Community 2019 which is available free of charge for non-commercial products (as of this writing).
 
 The solution contains code for a demo application that sends and dumps CAN traffic.
 
 
 # License
 
-SuperCAN is available under the MIT license. Supercan uses FreeRTOS and TinyUSB which are both available under the same license.
+SuperCAN is available under the MIT license. SuperCan uses FreeRTOS and TinyUSB which are both available under the same license.
