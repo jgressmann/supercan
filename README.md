@@ -46,7 +46,7 @@ $ cd Boards/examples/device/supercan
 $ VERBOSE=1 make V=1 BOARD=d5035-01 HWREV=2 flash-jlink
 ```
 
-This create and flashes the firmware file. Make sure to replace _HWREV=2_ with the version of the board you are using.
+This creates and flashes the firmware file. Make sure to replace _HWREV=2_ with the version of the board you are using.
 
 ### 2. Build and flash SuperCAN and SuperDFU (bootloader)
 
@@ -76,7 +76,7 @@ $ VERBOSE=1 make V=1 BOARD=d5035-01 HWREV=2 APP=1 flash-dfu
 
 #### Prequisites
 
-Ensure you have `python3` and `dfu-util` installed.
+Ensure you have `python3` and `fwupd` installed. The latter provides dfu-tool.
 
 #### Build
 
