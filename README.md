@@ -1,6 +1,6 @@
 # SuperCAN
 
-[![Build status](https://ci.appveyor.com/api/projects/status/i398eskxl418rwf9?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-firmware) [![License](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
+[![License](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
 
 What is this?
 
@@ -11,6 +11,13 @@ This is project SuperCAN. An open source USB to CAN-FD protocol. SuperCAN works 
 SuperCAN works on Windows 10. Linux drivers are being developed.
 
 To use a SuperCAN device on Windows, simply plug it in.
+
+## Build
+
+*Firmware* [![Build status](https://ci.appveyor.com/api/projects/status/i398eskxl418rwf9?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-firmware)
+*Windows* [![Build status](https://ci.appveyor.com/api/projects/status/p25qholxtadg71ej?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-windows)
+
+
 
 
 # Building
@@ -104,4 +111,4 @@ The solution contains code for a demo application that sends and dumps CAN traff
 
 # License
 
-SuperCAN is available under the MIT license. SuperCan uses FreeRTOS and TinyUSB which are both available under the same license.
+SuperCAN is available under the MIT license. SuperCAN uses FreeRTOS and TinyUSB which are both available under the same license.
