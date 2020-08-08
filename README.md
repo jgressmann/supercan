@@ -4,7 +4,9 @@
 
 What is this?
 
-This is project SuperCAN. An open source USB to CAN-FD protocol. SuperCAN works with the open source [D5035-01](https://github.com/RudolphRiedel/USB_CAN-FD) hardware to form a working USB 2.0 to CAN-FD interface.
+This is project SuperCAN. An open source USB to CAN-FD protocol. 
+SuperCAN works with the open source [D5035-01](https://github.com/RudolphRiedel/USB_CAN-FD) 
+hardware to form a working USB 2.0 to CAN-FD interface.
 
 # Status
 
@@ -30,7 +32,8 @@ Clone this repository and initialize the submodules.
 $ git submodule update --init --recursive
 ```
 
-You will need the the ARM GNU toolchain. On Debian derived Linux distribution `apt-get install gcc-arm-none-eabi` will get you set up.
+You will need the the ARM GNU toolchain. 
+On Debian derived Linux distribution `apt-get install gcc-arm-none-eabi` will get you set up.
 
 ## 1. Firmware
 
@@ -99,7 +102,7 @@ Ensure _HWREV_ matches the board you are using.
 Next, upload the DFU file to the board.
 ```
 $ cd Boards/examples/device/supercan
-$ sudo dfu-util -R -D _build/build-d5035-01/d5035-01-firmware.dfu
+$ sudo  dfu-tool write _build/build-d5035-01/d5035-01-firmware.dfu
 ```
 
 ## 2. Windows API
