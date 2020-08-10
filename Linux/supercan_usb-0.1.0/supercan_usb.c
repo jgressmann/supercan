@@ -36,25 +36,38 @@
 
 #define SC_USB_TIMEOUT_MS 1000
 #define SC_MIN_SUPPORTED_TRANSFER_SIZE 64
+#define SC_MAX_RX_URBS 8
+#define SC_MAX_TX_URBS 8
 
-struct sc_usb_dev;
-struct sc_can_chan {
-	struct sc_usb_dev *dev;
-	struct usb_anchor rx_queued;
+struct sc_usb_device_data;
+struct sc_can_channel_data {
+	struct sc_usb_device_data *usb;
+	struct net_device *net;
+	struct usb_anchor rx_anchor;
+	struct usb_anchor tx_anchor;
 	u8 cmd_epp;
 	u8 msg_epp;
 	u8 initialized;
 };
 
 /* usb interface struct */
-struct sc_usb_dev {
-	struct sc_can_chan *chan_ptr;
-	struct usb_device *udev;
+struct sc_usb_device_data {
+	struct sc_can_channel_data *chan_ptr;
+	struct usb_interface *intf;
 	u16 (*host_to_dev16)(u16);
 	u32 (*host_to_dev32)(u32);
-	// u8 cmd_epp;
+	u32 can_clock_hz;
+	u32 ctrlmode_supported;
+	// u32 capabilities;
+	struct can_bittiming_const nominal;
+	struct can_bittiming_const data;
 	u16 msg_buffer_size;
 	u8 chan_count;
+};
+
+struct sc_net_device_data {
+	struct can_priv can; // must be first member I suppose
+	struct sc_can_channel_data *chan;
 };
 
 static u16 sc_nop16(u16 value)
@@ -77,53 +90,115 @@ static u32 sc_swap32(u32 value)
 	return __builtin_bswap32(value);
 }
 
-static void sc_can_chan_uninit(struct sc_can_chan *ch)
+static int sc_set_bittiming(struct net_device *dev)
 {
-	if (WARN_ON(!ch->dev))
-		return;
-
-
-}
-
-static int sc_can_chan_init(struct sc_can_chan *ch, struct sc_chan_info *info)
-{
-	if (WARN_ON(!ch->dev))
-		return -ENODEV;
-
-	ch->cmd_epp = info->cmd_epp;
-	ch->msg_epp = info->msg_epp;
 	return -ENODEV;
 }
 
+static int sc_set_data_bittiming(struct net_device *dev)
+{
+	return -ENODEV;
+}
 
-static void sc_usb_cleanup(struct sc_usb_dev *dev)
+static int sc_set_mode(struct net_device *dev, enum can_mode mode)
+{
+	return -ENODEV;
+}
+
+int sc_get_berr_counter(const struct net_device *dev, struct can_berr_counter *bec)
+{
+	return -ENODEV;
+}
+
+static void sc_can_chan_uninit(struct sc_can_channel_data *ch)
+{
+	// if (WARN_ON(!ch->dev))
+	// 	return;
+
+	if (ch->net) {
+		free_candev(ch->net);
+		ch->net = NULL;
+	}
+}
+
+static int sc_can_chan_init(struct sc_can_channel_data *ch, struct sc_chan_info *info)
+{
+	int rc = 0;
+	struct sc_net_device_data *net_data = NULL;
+
+	if (WARN_ON(!ch->usb)) {
+		rc = -ENODEV;
+		goto fail;
+	}
+
+	ch->cmd_epp = info->cmd_epp;
+	ch->msg_epp = info->msg_epp;
+
+	ch->net = alloc_candev(sizeof(*net_data), SC_MAX_TX_URBS);
+	if (!ch->net) {
+		dev_err(&ch->usb->intf->dev, "candev alloc failed\n");
+		rc = -ENOMEM;
+		goto fail;
+	}
+
+	net_data = netdev_priv(ch->net);
+	net_data->can.state = CAN_STATE_STOPPED;
+	net_data->can.clock.freq = ch->usb->can_clock_hz;
+	net_data->can.bittiming_const = &ch->usb->nominal;
+	net_data->can.data_bittiming_const = &ch->usb->data;
+	net_data->can.ctrlmode_supported = ch->usb->ctrlmode_supported;
+	net_data->can.do_set_bittiming = &sc_set_bittiming;
+	net_data->can.do_set_data_bittiming = &sc_set_data_bittiming;
+	net_data->can.do_set_mode = &sc_set_mode;
+	net_data->can.do_get_berr_counter = &sc_get_berr_counter;
+
+
+
+	// int (*do_set_bittiming)(struct net_device *dev);
+	// int (*do_set_data_bittiming)(struct net_device *dev);
+	// int (*do_set_mode)(struct net_device *dev, enum can_mode mode);
+	// int (*do_set_termination)(struct net_device *dev, u16 term);
+	// int (*do_get_state)(const struct net_device *dev,
+	// 		    enum can_state *state);
+	// int (*do_get_berr_counter)(const struct net_device *dev,
+	// 			   struct can_berr_counter *bec);
+
+out:
+	return rc;
+
+fail:
+	sc_can_chan_uninit(ch);
+	goto out;
+}
+
+
+static void sc_usb_cleanup(struct sc_usb_device_data *device_data)
 {
 	unsigned i;
-	if (dev) {
-		if (dev->chan_ptr) {
-			for (i = 0; i < dev->chan_count; ++i)
-				sc_can_chan_uninit(&dev->chan_ptr[i]);
 
-			kfree(dev->chan_ptr);
+	if (device_data) {
+		if (device_data->chan_ptr) {
+			for (i = 0; i < device_data->chan_count; ++i)
+				sc_can_chan_uninit(&device_data->chan_ptr[i]);
+
+			kfree(device_data->chan_ptr);
 		}
 
-		kfree(dev);
+		kfree(device_data);
 	}
 }
 
 static void sc_usb_disconnect(struct usb_interface *intf)
 {
-	struct sc_usb_dev *dev = usb_get_intfdata(intf);
+	struct sc_usb_device_data *device_data = usb_get_intfdata(intf);
 
 	usb_set_intfdata(intf, NULL);
 
-	if (dev)
-		sc_usb_cleanup(dev);
+	if (device_data)
+		sc_usb_cleanup(device_data);
 }
 
-static int sc_usb_probe(
-	struct usb_interface *intf,
-	const struct usb_device_id *id)
+static int sc_usb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 {
 	int rc = 0;
 	int actual_len;
@@ -137,7 +212,7 @@ static int sc_usb_probe(
 	u16 msg_buffer_size;
 	unsigned i;
 	char serial_str[1 + sizeof(info->sn_bytes)*2];
-	struct sc_usb_dev *dev = NULL;
+	struct sc_usb_device_data *device_data = NULL;
 	struct usb_device *udev = interface_to_usbdev(intf);
 
 	// ensure interface is set
@@ -148,7 +223,7 @@ static int sc_usb_probe(
 
 	// we want a VENDOR interface
 	if (intf->cur_altsetting->desc.bInterfaceClass != USB_CLASS_VENDOR_SPEC) {
-		dev_dbg(&intf->dev, "not a vendor specific interface: %#02x\n", intf->cur_altsetting->desc.bInterfaceClass);
+		dev_dbg(&intf->dev, "not a vendor interface: %#02x\n", intf->cur_altsetting->desc.bInterfaceClass);
 		rc = -ENODEV;
 		goto err;
 	}
@@ -276,38 +351,65 @@ static int sc_usb_probe(
 
 	dev_info(&intf->dev, "device serial %s has %u channel(s)\n", serial_str, info->chan_count);
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
-	if (!dev) {
+	device_data = kzalloc(sizeof(*device_data), GFP_KERNEL);
+	if (!device_data) {
 		rc = -ENODEV;
 		goto err;
 	}
 
-	dev->udev = interface_to_usbdev(intf);
+	device_data->intf = intf;
+
 
 	if (SC_NATIVE_BYTE_ORDER == device_hello->byte_order) {
-		dev->host_to_dev16 = &sc_nop16;
-		dev->host_to_dev32 = &sc_nop32;
+		device_data->host_to_dev16 = &sc_nop16;
+		device_data->host_to_dev32 = &sc_nop32;
 	} else {
-		dev->host_to_dev16 = &sc_swap16;
-		dev->host_to_dev32 = &sc_swap32;
+		device_data->host_to_dev16 = &sc_swap16;
+		device_data->host_to_dev32 = &sc_swap32;
 	}
 
-	dev->msg_buffer_size = msg_buffer_size;
-	dev->chan_count = info->chan_count;
-	dev->chan_ptr = kcalloc(dev->chan_count, sizeof(*dev->chan_ptr), GFP_KERNEL);
-	if (!dev->chan_ptr) {
+	device_data->msg_buffer_size = msg_buffer_size;
+	device_data->chan_count = info->chan_count;
+	device_data->can_clock_hz = device_data->host_to_dev32(info->can_clk_hz);
+
+	// nominal bitrate
+	strlcpy(device_data->nominal.name, SC_NAME, sizeof(device_data->nominal.name));
+	device_data->nominal.tseg1_min = info->nmbt_tseg1_min;
+	device_data->nominal.tseg1_max = device_data->host_to_dev16(info->nmbt_tseg1_max);
+	device_data->nominal.tseg2_min = info->nmbt_tseg2_min;
+	device_data->nominal.tseg2_max = info->nmbt_tseg2_max;
+	device_data->nominal.sjw_max = info->nmbt_sjw_max;
+	device_data->nominal.brp_min = info->nmbt_brp_min;
+	device_data->nominal.brp_max = device_data->host_to_dev16(info->nmbt_brp_max);
+	device_data->nominal.brp_inc = 1;
+
+	// data bitrate
+	strlcpy(device_data->data.name, SC_NAME, sizeof(device_data->data.name));
+	device_data->data.tseg1_min = info->dtbt_tseg1_min;
+	device_data->data.tseg1_max = info->dtbt_tseg1_max;
+	device_data->data.tseg2_min = info->dtbt_tseg2_min;
+	device_data->data.tseg2_max = info->dtbt_tseg2_max;
+	device_data->data.sjw_max = info->dtbt_sjw_max;
+	device_data->data.brp_min = info->dtbt_brp_min;
+	device_data->data.brp_max = info->dtbt_brp_max;
+	device_data->data.brp_inc = 1;
+
+
+
+	device_data->chan_ptr = kcalloc(device_data->chan_count, sizeof(*device_data->chan_ptr), GFP_KERNEL);
+	if (!device_data->chan_ptr) {
 		rc = -ENODEV;
 		goto err;
 	}
 
-	for (i = 0; i < dev->chan_count; ++i) {
-		dev->chan_ptr[i].dev = dev;
-		rc = sc_can_chan_init(&dev->chan_ptr[i], &info->chan_info[i]);
+	for (i = 0; i < device_data->chan_count; ++i) {
+		device_data->chan_ptr[i].usb = device_data;
+		rc = sc_can_chan_init(&device_data->chan_ptr[i], &info->chan_info[i]);
 		if (rc)
 			goto err;
 	}
 
-	usb_set_intfdata(intf, dev);
+	usb_set_intfdata(intf, device_data);
 
 cleanup:
 	kfree(tx_buf);
@@ -316,7 +418,7 @@ cleanup:
 	return rc;
 
 err:
-	sc_usb_cleanup(dev);
+	sc_usb_cleanup(device_data);
 	goto cleanup;
 }
 
