@@ -37,8 +37,13 @@
 #define SC_USB_TIMEOUT_MS 1000
 #define SC_MIN_SUPPORTED_TRANSFER_SIZE 64
 
+struct sc_usb_dev;
 struct sc_can_chan {
-	struct sc_chan_info info;
+	struct sc_usb_dev *dev;
+	struct usb_anchor rx_queued;
+	u8 cmd_epp;
+	u8 msg_epp;
+	u8 initialized;
 };
 
 /* usb interface struct */
@@ -47,7 +52,9 @@ struct sc_usb_dev {
 	struct usb_device *udev;
 	u16 (*host_to_dev16)(u16);
 	u32 (*host_to_dev32)(u32);
-	unsigned int chan_count;
+	// u8 cmd_epp;
+	u16 msg_buffer_size;
+	u8 chan_count;
 };
 
 static u16 sc_nop16(u16 value)
@@ -72,19 +79,46 @@ static u32 sc_swap32(u32 value)
 
 static void sc_can_chan_uninit(struct sc_can_chan *ch)
 {
+	if (WARN_ON(!ch->dev))
+		return;
+
 
 }
 
-static int sc_can_chan_init(struct sc_can_chan *ch)
+static int sc_can_chan_init(struct sc_can_chan *ch, struct sc_chan_info *info)
 {
+	if (WARN_ON(!ch->dev))
+		return -ENODEV;
+
+	ch->cmd_epp = info->cmd_epp;
+	ch->msg_epp = info->msg_epp;
 	return -ENODEV;
 }
 
 
+static void sc_usb_cleanup(struct sc_usb_dev *dev)
+{
+	unsigned i;
+	if (dev) {
+		if (dev->chan_ptr) {
+			for (i = 0; i < dev->chan_count; ++i)
+				sc_can_chan_uninit(&dev->chan_ptr[i]);
+
+			kfree(dev->chan_ptr);
+		}
+
+		kfree(dev);
+	}
+}
 
 static void sc_usb_disconnect(struct usb_interface *intf)
 {
+	struct sc_usb_dev *dev = usb_get_intfdata(intf);
 
+	usb_set_intfdata(intf, NULL);
+
+	if (dev)
+		sc_usb_cleanup(dev);
 }
 
 static int sc_usb_probe(
@@ -96,12 +130,12 @@ static int sc_usb_probe(
 	struct sc_msg_req *req;
 	struct sc_msg_hello *device_hello;
 	struct sc_msg_dev_info *info;
-	uint8_t cmd_pipe;
+	uint8_t cmd_epp;
 	void *tx_buf = NULL;
 	void *rx_buf = NULL;
 	u16 ep_size;
 	u16 msg_buffer_size;
-	unsigned i, j;
+	unsigned i;
 	char serial_str[1 + sizeof(info->sn_bytes)*2];
 	struct sc_usb_dev *dev = NULL;
 	struct usb_device *udev = interface_to_usbdev(intf);
@@ -109,14 +143,14 @@ static int sc_usb_probe(
 	// ensure interface is set
 	if (unlikely(!intf->cur_altsetting)) {
 		rc = -ENODEV;
-		goto cleanup;
+		goto err;
 	}
 
 	// we want a VENDOR interface
 	if (intf->cur_altsetting->desc.bInterfaceClass != USB_CLASS_VENDOR_SPEC) {
 		dev_dbg(&intf->dev, "not a vendor specific interface: %#02x\n", intf->cur_altsetting->desc.bInterfaceClass);
 		rc = -ENODEV;
-		goto cleanup;
+		goto err;
 	}
 
 	// must have at least one endpoint
@@ -124,13 +158,13 @@ static int sc_usb_probe(
 	if (unlikely(!(intf->cur_altsetting->desc.bNumEndpoints / 2))) {
 		// no endpoint pair
 		rc = -ENODEV;
-		goto cleanup;
+		goto err;
 	}
 
 	// endpoint must be bulk
 	if (unlikely(usb_endpoint_type(&intf->cur_altsetting->endpoint->desc) != USB_ENDPOINT_XFER_BULK)) {
 		rc = -ENODEV;
-		goto cleanup;
+		goto err;
 	}
 
 	ep_size = le16_to_cpu(intf->cur_altsetting->endpoint->desc.wMaxPacketSize);
@@ -139,15 +173,15 @@ static int sc_usb_probe(
 	// endpoint too small?
 	if (unlikely(ep_size < SC_MIN_SUPPORTED_TRANSFER_SIZE)) {
 		rc = -ENODEV;
-		goto cleanup;
+		goto err;
 	}
 
-	cmd_pipe = usb_endpoint_num(&intf->cur_altsetting->endpoint->desc);
-	dev_dbg(&intf->dev, "ep num %u\n", cmd_pipe);
+	cmd_epp = usb_endpoint_num(&intf->cur_altsetting->endpoint->desc);
+	dev_dbg(&intf->dev, "ep num %u\n", cmd_epp);
 	tx_buf = kmalloc(ep_size, GFP_KERNEL);
 	if (!tx_buf) {
 		rc = -ENOMEM;
-		goto cleanup;
+		goto err;
 	}
 
 	req = tx_buf;
@@ -157,22 +191,22 @@ static int sc_usb_probe(
 
 
 	dev_dbg(&intf->dev, "sending SC_MSG_HELLO_DEVICE\n");
-	rc = usb_bulk_msg(udev, usb_sndbulkpipe(udev, cmd_pipe), req,
+	rc = usb_bulk_msg(udev, usb_sndbulkpipe(udev, cmd_epp), req,
 			sizeof(*req), &actual_len, SC_USB_TIMEOUT_MS);
 	if (rc)
-		goto cleanup;
+		goto err;
 
 	rx_buf = kmalloc(ep_size, GFP_KERNEL);
 	if (!rx_buf) {
 		rc = -ENOMEM;
-		goto cleanup;
+		goto err;
 	}
 
 	/* wait for response */
 	dev_dbg(&intf->dev, "waiting for SC_MSG_HELLO_HOST\n");
-	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, cmd_pipe), rx_buf, ep_size, &actual_len, SC_USB_TIMEOUT_MS);
+	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, cmd_epp), rx_buf, ep_size, &actual_len, SC_USB_TIMEOUT_MS);
 	if (rc)
-		goto cleanup;
+		goto err;
 
 	device_hello = rx_buf;
 
@@ -182,7 +216,7 @@ static int sc_usb_probe(
 	    device_hello->len < sizeof(struct sc_msg_hello)) {
 		/* no dice */
 		rc = -ENODEV;
-		goto cleanup;
+		goto err;
 	}
 
 	msg_buffer_size = ntohs(device_hello->msg_buffer_size);
@@ -192,29 +226,62 @@ static int sc_usb_probe(
 			"badly configured device: proto_version=%u msg_buffer_size=%u\n",
 			device_hello->proto_version, msg_buffer_size);
 		rc = -ENODEV;
-		goto cleanup;
+		goto err;
 	}
 
 	if (device_hello->proto_version > SC_VERSION) {
 		dev_info(&intf->dev, "device proto version %u exceeds supported version %u\n",
 			device_hello->proto_version, SC_VERSION);
 		rc = -ENODEV;
-		goto cleanup;
+		goto err;
 	}
 
 	/* At this point we are fairly confident we are dealing with the genuine article. */
 	dev_info(
 		&intf->dev,
-		"device uses SuperCAN proto version %u, %s endian\n",
+		"device proto version %u, %s endian\n",
 		device_hello->proto_version, device_hello->byte_order == SC_BYTE_ORDER_LE ? "little" : "big");
+
+
+
+	req->id = SC_MSG_DEVICE_INFO;
+	rc = usb_bulk_msg(udev, usb_sndbulkpipe(udev, cmd_epp), req, sizeof(*req), &actual_len, SC_USB_TIMEOUT_MS);
+	if (rc)
+		goto err;
+
+	/* wait for response */
+	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, cmd_epp), rx_buf, ep_size, &actual_len, SC_USB_TIMEOUT_MS);
+	if (rc)
+		goto err;
+
+	info = rx_buf;
+
+	if (unlikely(actual_len < 0 ||
+				 (size_t)actual_len < sizeof(*info) ||
+	             SC_MSG_DEVICE_INFO != info->id ||
+	             info->len < sizeof(*info) ||
+	             actual_len < sizeof(*info)
+	                + sizeof(struct sc_chan_info) * info->chan_count)) {
+		dev_err(&intf->dev, "bad reply to SC_MSG_DEVICE_INFO (%d bytes)\n", actual_len);
+		rc = -ENODEV;
+		goto err;
+	}
+
+	// dev_dbg(&intf->dev, "info serial len %u, str buf size %zu\n", info->sn_len, ARRAY_SIZE(serial_str));
+	for (i = 0; i < min((size_t)info->sn_len, ARRAY_SIZE(serial_str)-1); ++i)
+		snprintf(&serial_str[i*2], 3, "%02x", info->sn_bytes[i]);
+
+	// dev_dbg(&intf->dev, "i=%u\n", i);
+	serial_str[i*2] = 0;
+
+	dev_info(&intf->dev, "device serial %s has %u channel(s)\n", serial_str, info->chan_count);
 
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev) {
 		rc = -ENODEV;
-		goto cleanup;
+		goto err;
 	}
 
-	usb_set_intfdata(intf, dev);
 	dev->udev = interface_to_usbdev(intf);
 
 	if (SC_NATIVE_BYTE_ORDER == device_hello->byte_order) {
@@ -225,65 +292,32 @@ static int sc_usb_probe(
 		dev->host_to_dev32 = &sc_swap32;
 	}
 
-	req->id = SC_MSG_DEVICE_INFO;
-	rc = usb_bulk_msg(udev, usb_sndbulkpipe(udev, cmd_pipe), req, sizeof(*req), &actual_len, SC_USB_TIMEOUT_MS);
-	if (rc)
-		goto cleanup;
-
-	/* wait for response */
-	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, cmd_pipe), rx_buf, ep_size, &actual_len, SC_USB_TIMEOUT_MS);
-	if (rc)
-		goto cleanup;
-
-	info = rx_buf;
-
-	if (unlikely(actual_len < (int)sizeof(*info) ||
-	             SC_MSG_DEVICE_INFO != info->id ||
-	             info->len < sizeof(*info) ||
-	             actual_len < (int)(sizeof(*info)
-	             + sizeof(struct sc_chan_info) * info->channel_count))) {
-		dev_err(&intf->dev, "bad reply to SC_MSG_DEVICE_INFO (%d bytes)\n", actual_len);
-		rc = -ENODEV;
-		goto cleanup;
-	}
-
-	for (i = 0, j = 0; i < min((size_t)info->sn_len, sizeof(serial_str)-1); i += 1, j += 2)
-		snprintf(&serial_str[j], 2, "%02x", info->sn_bytes[i]);
-
-	serial_str[j] = 0;
-
-	dev_info(&intf->dev, "device serial %s has %u channel(s)\n", serial_str, info->channel_count);
-
-	dev->chan_count = info->channel_count;
-	dev->chan_ptr = kzalloc(dev->chan_count * sizeof(*dev->chan_ptr), GFP_KERNEL);
+	dev->msg_buffer_size = msg_buffer_size;
+	dev->chan_count = info->chan_count;
+	dev->chan_ptr = kcalloc(dev->chan_count, sizeof(*dev->chan_ptr), GFP_KERNEL);
 	if (!dev->chan_ptr) {
 		rc = -ENODEV;
-		goto cleanup;
+		goto err;
 	}
 
 	for (i = 0; i < dev->chan_count; ++i) {
-		rc = sc_can_chan_init(&dev->chan_ptr[i]);
+		dev->chan_ptr[i].dev = dev;
+		rc = sc_can_chan_init(&dev->chan_ptr[i], &info->chan_info[i]);
 		if (rc)
-			goto cleanup;
+			goto err;
 	}
 
-out:
-	return rc;
+	usb_set_intfdata(intf, dev);
 
 cleanup:
 	kfree(tx_buf);
 	kfree(rx_buf);
 
-	if (dev) {
-		if (dev->chan_ptr) {
-			sc_can_chan_uninit(&dev->chan_ptr[i]);
-			kfree(dev->chan_ptr);
-		}
+	return rc;
 
-		kfree(dev);
-	}
-
-	goto out;
+err:
+	sc_usb_cleanup(dev);
+	goto cleanup;
 }
 
 MODULE_AUTHOR("Jean Gressmann <jean@0x42.de>");
