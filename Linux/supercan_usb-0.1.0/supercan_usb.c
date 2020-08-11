@@ -47,7 +47,6 @@ struct sc_can_channel_data {
 	struct usb_anchor tx_anchor;
 	u8 cmd_epp;
 	u8 msg_epp;
-	u8 initialized;
 };
 
 /* usb interface struct */
@@ -57,6 +56,7 @@ struct sc_usb_device_data {
 	u16 (*host_to_dev16)(u16);
 	u32 (*host_to_dev32)(u32);
 	u32 can_clock_hz;
+	u32 ctrlmode_static;
 	u32 ctrlmode_supported;
 	// u32 capabilities;
 	struct can_bittiming_const nominal;
@@ -68,7 +68,10 @@ struct sc_usb_device_data {
 struct sc_net_device_data {
 	struct can_priv can; // must be first member I suppose
 	struct sc_can_channel_data *chan;
+	u8 registered;
 };
+
+
 
 static u16 sc_nop16(u16 value)
 {
@@ -90,32 +93,67 @@ static u32 sc_swap32(u32 value)
 	return __builtin_bswap32(value);
 }
 
-static int sc_set_bittiming(struct net_device *dev)
+static int sc_can_open(struct net_device *dev)
 {
 	return -ENODEV;
 }
 
-static int sc_set_data_bittiming(struct net_device *dev)
+static int sc_can_stop(struct net_device *dev)
 {
 	return -ENODEV;
 }
 
-static int sc_set_mode(struct net_device *dev, enum can_mode mode)
+static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *dev)
+{
+	return NETDEV_TX_OK;
+}
+
+static int sc_can_change_mtu(struct net_device *dev, int new_mtu)
 {
 	return -ENODEV;
 }
 
-int sc_get_berr_counter(const struct net_device *dev, struct can_berr_counter *bec)
+
+static int sc_can_set_bittiming(struct net_device *dev)
 {
 	return -ENODEV;
 }
+
+static int sc_can_set_data_bittiming(struct net_device *dev)
+{
+	return -ENODEV;
+}
+
+static int sc_can_set_mode(struct net_device *dev, enum can_mode mode)
+{
+	return -ENODEV;
+}
+
+static int sc_get_berr_counter(const struct net_device *dev, struct can_berr_counter *bec)
+{
+	return -ENODEV;
+}
+
+static const struct net_device_ops sc_can_netdev_ops = {
+	.ndo_open = &sc_can_open,
+	.ndo_stop = &sc_can_stop,
+	.ndo_start_xmit = &sc_can_start_xmit,
+	.ndo_change_mtu = &sc_can_change_mtu,
+};
+
 
 static void sc_can_chan_uninit(struct sc_can_channel_data *ch)
 {
 	// if (WARN_ON(!ch->dev))
 	// 	return;
 
+	struct sc_net_device_data *net_data;
+
 	if (ch->net) {
+		net_data = netdev_priv(ch->net);
+		if (net_data->registered) {
+			unregister_candev(ch->net);
+		}
 		free_candev(ch->net);
 		ch->net = NULL;
 	}
@@ -147,21 +185,22 @@ static int sc_can_chan_init(struct sc_can_channel_data *ch, struct sc_chan_info 
 	net_data->can.bittiming_const = &ch->usb->nominal;
 	net_data->can.data_bittiming_const = &ch->usb->data;
 	net_data->can.ctrlmode_supported = ch->usb->ctrlmode_supported;
-	net_data->can.do_set_bittiming = &sc_set_bittiming;
-	net_data->can.do_set_data_bittiming = &sc_set_data_bittiming;
-	net_data->can.do_set_mode = &sc_set_mode;
+	net_data->can.do_set_bittiming = &sc_can_set_bittiming;
+	net_data->can.do_set_data_bittiming = &sc_can_set_data_bittiming;
+	net_data->can.do_set_mode = &sc_can_set_mode;
 	net_data->can.do_get_berr_counter = &sc_get_berr_counter;
 
+	ch->net->netdev_ops = &sc_can_netdev_ops;
+	SET_NETDEV_DEV(ch->net, &ch->usb->intf->dev);
 
+	rc = register_candev(ch->net);
+	if (rc) {
+		dev_err(&ch->usb->intf->dev, "candev registration failed\n");
+		goto fail;
+	}
 
-	// int (*do_set_bittiming)(struct net_device *dev);
-	// int (*do_set_data_bittiming)(struct net_device *dev);
-	// int (*do_set_mode)(struct net_device *dev, enum can_mode mode);
-	// int (*do_set_termination)(struct net_device *dev, u16 term);
-	// int (*do_get_state)(const struct net_device *dev,
-	// 		    enum can_state *state);
-	// int (*do_get_berr_counter)(const struct net_device *dev,
-	// 			   struct can_berr_counter *bec);
+	net_data->registered = 1;
+	netdev_dbg(ch->net, "candev registration success\n");
 
 out:
 	return rc;
@@ -394,6 +433,18 @@ static int sc_usb_probe(struct usb_interface *intf, const struct usb_device_id *
 	device_data->data.brp_max = info->dtbt_brp_max;
 	device_data->data.brp_inc = 1;
 
+	device_data->ctrlmode_supported = CAN_CTRLMODE_BERR_REPORTING;
+	if (info->features & SC_FEATURE_FLAG_FDF) {
+		device_data->ctrlmode_supported |= CAN_CTRLMODE_FD;
+	}
+
+	if (info->features & SC_FEATURE_FLAG_MON_MODE) {
+		device_data->ctrlmode_supported |= CAN_CTRLMODE_LISTENONLY;
+	}
+
+	if (info->features & SC_FEATURE_FLAG_EXT_LOOP_MODE) {
+		device_data->ctrlmode_supported |= CAN_CTRLMODE_LOOPBACK;
+	}
 
 
 	device_data->chan_ptr = kcalloc(device_data->chan_count, sizeof(*device_data->chan_ptr), GFP_KERNEL);
