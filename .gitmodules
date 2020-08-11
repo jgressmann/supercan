@@ -1,4 +1,4 @@
 [submodule "Boards"]
 	path = Boards
 	url = https://github.com/jgressmann/tinyusb.git
-	branch = supercan
+	branch = supercan-devel
