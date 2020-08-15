@@ -36,23 +36,34 @@
 
 #define SC_USB_TIMEOUT_MS 1000
 #define SC_MIN_SUPPORTED_TRANSFER_SIZE 64
-#define SC_MAX_RX_URBS 8
-#define SC_MAX_TX_URBS 8
+#define SC_MAX_RX_URBS 128
+#define SC_MAX_TX_URBS 128
 
-struct sc_usb_device_data;
-struct sc_can_channel_data {
-	struct sc_usb_device_data *usb;
-	struct net_device *net;
+struct sc_chan;
+struct sc_net_priv {
+	/* must be the first member */
+	struct can_priv can;
+	struct sc_chan *ch;
+	spinlock_t echo_lock;
+};
+
+struct sc_usb_priv;
+struct sc_chan {
+	// struct sc_net_priv *can_priv;
+	struct sc_usb_priv *usb_priv;
+	struct net_device *netdev;
 	struct usb_anchor rx_anchor;
 	struct usb_anchor tx_anchor;
 	struct can_berr_counter bec;
 	u8 cmd_epp;
 	u8 msg_epp;
+	u8 registered;
+	spinlock_t urb_lock;
 };
 
 /* usb interface struct */
-struct sc_usb_device_data {
-	struct sc_can_channel_data *chan_ptr;
+struct sc_usb_priv {
+	struct sc_chan *chan_ptr;
 	struct usb_interface *intf;
 	u16 (*host_to_dev16)(u16);
 	u32 (*host_to_dev32)(u32);
@@ -65,13 +76,10 @@ struct sc_usb_device_data {
 	u16 cmd_buffer_size;
 	u16 msg_buffer_size;
 	u8 chan_count;
+	u8 tx_fifo_size;
+	u8 rx_fifo_size;
 };
 
-struct sc_net_device_data {
-	struct can_priv can; // must be first member I suppose
-	struct sc_can_channel_data *ch;
-	u8 registered;
-};
 
 static u16 sc_nop16(u16 value)
 {
@@ -93,34 +101,147 @@ static u32 sc_swap32(u32 value)
 	return __builtin_bswap32(value);
 }
 
-static int sc_can_stop(struct net_device *dev)
+static int sc_usb_map_error(int error)
 {
-	struct sc_net_device_data *net_data = netdev_priv(dev);
-	struct sc_can_channel_data *ch = net_data->ch;
+	switch (error) {
+	case SC_ERROR_UNKNOWN:
+		return -ENODEV;
+	case SC_ERROR_NONE:
+		return 0;
+	case SC_ERROR_PARAM:
+		return -EINVAL;
+	case SC_ERROR_MODE:
+		return EBUSY;
+	default:
+		return -ENODEV;
+	}
+}
 
-	net_data->can.state = CAN_STATE_STOPPED;
-	(void)close_candev(dev);
+static int sc_can_stop(struct net_device *netdev)
+{
+	struct sc_net_priv *priv = netdev_priv(netdev);
+	struct sc_chan *ch = priv->ch;
 
+	priv->can.state = CAN_STATE_STOPPED;
+
+	netdev_dbg(netdev, "kill anchored URBs\n");
 	usb_kill_anchored_urbs(&ch->rx_anchor);
+
+	netdev_dbg(netdev, "close device\n");
+	(void)close_candev(netdev);
 
 	return 0;
 }
+// struct sc_msg_can_status {
+//     uint8_t id;
+//     uint8_t len;
+//     uint8_t channel;
+//     uint8_t flags;
+//     uint32_t timestamp_us;
+//     uint16_t rx_lost;       ///< messages CAN -> USB lost since last time due to full rx fifo
+//     uint16_t tx_dropped;    ///< messages USB-> CAN dropped since last time due of full tx fifo
+// } SC_PACKED;
 
-static void sc_usb_process_rx_buffer(struct sc_can_channel_data *ch, u8 *ptr, unsigned size)
+// #define SC_CAN_STATUS_FLAG_BUS_OFF       0x01
+// #define SC_CAN_STATUS_FLAG_ERROR_WARNING 0x02
+// #define SC_CAN_STATUS_FLAG_ERROR_PASSIVE 0x04
+// #define SC_CAN_STATUS_FLAG_RX_FULL       0x08 ///< rx queue is full, CAN -> USB messages were lost
+// #define SC_CAN_STATUS_FLAG_TX_FULL       0x10 ///< tx queue is full, USB -> CAN messages were lost
+// #define SC_CAN_STATUS_FLAG_TXR_DESYNC    0x20 ///< no USB buffer space to queue TXR message
+
+static void sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_status *status)
 {
+	struct net_device *netdev = ch->netdev;
+	struct sc_net_priv *net_priv = netdev_priv(netdev);
+	struct net_device_stats *net_stats = &netdev->stats;
+	struct can_device_stats *can_stats = &net_priv->can.can_stats;
+	enum can_state curr_state, next_state;
+	struct can_frame cf;
 
+	// can_stats->bus_error +=
+	net_stats->rx_over_errors += ch->usb_priv->host_to_dev16(status->rx_lost);
+
+	ch->bec.rxerr += ch->usb_priv->host_to_dev16(status->rx_lost);
+	ch->bec.txerr += ch->usb_priv->host_to_dev16(status->tx_dropped);
+
+	curr_state = net_priv->can.state;
+
+	if (status->flags & SC_CAN_STATUS_FLAG_BUS_OFF) {
+		can_stats->bus_off++;
+		next_state = CAN_STATE_BUS_OFF;
+	} else if (status->flags & SC_CAN_STATUS_FLAG_ERROR_PASSIVE) {
+		can_stats->error_passive++;
+		next_state = CAN_STATE_ERROR_PASSIVE;
+	} else if (status->flags & SC_CAN_STATUS_FLAG_ERROR_WARNING) {
+		can_stats->error_warning++;
+		next_state = CAN_STATE_ERROR_WARNING;
+	} else {
+		next_state = CAN_STATE_ERROR_ACTIVE;
+	}
+
+	if (next_state != curr_state) {
+		netdev_dbg(netdev, "new can status: 0x%02x\n", next_state);
+		switch (next_state) {
+		case CAN_STATE_BUS_OFF:
+			can_bus_off(netdev);
+			break;
+		default:
+			can_change_state(netdev, &cf, 0, 0);
+			break;
+		}
+	}
+}
+
+static void sc_usb_process_msg(struct sc_chan *ch, struct sc_msg_header *hdr)
+{
+	switch (hdr->id) {
+	case SC_MSG_CAN_STATUS:
+		sc_usb_process_can_status(ch, (struct sc_msg_can_status *)hdr);
+		break;
+	case SC_MSG_CAN_RX:
+		netdev_dbg(ch->netdev, "rx\n");
+		break;
+	default:
+		netdev_dbg(ch->netdev, "ignore msg id %#02x len %u\n", hdr->id, hdr->len);
+		/* unhandled messages are expected as the protocol evolves */
+		break;
+	}
+}
+
+static void sc_usb_process_rx_buffer(struct sc_chan *ch, u8 *ptr, unsigned size)
+{
+	u8 * const eptr = ptr + size;
+
+	while (ptr + SC_MSG_HEADER_LEN <= eptr) {
+		struct sc_msg_header *hdr = (struct sc_msg_header *)ptr;
+
+		if (SC_MSG_EOF == hdr->id || !hdr->len)
+			break;
+
+		if (unlikely(ptr + hdr->len > eptr)) {
+			dev_err_ratelimited(
+				&ch->usb_priv->intf->dev,
+				"malformed msg id %02x, remaining %zu bytes of payload will be skipped\n",
+				hdr->id, (size_t)(eptr-ptr));
+			break;
+		}
+
+		ptr += hdr->len;
+
+		sc_usb_process_msg(ch, hdr);
+	}
 }
 
 static void sc_usb_urb_completed(struct urb *urb)
 {
-	struct sc_can_channel_data *ch;
+	struct sc_chan *ch;
 	struct usb_device *udev;
 	int rc;
 
 	BUG_ON(!urb);
 	BUG_ON(!urb->context);
 
-	ch = (struct sc_can_channel_data *)urb->context;
+	ch = (struct sc_chan *)urb->context;
 
 	switch (urb->status) {
 	case 0:
@@ -131,19 +252,24 @@ static void sc_usb_urb_completed(struct urb *urb)
 	case -ESHUTDOWN:
 		return;
 	default:
-		dev_info(&ch->usb->intf->dev, "rx URB status %d\n", urb->status);
+		dev_info(&ch->usb_priv->intf->dev, "rx URB status %d\n", urb->status);
 		goto resubmit_urb;
 	}
 
+	/* sanity check */
+	if (!netif_device_present(ch->netdev))
+		return;
+
+	/* sanity check */
 	if (likely(urb->actual_length >= 0))
 		sc_usb_process_rx_buffer(ch, (u8*)urb->transfer_buffer, (unsigned)urb->actual_length);
 
 
 resubmit_urb:
-	udev = interface_to_usbdev(ch->usb->intf);
+	udev = interface_to_usbdev(ch->usb_priv->intf);
 	usb_fill_bulk_urb(
 		urb, udev, usb_rcvbulkpipe(udev, ch->msg_epp),
-		urb->transfer_buffer, ch->usb->msg_buffer_size,
+		urb->transfer_buffer, ch->usb_priv->msg_buffer_size,
 		&sc_usb_urb_completed, ch);
 
 	rc = usb_submit_urb(urb, GFP_ATOMIC);
@@ -151,36 +277,49 @@ resubmit_urb:
 		switch (rc) {
 		case -ENODEV:
 			// oopsie daisy, USB device gone, remove can dev
-			netif_device_detach(ch->net);
+			netif_device_detach(ch->netdev);
 			break;
 		default:
-			dev_err(&ch->usb->intf->dev, "URB resubmit failed: %d\n", rc);
+			dev_err(&ch->usb_priv->intf->dev, "URB resubmit failed: %d\n", rc);
 			break;
 		}
 	}
 }
 
 
-static int sc_usb_start_continous_reader(struct sc_can_channel_data *ch)
+static int sc_usb_start_continuous_reader(struct sc_chan *ch)
 {
 	int rc = 0;
 	unsigned i;
-	struct usb_device *udev = interface_to_usbdev(ch->usb->intf);
-	unsigned rx_pipe = usb_rcvbulkpipe(udev, ch->msg_epp);
-	size_t bytes = ch->usb->msg_buffer_size;
-// FIX ME!!!
-	for (i = 0; i < SC_MAX_RX_URBS; ++i) {
+	struct usb_device *udev;
+	unsigned rx_pipe, rx_urbs;
+	size_t bytes;
+
+	BUG_ON(!ch);
+	BUG_ON(!ch->usb_priv);
+	BUG_ON(!ch->usb_priv->intf);
+
+	udev = interface_to_usbdev(ch->usb_priv->intf);
+	BUG_ON(!udev);
+
+	rx_pipe = usb_rcvbulkpipe(udev, ch->msg_epp);
+	bytes = ch->usb_priv->msg_buffer_size;
+	rx_urbs = ch->usb_priv->rx_fifo_size;
+
+	for (i = 0; i < rx_urbs; ++i) {
 		dma_addr_t dma;
 		void* mem;
 		struct urb *urb = usb_alloc_urb(0, GFP_KERNEL);
 		if (!urb) {
-			goto check_urbs;
+			dev_err(&ch->usb_priv->intf->dev, "URB allocation failed\n");
+			break;
 		}
 
 		mem = usb_alloc_coherent(udev, bytes, GFP_KERNEL, &dma);
 		if (!mem) {
+			dev_err(&ch->usb_priv->intf->dev, "URB coherent mem allocation failed\n");
 			usb_free_urb(urb);
-			goto check_urbs;
+			break;
 		}
 
 		usb_fill_bulk_urb(urb, udev, rx_pipe, mem, bytes, &sc_usb_urb_completed, ch);
@@ -202,81 +341,209 @@ static int sc_usb_start_continous_reader(struct sc_can_channel_data *ch)
 		usb_free_urb(urb);
 	}
 
-out:
-	return rc;
+	if (0 == i) {
+		dev_err(&ch->usb_priv->intf->dev, "no URBs\n");
+		return -ENOMEM;
+	}
 
-check_urbs:
-	if (!i) {
-		dev_err(&ch->usb->intf->dev, "URB allocation failed\n");
-		if (!rc)
-			rc = -ENOMEM;
-	} else if (i < SC_MAX_RX_URBS)
-		dev_warn(&ch->usb->intf->dev, "only %u/%u rx URBs allocated\n", i, (unsigned)SC_MAX_RX_URBS);
+	if (i < rx_urbs)
+		dev_warn(&ch->usb_priv->intf->dev, "only %u/%u rx URBs allocated\n", i, rx_urbs);
 
 
-	goto out;
-}
 
-static int sc_usb_apply_configuration(struct sc_can_channel_data *ch)
-{
 	return 0;
 }
 
-static int sc_can_open(struct net_device *dev)
+static int sc_usb_cmd_send_receive(
+	struct sc_usb_priv *priv, u8 ep, void *tx_ptr, int tx_len,
+	void *rx_ptr, int rx_len)
 {
-	struct sc_net_device_data *net_data = netdev_priv(dev);
-	struct sc_can_channel_data *ch = net_data->ch;
+	struct usb_device *udev = interface_to_usbdev(priv->intf);
+	struct sc_msg_error *error_msg = rx_ptr;
+	int rc;
+	int tx_actual_len, rx_actual_len;
+
+	/* send */
+	dev_dbg(&priv->intf->dev, "send %d bytes on ep %u\n", tx_len, ep);
+	rc = usb_bulk_msg(udev, usb_sndbulkpipe(udev, ep), tx_ptr, tx_len, &tx_actual_len, SC_USB_TIMEOUT_MS);
+	if (rc)
+		return rc;
+
+	if (unlikely(tx_actual_len != tx_len))
+		return -EPIPE;
+
+	/* wait for response */
+	dev_dbg(&priv->intf->dev, "wait for data on ep %u\n", ep);
+	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, ep), rx_ptr, rx_len, &rx_actual_len, SC_USB_TIMEOUT_MS);
+	if (rc)
+		return rc;
+
+	/* check response format */
+	if (unlikely(
+		rx_actual_len < 0 ||
+		(size_t)rx_actual_len < sizeof(*error_msg) ||
+		error_msg->id != SC_MSG_ERROR)) {
+
+		dev_err(&priv->intf->dev, "malformed response\n");
+		return -EPROTO;
+	}
+
+	return sc_usb_map_error(error_msg->error);
+}
+
+
+static int sc_usb_apply_configuration(struct sc_chan *ch)
+{
+	struct sc_usb_priv *usb_priv = ch->usb_priv;
+	struct sc_net_priv *net_priv = netdev_priv(ch->netdev);
+	struct sc_msg_config *conf;
+	struct sc_msg_bittiming *bt;
+	int rc = 0;
+	u8 *tx_buf = NULL;
+	u8 *rx_buf = NULL;
+
+	netdev_dbg(ch->netdev, "malloc\n");
+	tx_buf = kmalloc(2 * usb_priv->cmd_buffer_size, GFP_KERNEL);
+	if (!tx_buf) {
+		rc = -ENOMEM;
+		goto cleanup;
+	}
+
+	rx_buf = tx_buf + usb_priv->cmd_buffer_size;
+
+	conf = (struct sc_msg_config *)tx_buf;
+	bt = (struct sc_msg_bittiming *)tx_buf;
+
+	// bus off
+	memset(conf, 0, sizeof(*conf));
+	conf->id = SC_MSG_BUS;
+	conf->len = sizeof(*conf);
+	conf->channel = 0;
+	conf->args[0] = 0;
+
+	netdev_dbg(ch->netdev, "bus off\n");
+	rc = sc_usb_cmd_send_receive(
+		usb_priv, ch->cmd_epp, conf, sizeof(*conf), rx_buf, usb_priv->cmd_buffer_size);
+	if (rc)
+		goto cleanup;
+
+	// classic or fd?
+	memset(conf, 0, sizeof(*conf));
+	conf->id = SC_MSG_MODE;
+	conf->len = sizeof(*conf);
+	conf->channel = 0;
+	conf->args[0] =
+		((net_priv->can.ctrlmode & CAN_CTRLMODE_FD) ? SC_MODE_FLAG_FDF : 0) |
+		SC_MODE_NORMAL;
+
+	netdev_dbg(ch->netdev, "set mode\n");
+	rc = sc_usb_cmd_send_receive(
+		usb_priv, ch->cmd_epp, conf, sizeof(*conf), rx_buf, usb_priv->cmd_buffer_size);
+	if (rc)
+		goto cleanup;
+
+	// bittiming
+	memset(bt, 0, sizeof(*bt));
+	bt->id = SC_MSG_BITTIMING;
+	bt->len = sizeof(*bt);
+	bt->channel = 0;
+	bt->nmbt_brp = net_priv->can.bittiming.brp;
+	bt->nmbt_sjw = net_priv->can.bittiming.sjw;
+	bt->nmbt_tseg1 = net_priv->can.bittiming.phase_seg1;
+	bt->nmbt_tseg2 = net_priv->can.bittiming.phase_seg2;
+	bt->dtbt_brp = net_priv->can.data_bittiming.brp;
+	bt->dtbt_sjw = net_priv->can.data_bittiming.sjw;
+	bt->dtbt_tseg1 = net_priv->can.data_bittiming.phase_seg1;
+	bt->dtbt_tseg2 = net_priv->can.data_bittiming.phase_seg2;
+
+	netdev_dbg(ch->netdev, "set bittiming\n");
+	rc = sc_usb_cmd_send_receive(
+		usb_priv, ch->cmd_epp, bt, sizeof(*bt), rx_buf, usb_priv->cmd_buffer_size);
+	if (rc)
+		goto cleanup;
+
+	// bus on
+	memset(conf, 0, sizeof(*conf));
+	conf->id = SC_MSG_BUS;
+	conf->len = sizeof(*conf);
+	conf->channel = 0;
+	conf->args[0] = 1;
+
+	netdev_dbg(ch->netdev, "bus on\n");
+	rc = sc_usb_cmd_send_receive(
+		usb_priv, ch->cmd_epp, conf, sizeof(*conf), rx_buf, usb_priv->cmd_buffer_size);
+	if (rc)
+		goto cleanup;
+
+cleanup:
+	netdev_dbg(ch->netdev, "cleanup\n");
+	kfree(tx_buf);
+
+	return rc;
+}
+
+static int sc_can_open(struct net_device *netdev)
+{
+	struct sc_net_priv *priv = netdev_priv(netdev);
 	int rc = 0;
 
-	rc = open_candev(dev);
+	netdev_dbg(netdev, "candev open\n");
+	rc = open_candev(netdev);
 	if (rc)
 		goto fail;
 
-	rc = sc_usb_start_continous_reader(ch);
+	netdev_dbg(netdev, "start cont reader\n");
+	rc = sc_usb_start_continuous_reader(priv->ch);
 	if (rc)
 		goto fail;
 
-	rc = sc_usb_apply_configuration(ch);
+	netdev_dbg(netdev, "apply config\n");
+	rc = sc_usb_apply_configuration(priv->ch);
 	if (rc)
 		goto fail;
 
-	net_data->can.state = CAN_STATE_ERROR_ACTIVE;
+	priv->can.state = CAN_STATE_ERROR_ACTIVE;
+
+	netdev_dbg(netdev, "start queue\n");
+	netif_start_queue(netdev);
 
 out:
 	return rc;
 
 fail:
-	sc_can_stop(dev);
+	netdev_dbg(netdev, "sc_can_open failed, stopping device\n");
+	sc_can_stop(netdev);
 	goto out;
 }
 
-static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
 	return NETDEV_TX_OK;
 }
 
-static int sc_can_set_bittiming(struct net_device *dev)
+static int sc_can_set_bittiming(struct net_device *netdev)
 {
-	struct sc_net_device_data *net_data = netdev_priv(dev);
-	struct sc_can_channel_data *ch = net_data->ch;
+	struct sc_net_priv *priv = netdev_priv(netdev);
+	struct sc_chan *ch = priv->ch;
 
 	return 0;
 }
 
-static int sc_can_set_data_bittiming(struct net_device *dev)
+static int sc_can_set_data_bittiming(struct net_device *netdev)
 {
-	return sc_can_set_bittiming(dev);
+	return sc_can_set_bittiming(netdev);
 }
 
 static int sc_can_set_mode(struct net_device *dev, enum can_mode mode)
 {
-	return 0;
+	return -EOPNOTSUPP;
 }
 
-static int sc_get_berr_counter(const struct net_device *dev, struct can_berr_counter *bec)
+static int sc_get_berr_counter(const struct net_device *netdev, struct can_berr_counter *bec)
 {
-	struct sc_net_device_data *net_data = netdev_priv(dev);
-	*bec = net_data->ch->bec;
+	struct sc_net_priv *priv = netdev_priv(netdev);
+	struct sc_chan *ch = priv->ch;
+	*bec = ch->bec;
 	return 0;
 }
 
@@ -288,71 +555,70 @@ static const struct net_device_ops sc_can_netdev_ops = {
 };
 
 
-static void sc_can_chan_uninit(struct sc_can_channel_data *ch)
+static void sc_can_chan_uninit(struct sc_chan *ch)
 {
-	struct sc_net_device_data *net_data;
+	if (ch->netdev) {
+		if (ch->registered)
+			unregister_candev(ch->netdev);
 
-	if (ch->net) {
-		net_data = netdev_priv(ch->net);
-		if (net_data->registered) {
-			unregister_candev(ch->net);
-		}
-		free_candev(ch->net);
-		ch->net = NULL;
+		free_candev(ch->netdev);
+		ch->netdev = NULL;
 	}
-
-
 }
 
-static int sc_can_chan_init(struct sc_can_channel_data *ch, struct sc_chan_info *info)
+static int sc_can_chan_init(struct sc_chan *ch, struct sc_chan_info *info)
 {
 	int rc = 0;
-	struct sc_net_device_data *net_data = NULL;
+	struct sc_net_priv *priv = NULL;
 
 	BUG_ON(!ch);
-	BUG_ON(!ch->usb);
+	BUG_ON(!ch->usb_priv);
 	BUG_ON(!info);
 
+	ch->registered = 0;
 	ch->cmd_epp = info->cmd_epp;
 	ch->msg_epp = info->msg_epp;
+	spin_lock_init(&ch->urb_lock);
 	init_usb_anchor(&ch->rx_anchor);
 
-	ch->net = alloc_candev(sizeof(*net_data), SC_MAX_TX_URBS);
-	if (!ch->net) {
-		dev_err(&ch->usb->intf->dev, "candev alloc failed\n");
+
+	ch->netdev = alloc_candev(sizeof(*priv), ch->usb_priv->tx_fifo_size);
+	if (!ch->netdev) {
+		dev_err(&ch->usb_priv->intf->dev, "candev alloc failed\n");
 		rc = -ENOMEM;
 		goto fail;
 	}
 
-	net_data = netdev_priv(ch->net);
-	net_data->ch = ch;
+	ch->netdev->netdev_ops = &sc_can_netdev_ops;
+	SET_NETDEV_DEV(ch->netdev, &ch->usb_priv->intf->dev);
 
-	net_data->can.ctrlmode_static = ch->usb->ctrlmode_static;
-	net_data->can.ctrlmode_supported = ch->usb->ctrlmode_supported;
-	net_data->can.state = CAN_STATE_STOPPED;
-	net_data->can.clock.freq = ch->usb->can_clock_hz;
+	priv = netdev_priv(ch->netdev);
+	priv->ch = ch;
+	spin_lock_init(&priv->echo_lock);
 
-	net_data->can.do_set_mode = &sc_can_set_mode;
-	net_data->can.do_get_berr_counter = &sc_get_berr_counter;
-	net_data->can.bittiming_const = &ch->usb->nominal;
-	net_data->can.do_set_bittiming = &sc_can_set_bittiming;
+	priv->can.ctrlmode_static = ch->usb_priv->ctrlmode_static;
+	priv->can.ctrlmode_supported = ch->usb_priv->ctrlmode_supported;
+	priv->can.state = CAN_STATE_STOPPED;
+	priv->can.clock.freq = ch->usb_priv->can_clock_hz;
 
-	if (ch->usb->features & SC_FEATURE_FLAG_FDF) {
-		net_data->can.data_bittiming_const = &ch->usb->data;
-		net_data->can.do_set_data_bittiming = &sc_can_set_data_bittiming;
+	priv->can.do_set_mode = &sc_can_set_mode;
+	priv->can.do_get_berr_counter = &sc_get_berr_counter;
+	priv->can.bittiming_const = &ch->usb_priv->nominal;
+	priv->can.do_set_bittiming = &sc_can_set_bittiming;
+
+	if (ch->usb_priv->features & SC_FEATURE_FLAG_FDF) {
+		priv->can.data_bittiming_const = &ch->usb_priv->data;
+		priv->can.do_set_data_bittiming = &sc_can_set_data_bittiming;
 	}
 
-	ch->net->netdev_ops = &sc_can_netdev_ops;
-	SET_NETDEV_DEV(ch->net, &ch->usb->intf->dev);
-
-	rc = register_candev(ch->net);
+	rc = register_candev(ch->netdev);
 	if (rc) {
-		dev_err(&ch->usb->intf->dev, "candev registration failed\n");
+		dev_err(&ch->usb_priv->intf->dev, "candev registration failed\n");
 		goto fail;
 	}
 
-	net_data->registered = 1;
-	netdev_dbg(ch->net, "candev registration success\n");
+	ch->registered = 1;
+	netdev_dbg(ch->netdev, "candev registered\n");
 
 out:
 	return rc;
@@ -363,30 +629,30 @@ fail:
 }
 
 
-static void sc_usb_cleanup(struct sc_usb_device_data *device_data)
+static void sc_usb_cleanup(struct sc_usb_priv *priv)
 {
 	unsigned i;
 
-	if (device_data) {
-		if (device_data->chan_ptr) {
-			for (i = 0; i < device_data->chan_count; ++i)
-				sc_can_chan_uninit(&device_data->chan_ptr[i]);
+	if (priv) {
+		if (priv->chan_ptr) {
+			for (i = 0; i < priv->chan_count; ++i)
+				sc_can_chan_uninit(&priv->chan_ptr[i]);
 
-			kfree(device_data->chan_ptr);
+			kfree(priv->chan_ptr);
 		}
 
-		kfree(device_data);
+		kfree(priv);
 	}
 }
 
 static void sc_usb_disconnect(struct usb_interface *intf)
 {
-	struct sc_usb_device_data *device_data = usb_get_intfdata(intf);
+	struct sc_usb_priv *priv = usb_get_intfdata(intf);
 
 	usb_set_intfdata(intf, NULL);
 
-	if (device_data)
-		sc_usb_cleanup(device_data);
+	if (priv)
+		sc_usb_cleanup(priv);
 }
 
 static int sc_usb_probe_prelim(struct usb_interface *intf, u8 *cmd_epp, u16 *ep_size)
@@ -428,7 +694,7 @@ static int sc_usb_probe_prelim(struct usb_interface *intf, u8 *cmd_epp, u16 *ep_
 }
 
 
-static int sc_usb_probe_dev(struct sc_usb_device_data *device_data, u8 cmd_epp, u16 ep_size)
+static int sc_usb_probe_dev(struct sc_usb_priv *priv, u8 cmd_epp, u16 ep_size)
 {
 	int rc = 0;
 	int actual_len;
@@ -441,12 +707,14 @@ static int sc_usb_probe_dev(struct sc_usb_device_data *device_data, u8 cmd_epp, 
 	unsigned i;
 	char serial_str[1 + sizeof(device_info->sn_bytes)*2];
 	char name_str[1 + sizeof(device_info->name_bytes)];
-	struct usb_device *udev = interface_to_usbdev(device_data->intf);
+	struct usb_device *udev;
 
 
-	BUG_ON(!device_data);
-	BUG_ON(!device_data->intf);
+	BUG_ON(!priv);
+	BUG_ON(!priv->intf);
 	BUG_ON(ep_size < SC_MIN_SUPPORTED_TRANSFER_SIZE);
+
+	udev = interface_to_usbdev(priv->intf);
 
 	tx_buf = kmalloc(ep_size, GFP_KERNEL);
 	if (!tx_buf) {
@@ -466,14 +734,14 @@ static int sc_usb_probe_dev(struct sc_usb_device_data *device_data, u8 cmd_epp, 
 	req->len = sizeof(*req);
 
 
-	dev_dbg(&device_data->intf->dev, "sending SC_MSG_HELLO_DEVICE on %02x\n", cmd_epp);
+	dev_dbg(&priv->intf->dev, "sending SC_MSG_HELLO_DEVICE on %02x\n", cmd_epp);
 	rc = usb_bulk_msg(udev, usb_sndbulkpipe(udev, cmd_epp), req,
 			sizeof(*req), &actual_len, SC_USB_TIMEOUT_MS);
 	if (rc)
 		goto err;
 
 	/* wait for response */
-	dev_dbg(&device_data->intf->dev, "waiting for SC_MSG_HELLO_HOST\n");
+	dev_dbg(&priv->intf->dev, "waiting for SC_MSG_HELLO_HOST\n");
 	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, cmd_epp), rx_buf, ep_size, &actual_len, SC_USB_TIMEOUT_MS);
 	if (rc)
 		goto err;
@@ -489,21 +757,21 @@ static int sc_usb_probe_dev(struct sc_usb_device_data *device_data, u8 cmd_epp, 
 		goto err;
 	}
 
-	device_data->cmd_buffer_size = ntohs(device_hello->cmd_buffer_size);
-	device_data->msg_buffer_size = ntohs(device_hello->msg_buffer_size);
+	priv->cmd_buffer_size = ntohs(device_hello->cmd_buffer_size);
+	priv->msg_buffer_size = ntohs(device_hello->msg_buffer_size);
 
 	if (0 == device_hello->proto_version
-		|| device_data->cmd_buffer_size < SC_MIN_SUPPORTED_TRANSFER_SIZE
-		|| device_data->msg_buffer_size < SC_MIN_SUPPORTED_TRANSFER_SIZE) {
-		dev_err(&device_data->intf->dev,
+		|| priv->cmd_buffer_size < SC_MIN_SUPPORTED_TRANSFER_SIZE
+		|| priv->msg_buffer_size < SC_MIN_SUPPORTED_TRANSFER_SIZE) {
+		dev_err(&priv->intf->dev,
 			"badly configured device: proto_version=%u cmd_buffer_size=%u msg_buffer_size=%u\n",
-			device_hello->proto_version, device_data->cmd_buffer_size, device_data->msg_buffer_size);
+			device_hello->proto_version, priv->cmd_buffer_size, priv->msg_buffer_size);
 		rc = -ENODEV;
 		goto err;
 	}
 
 	if (device_hello->proto_version > SC_VERSION) {
-		dev_info(&device_data->intf->dev, "device proto version %u exceeds supported version %u\n",
+		dev_info(&priv->intf->dev, "device proto version %u exceeds supported version %u\n",
 			device_hello->proto_version, SC_VERSION);
 		rc = -ENODEV;
 		goto err;
@@ -511,23 +779,23 @@ static int sc_usb_probe_dev(struct sc_usb_device_data *device_data, u8 cmd_epp, 
 
 	/* At this point we are fairly confident we are dealing with the genuine article. */
 	dev_info(
-		&device_data->intf->dev,
+		&priv->intf->dev,
 		"device proto version %u, %s endian\n",
 		device_hello->proto_version, device_hello->byte_order == SC_BYTE_ORDER_LE ? "little" : "big");
 
 	if (SC_NATIVE_BYTE_ORDER == device_hello->byte_order) {
-		device_data->host_to_dev16 = &sc_nop16;
-		device_data->host_to_dev32 = &sc_nop32;
+		priv->host_to_dev16 = &sc_nop16;
+		priv->host_to_dev32 = &sc_nop32;
 	} else {
-		device_data->host_to_dev16 = &sc_swap16;
-		device_data->host_to_dev32 = &sc_swap32;
+		priv->host_to_dev16 = &sc_swap16;
+		priv->host_to_dev32 = &sc_swap32;
 	}
 
 	// realloc cmd rx buffer if device reports larger cap
-	if (ep_size < device_data->cmd_buffer_size)
-		if (ksize(rx_buf) < device_data->cmd_buffer_size) {
+	if (ep_size < priv->cmd_buffer_size)
+		if (ksize(rx_buf) < priv->cmd_buffer_size) {
 			kfree(rx_buf);
-			rx_buf = kmalloc(device_data->cmd_buffer_size, GFP_KERNEL);
+			rx_buf = kmalloc(priv->cmd_buffer_size, GFP_KERNEL);
 			if (!rx_buf) {
 				rc = -ENOMEM;
 				goto err;
@@ -540,7 +808,7 @@ static int sc_usb_probe_dev(struct sc_usb_device_data *device_data, u8 cmd_epp, 
 		goto err;
 
 	/* wait for response */
-	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, cmd_epp), rx_buf, device_data->cmd_buffer_size, &actual_len, SC_USB_TIMEOUT_MS);
+	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, cmd_epp), rx_buf, priv->cmd_buffer_size, &actual_len, SC_USB_TIMEOUT_MS);
 	if (rc)
 		goto err;
 
@@ -550,7 +818,7 @@ static int sc_usb_probe_dev(struct sc_usb_device_data *device_data, u8 cmd_epp, 
 		(size_t)actual_len < sizeof(*device_info) ||
 		SC_MSG_DEVICE_INFO != device_info->id ||
 		device_info->len < sizeof(*device_info))) {
-		dev_err(&device_data->intf->dev, "bad reply to SC_MSG_DEVICE_INFO (%d bytes)\n", actual_len);
+		dev_err(&priv->intf->dev, "bad reply to SC_MSG_DEVICE_INFO (%d bytes)\n", actual_len);
 		rc = -ENODEV;
 		goto err;
 	}
@@ -564,7 +832,7 @@ static int sc_usb_probe_dev(struct sc_usb_device_data *device_data, u8 cmd_epp, 
 	memcpy(name_str, device_info->name_bytes, device_info->name_len);
 	name_str[device_info->name_len] = 0;
 
-	dev_info(&device_data->intf->dev, "device %s, serial %s, firmware version %u.%u.%u\n",
+	dev_info(&priv->intf->dev, "device %s, serial %s, firmware version %u.%u.%u\n",
 		name_str, serial_str, device_info->fw_ver_major, device_info->fw_ver_minor, device_info->fw_ver_patch);
 
 
@@ -574,7 +842,7 @@ static int sc_usb_probe_dev(struct sc_usb_device_data *device_data, u8 cmd_epp, 
 		goto err;
 
 	/* wait for response */
-	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, cmd_epp), rx_buf, device_data->cmd_buffer_size, &actual_len, SC_USB_TIMEOUT_MS);
+	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, cmd_epp), rx_buf, priv->cmd_buffer_size, &actual_len, SC_USB_TIMEOUT_MS);
 	if (rc)
 		goto err;
 
@@ -585,61 +853,63 @@ static int sc_usb_probe_dev(struct sc_usb_device_data *device_data, u8 cmd_epp, 
 	             SC_MSG_CAN_INFO != can_info->id ||
 	             can_info->len < sizeof(*can_info) + sizeof(struct sc_chan_info) * can_info->chan_count ||
 	             (size_t)actual_len < sizeof(*can_info) + sizeof(struct sc_chan_info) * can_info->chan_count)) {
-		dev_err(&device_data->intf->dev, "bad reply to SC_MSG_CAN_INFO (%d bytes)\n", actual_len);
+		dev_err(&priv->intf->dev, "bad reply to SC_MSG_CAN_INFO (%d bytes)\n", actual_len);
 		rc = -ENODEV;
 		goto err;
 	}
 
-	device_data->chan_count = can_info->chan_count;
-	device_data->can_clock_hz = device_data->host_to_dev32(can_info->can_clk_hz);
-	device_data->features = device_data->host_to_dev16(can_info->features);
+	priv->chan_count = can_info->chan_count;
+	priv->can_clock_hz = priv->host_to_dev32(can_info->can_clk_hz);
+	priv->features = priv->host_to_dev16(can_info->features);
+	priv->tx_fifo_size = min(can_info->tx_fifo_size, (u8)SC_MAX_TX_URBS);
+	priv->rx_fifo_size = min(can_info->rx_fifo_size, (u8)SC_MAX_RX_URBS);
 
 	// nominal bitrate
-	strlcpy(device_data->nominal.name, SC_NAME, sizeof(device_data->nominal.name));
-	device_data->nominal.tseg1_min = can_info->nmbt_tseg1_min;
-	device_data->nominal.tseg1_max = device_data->host_to_dev16(can_info->nmbt_tseg1_max);
-	device_data->nominal.tseg2_min = can_info->nmbt_tseg2_min;
-	device_data->nominal.tseg2_max = can_info->nmbt_tseg2_max;
-	device_data->nominal.sjw_max = can_info->nmbt_sjw_max;
-	device_data->nominal.brp_min = can_info->nmbt_brp_min;
-	device_data->nominal.brp_max = device_data->host_to_dev16(can_info->nmbt_brp_max);
-	device_data->nominal.brp_inc = 1;
+	strlcpy(priv->nominal.name, SC_NAME, sizeof(priv->nominal.name));
+	priv->nominal.tseg1_min = can_info->nmbt_tseg1_min;
+	priv->nominal.tseg1_max = priv->host_to_dev16(can_info->nmbt_tseg1_max);
+	priv->nominal.tseg2_min = can_info->nmbt_tseg2_min;
+	priv->nominal.tseg2_max = can_info->nmbt_tseg2_max;
+	priv->nominal.sjw_max = can_info->nmbt_sjw_max;
+	priv->nominal.brp_min = can_info->nmbt_brp_min;
+	priv->nominal.brp_max = priv->host_to_dev16(can_info->nmbt_brp_max);
+	priv->nominal.brp_inc = 1;
 
 	// data bitrate
-	strlcpy(device_data->data.name, SC_NAME, sizeof(device_data->data.name));
-	device_data->data.tseg1_min = can_info->dtbt_tseg1_min;
-	device_data->data.tseg1_max = can_info->dtbt_tseg1_max;
-	device_data->data.tseg2_min = can_info->dtbt_tseg2_min;
-	device_data->data.tseg2_max = can_info->dtbt_tseg2_max;
-	device_data->data.sjw_max = can_info->dtbt_sjw_max;
-	device_data->data.brp_min = can_info->dtbt_brp_min;
-	device_data->data.brp_max = can_info->dtbt_brp_max;
-	device_data->data.brp_inc = 1;
+	strlcpy(priv->data.name, SC_NAME, sizeof(priv->data.name));
+	priv->data.tseg1_min = can_info->dtbt_tseg1_min;
+	priv->data.tseg1_max = can_info->dtbt_tseg1_max;
+	priv->data.tseg2_min = can_info->dtbt_tseg2_min;
+	priv->data.tseg2_max = can_info->dtbt_tseg2_max;
+	priv->data.sjw_max = can_info->dtbt_sjw_max;
+	priv->data.brp_min = can_info->dtbt_brp_min;
+	priv->data.brp_max = can_info->dtbt_brp_max;
+	priv->data.brp_inc = 1;
 
-	device_data->ctrlmode_static = CAN_CTRLMODE_BERR_REPORTING;
+	priv->ctrlmode_static = CAN_CTRLMODE_BERR_REPORTING;
 
-	if (device_data->features & SC_FEATURE_FLAG_FDF) {
-		device_data->ctrlmode_supported |= CAN_CTRLMODE_FD;
+	if (priv->features & SC_FEATURE_FLAG_FDF) {
+		priv->ctrlmode_supported |= CAN_CTRLMODE_FD;
 	}
 
-	if (device_data->features & SC_FEATURE_FLAG_MON_MODE) {
-		device_data->ctrlmode_supported |= CAN_CTRLMODE_LISTENONLY;
+	if (priv->features & SC_FEATURE_FLAG_MON_MODE) {
+		priv->ctrlmode_supported |= CAN_CTRLMODE_LISTENONLY;
 	}
 
-	if (device_data->features & SC_FEATURE_FLAG_EXT_LOOP_MODE) {
-		device_data->ctrlmode_supported |= CAN_CTRLMODE_LOOPBACK;
+	if (priv->features & SC_FEATURE_FLAG_EXT_LOOP_MODE) {
+		priv->ctrlmode_supported |= CAN_CTRLMODE_LOOPBACK;
 	}
 
 
-	device_data->chan_ptr = kcalloc(device_data->chan_count, sizeof(*device_data->chan_ptr), GFP_KERNEL);
-	if (!device_data->chan_ptr) {
+	priv->chan_ptr = kcalloc(priv->chan_count, sizeof(*priv->chan_ptr), GFP_KERNEL);
+	if (!priv->chan_ptr) {
 		rc = -ENOMEM;
 		goto err;
 	}
 
-	for (i = 0; i < device_data->chan_count; ++i) {
-		device_data->chan_ptr[i].usb = device_data;
-		rc = sc_can_chan_init(&device_data->chan_ptr[i], &can_info->chan_info[i]);
+	for (i = 0; i < priv->chan_count; ++i) {
+		priv->chan_ptr[i].usb_priv = priv;
+		rc = sc_can_chan_init(&priv->chan_ptr[i], &can_info->chan_info[i]);
 		if (rc)
 			goto err;
 	}
@@ -659,7 +929,7 @@ static int sc_usb_probe(struct usb_interface *intf, const struct usb_device_id *
 	int rc = 0;
 	u8 cmd_epp;
 	u16 ep_size;
-	struct sc_usb_device_data *device_data = NULL;
+	struct sc_usb_priv *priv = NULL;
 
 	(void)id; // unused
 
@@ -667,25 +937,25 @@ static int sc_usb_probe(struct usb_interface *intf, const struct usb_device_id *
 	if (rc)
 		goto err;
 
-	device_data = kzalloc(sizeof(*device_data), GFP_KERNEL);
-	if (!device_data) {
+	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	if (!priv) {
 		rc = -ENOMEM;
 		goto err;
 	}
 
-	device_data->intf = intf;
+	priv->intf = intf;
 
-	rc = sc_usb_probe_dev(device_data, cmd_epp, ep_size);
+	rc = sc_usb_probe_dev(priv, cmd_epp, ep_size);
 	if (rc)
 		goto err;
 
-	usb_set_intfdata(intf, device_data);
+	usb_set_intfdata(intf, priv);
 
 out:
 	return rc;
 
 err:
-	sc_usb_cleanup(device_data);
+	sc_usb_cleanup(priv);
 	goto out;
 }
 
