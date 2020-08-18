@@ -256,13 +256,13 @@ static void sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_stat
 
 	curr_state = net_priv->can.state;
 
-	if (status->flags & SC_CAN_STATUS_FLAG_BUS_OFF) {
+	if (SC_CAN_STATUS_BUS_OFF == status->bus_status) {
 		can_stats->bus_off++;
 		next_state = CAN_STATE_BUS_OFF;
-	} else if (status->flags & SC_CAN_STATUS_FLAG_ERROR_PASSIVE) {
+	} else if (SC_CAN_STATUS_ERROR_PASSIVE == status->bus_status) {
 		can_stats->error_passive++;
 		next_state = CAN_STATE_ERROR_PASSIVE;
-	} else if (status->flags & SC_CAN_STATUS_FLAG_ERROR_WARNING) {
+	} else if (SC_CAN_STATUS_ERROR_WARNING == status->bus_status) {
 		can_stats->error_warning++;
 		next_state = CAN_STATE_ERROR_WARNING;
 	} else {
@@ -270,13 +270,13 @@ static void sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_stat
 	}
 
 	if (next_state != curr_state) {
-		netdev_dbg(netdev, "new can status: 0x%02x\n", next_state);
+		netdev_dbg(netdev, "can bus status 0x%02x -> 0x%02x\n", curr_state, next_state);
 		switch (next_state) {
 		case CAN_STATE_BUS_OFF:
 			can_bus_off(netdev);
 			break;
 		default:
-			can_change_state(netdev, &cf, 0, 0);
+			can_change_state(netdev, &cf, next_state, next_state);
 			break;
 		}
 	}
@@ -303,7 +303,7 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 	data_len = can_dlc2len(rx->dlc);
 	can_id = ch->usb_priv->host_to_dev32(rx->can_id);
 
-	if (rx->flags & SC_CAN_FLAG_RTR) {
+	if (rx->flags & SC_CAN_FRAME_FLAG_RTR) {
 		can_id |= CAN_RTR_FLAG;
 	} else {
 		if (unlikely(rx->len < sizeof(*rx) + data_len)) {
@@ -315,17 +315,17 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 		}
 	}
 
-	if (unlikely(rx->flags & SC_CAN_FLAG_DRP)) {
-		++net_stats->tx_dropped;
-		return;
-	}
+	// if (unlikely(rx->flags & SC_CAN_FRAME_FLAG_DRP)) {
+	// 	++net_stats->tx_dropped;
+	// 	return;
+	// }
 
 
-	if (rx->flags & SC_CAN_FLAG_EXT) {
+	if (rx->flags & SC_CAN_FRAME_FLAG_EXT) {
 		can_id |= CAN_EFF_FLAG;
 	}
 
-	if (rx->flags & SC_CAN_FLAG_FDF) {
+	if (rx->flags & SC_CAN_FRAME_FLAG_FDF) {
 		struct canfd_frame *cf;
 
 		skb = alloc_canfd_skb(netdev, &cf);
@@ -337,15 +337,15 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 		cf->can_id = can_id;
 		cf->len = data_len;
 
-		if (rx->flags & SC_CAN_FLAG_BRS) {
+		if (rx->flags & SC_CAN_FRAME_FLAG_BRS) {
 			cf->flags |= CANFD_BRS;
 		}
 
-		if (rx->flags & SC_CAN_FLAG_ESI) {
+		if (rx->flags & SC_CAN_FRAME_FLAG_ESI) {
 			cf->flags |= CANFD_ESI;
 		}
 
-		if (!(rx->flags & SC_CAN_FLAG_RTR) && data_len)
+		if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR))
 			memcpy(cf->data, rx->data, data_len);
 
 	} else {
@@ -359,11 +359,34 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 		cf->can_id = can_id;
 		cf->can_dlc = can_len2dlc(data_len);
 
-		if (!(rx->flags & SC_CAN_FLAG_RTR) && data_len)
+		if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR) && data_len)
 			memcpy(cf->data, rx->data, data_len);
 	}
 
 	netif_rx(skb);
+}
+
+
+static void sc_usb_process_can_txr(struct sc_chan *ch, struct sc_msg_can_txr *txr)
+{
+	struct net_device *netdev = ch->netdev;
+	// struct sc_net_priv *net_priv = netdev_priv(netdev);
+	// struct net_device_stats *net_stats = &netdev->stats;
+
+	if (unlikely(txr->len < sizeof(*txr))) {
+		dev_err(
+			&ch->usb_priv->intf->dev,
+			"short sc_msg_can_txr (%u)\n",
+			txr->len);
+		return;
+	}
+
+	if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
+		netdev_err(
+			netdev,
+			"can frame dropped\n");
+		return;
+	}
 }
 
 static void sc_usb_process_msg(struct sc_chan *ch, struct sc_msg_header *hdr)
@@ -374,7 +397,9 @@ static void sc_usb_process_msg(struct sc_chan *ch, struct sc_msg_header *hdr)
 		break;
 	case SC_MSG_CAN_RX:
 		sc_usb_process_can_rx(ch, (struct sc_msg_can_rx *)hdr);
-
+		break;
+	case SC_MSG_CAN_TXR:
+		sc_usb_process_can_txr(ch, (struct sc_msg_can_txr *)hdr);
 		break;
 	default:
 		netdev_dbg(ch->netdev, "ignore msg id %#02x len %u\n", hdr->id, hdr->len);
@@ -506,73 +531,6 @@ resubmit_urb:
 	}
 }
 
-
-// static int sc_usb_submit_rx_urbs(struct sc_chan *ch)
-// {
-// 	int rc = 0;
-// 	unsigned i;
-// 	struct usb_device *udev;
-// 	unsigned rx_pipe, rx_urbs;
-// 	size_t bytes;
-
-// 	BUG_ON(!ch);
-// 	BUG_ON(!ch->usb_priv);
-// 	BUG_ON(!ch->usb_priv->intf);
-
-// 	udev = interface_to_usbdev(ch->usb_priv->intf);
-// 	BUG_ON(!udev);
-
-// 	rx_pipe = usb_rcvbulkpipe(udev, ch->msg_epp);
-// 	bytes = ch->usb_priv->msg_buffer_size;
-// 	rx_urbs = ch->usb_priv->rx_fifo_size;
-
-// 	for (i = 0; i < rx_urbs; ++i) {
-// 		dma_addr_t dma;
-// 		void* mem;
-// 		struct urb *urb = usb_alloc_urb(0, GFP_KERNEL);
-// 		if (!urb) {
-// 			dev_err(&ch->usb_priv->intf->dev, "URB allocation failed\n");
-// 			break;
-// 		}
-
-// 		mem = usb_alloc_coherent(udev, bytes, GFP_KERNEL, &dma);
-// 		if (!mem) {
-// 			dev_err(&ch->usb_priv->intf->dev, "URB coherent mem allocation failed\n");
-// 			usb_free_urb(urb);
-// 			break;
-// 		}
-
-// 		usb_fill_bulk_urb(urb, udev, rx_pipe, mem, bytes, &sc_usb_urb_completed, ch);
-// 		urb->transfer_dma = dma;
-// 		urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
-// 		usb_anchor_urb(urb, &ch->rx_anchor);
-
-// 		rc = usb_submit_urb(urb, GFP_KERNEL);
-// 		if (rc) {
-// 			usb_unanchor_urb(urb);
-// 			usb_free_coherent(udev, bytes, mem, dma);
-// 			usb_free_urb(urb);
-// 			break;
-// 		}
-
-// 		// dev->rxbuf[i] = buf;
-// 		// dev->rxbuf_dma[i] = buf_dma;
-
-// 		usb_free_urb(urb);
-// 	}
-
-// 	if (0 == i) {
-// 		dev_err(&ch->usb_priv->intf->dev, "no URBs\n");
-// 		return -ENOMEM;
-// 	}
-
-// 	if (i < rx_urbs)
-// 		dev_warn(&ch->usb_priv->intf->dev, "only %u/%u rx URBs allocated\n", i, rx_urbs);
-
-
-
-// 	return 0;
-// }
 
 
 static int sc_usb_submit_rx_urbs(struct sc_chan *ch)
@@ -750,22 +708,22 @@ static void sc_can_fill_tx_urb(struct sk_buff *skb, struct sc_chan *ch, struct s
 	tx->flags = 0;
 
 	if (CAN_EFF_FLAG & cfd->can_id)
-		tx->flags |= SC_CAN_FLAG_EXT;
+		tx->flags |= SC_CAN_FRAME_FLAG_EXT;
 
 	if (cfd->can_id & CAN_RTR_FLAG) {
 		tx->len = round_up(sizeof(*tx), 4);
-		tx->flags |= SC_CAN_FLAG_RTR;
+		tx->flags |= SC_CAN_FRAME_FLAG_RTR;
 	} else {
 		tx->len = round_up(sizeof(*tx) + data_len, 4);
 		memcpy(tx->data, cfd->data, data_len);
 	}
 
 	if (can_is_canfd_skb(skb)) {
-		tx->flags |= SC_CAN_FLAG_FDF;
+		tx->flags |= SC_CAN_FRAME_FLAG_FDF;
 		if (cfd->flags & CANFD_BRS)
-			tx->flags |= SC_CAN_FLAG_BRS;
+			tx->flags |= SC_CAN_FRAME_FLAG_BRS;
 		if (cfd->flags & CANFD_ESI)
-			tx->flags |= SC_CAN_FLAG_ESI;
+			tx->flags |= SC_CAN_FRAME_FLAG_ESI;
 	}
 
 	urb_data->urb->transfer_buffer_length = tx->len;
