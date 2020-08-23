@@ -14,15 +14,15 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-
-#include <linux/module.h>
-#include <linux/netdevice.h>
-#include <linux/usb.h>
-
 #include <linux/can.h>
 #include <linux/can/dev.h>
 #include <linux/can/error.h>
 #include <linux/can/netlink.h>
+#include <linux/ktime.h>
+#include <linux/module.h>
+#include <linux/netdevice.h>
+#include <linux/usb.h>
+
 
 #define SC_PACKED __packed
 #include "supercan.h"
@@ -56,8 +56,8 @@ struct sc_urb_data {
 	struct urb *urb;
 	void *mem;
 	dma_addr_t dma_addr;
-	u8 flags : 2;
-	u8 len   : 6;
+	u8 flags;
+	u8 len;
 };
 
 struct sc_usb_priv;
@@ -80,7 +80,6 @@ struct sc_chan {
 	u8 tx_urb_count;
 	u8 tx_urb_available_count;
 	spinlock_t tx_lock;
-	spinlock_t echo_lock;
 };
 
 /* usb interface struct */
@@ -423,11 +422,11 @@ static void sc_usb_process_can_txr(struct sc_chan *ch, struct sc_msg_can_txr *tx
 	len = urb_data->len;
 	if (sc_usb_tx_urb_done(urb_data)) {
 		sc_usb_tx_return_urb_unsafe(urb_data, &wake);
+		if (wake)
+			netif_wake_queue(netdev);
 	}
-	spin_unlock_irqrestore(&ch->tx_lock, flags);
 
 	// place / remove echo buffer
-	spin_lock_irqsave(&ch->echo_lock, flags);
 	if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
 		netdev_dbg(
 			netdev,
@@ -442,10 +441,7 @@ static void sc_usb_process_can_txr(struct sc_chan *ch, struct sc_msg_can_txr *tx
 		netdev->stats.tx_bytes += len;
 		can_get_echo_skb(netdev, index);
 	}
-	spin_unlock_irqrestore(&ch->echo_lock, flags);
-
-	if (wake)
-		netif_wake_queue(netdev);
+	spin_unlock_irqrestore(&ch->tx_lock, flags);
 }
 
 static void sc_usb_process_msg(struct sc_chan *ch, struct sc_msg_header *hdr)
@@ -813,6 +809,7 @@ static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *net
 	if (ch->tx_urb_available_count) {
 		urb_index = ch->tx_urb_available_ptr[--ch->tx_urb_available_count];
 		urb_data = &ch->tx_urb_ptr[urb_index];
+		can_put_echo_skb(skb, netdev, urb_index);
 	} else {
 		netif_stop_queue(netdev);
 		rc = NETDEV_TX_BUSY;
@@ -829,21 +826,15 @@ static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *net
 	// anchor, so that we can later kill it
 	usb_anchor_urb(urb_data->urb, &ch->tx_anchor);
 
-	spin_lock_irqsave(&ch->echo_lock, flags);
-	can_put_echo_skb(skb, netdev, urb_index);
-	spin_unlock_irqrestore(&ch->echo_lock, flags);
-
 	error = usb_submit_urb(urb_data->urb, GFP_ATOMIC);
 
 	if (error) {
 		// remove from anchor
 		usb_unanchor_urb(urb_data->urb);
 
+		spin_lock_irqsave(&ch->tx_lock, flags);
 		// // remove echo
-		spin_lock_irqsave(&ch->echo_lock, flags);
 		can_free_echo_skb(netdev, urb_index);
-		spin_unlock_irqrestore(&ch->echo_lock, flags);
-
 		// but tx urb back
 		spin_lock_irqsave(&ch->tx_lock, flags);
 		ch->tx_urb_available_ptr[ch->tx_urb_available_count++] = urb_index;
@@ -1086,7 +1077,6 @@ static int sc_can_chan_init(struct sc_chan *ch, struct sc_chan_info *info)
 	ch->cmd_epp = info->cmd_epp;
 	ch->msg_epp = info->msg_epp;
 	spin_lock_init(&ch->tx_lock);
-	spin_lock_init(&ch->echo_lock);
 	init_usb_anchor(&ch->rx_anchor);
 	init_usb_anchor(&ch->tx_anchor);
 
