@@ -72,6 +72,8 @@ struct sc_chan {
 	u8 *tx_cmd_buffer;
 	u8 *rx_cmd_buffer;             /* points into tx_cmd_buffer mem, don't free */
 	u8 *tx_urb_available_ptr;
+	ktime_t device_time_now;
+	u32 device_time_base;
 	u8 cmd_epp;
 	u8 msg_epp;
 	u8 index;                      /* filled in by sc_usb_probe */
@@ -80,6 +82,7 @@ struct sc_chan {
 	u8 tx_urb_count;
 	u8 tx_urb_available_count;
 	spinlock_t tx_lock;
+	spinlock_t ts_lock;
 };
 
 /* usb interface struct */
@@ -138,12 +141,63 @@ static int sc_usb_map_error(int error)
 	}
 }
 
+
+
 static inline bool sc_usb_tx_urb_done(struct sc_urb_data const *urb_data)
 {
 	const u8 done_flags = SC_TX_URB_FLAG_TX_BACK | SC_TX_URB_FLAG_TXR_BACK;
 	return (urb_data->flags & done_flags) == done_flags;
 }
 
+
+
+static inline void sc_can_ch_ktime_from_us(
+	struct sc_chan *ch, u32 timestamp_us, ktime_t *duration)
+{
+	unsigned long flags;
+	ktime_t result;
+	const u32 HALF_TIME = __UINT32_MAX__ / 2;
+	u32 diff_us;
+
+	spin_lock_irqsave(&ch->ts_lock, flags);
+	// BUG_ON(!ch->time_base_established);
+	diff_us = timestamp_us - ch->device_time_base;
+
+	if (timestamp_us < ch->device_time_base) {
+		if (diff_us > HALF_TIME) {
+			/* jitter */
+			diff_us = ch->device_time_base - timestamp_us;
+			netdev_dbg(ch->netdev, "jitter base=%u ts=%u diff=%u\n", ch->device_time_base, timestamp_us, diff_us);
+			result = ktime_sub_us(ch->device_time_now, diff_us);
+		} else {
+			// wrap around
+			netdev_dbg(ch->netdev, "wrap base=%u ts=%u diff=%u\n", ch->device_time_base, timestamp_us, diff_us);
+			ch->device_time_base = timestamp_us;
+			ch->device_time_now = ktime_add_us(ch->device_time_now, diff_us);
+			result = ch->device_time_now;
+		}
+	} else {
+		if (diff_us > HALF_TIME) {
+			/* keep track of device time within half time */
+			netdev_dbg(ch->netdev, "track base=%u ts=%u diff=%u\n", ch->device_time_base, timestamp_us, diff_us);
+			ch->device_time_base += HALF_TIME;
+			ch->device_time_now = ktime_add_us(ch->device_time_now, HALF_TIME);
+			diff_us -= HALF_TIME;
+		}
+
+		result = ktime_add_us(ch->device_time_now, diff_us);
+	}
+
+	spin_unlock_irqrestore(&ch->ts_lock, flags);
+
+	*duration = result;
+}
+
+static inline void sc_can_ch_update_ktime_from_us(struct sc_chan *ch, u32 timestamp_us)
+{
+	ktime_t unused;
+	sc_can_ch_ktime_from_us(ch, timestamp_us, &unused);
+}
 
 static int sc_usb_cmd_send_receive(
 	struct sc_usb_priv *priv, u8 ep, void *tx_ptr, int tx_len, void *rx_ptr)
@@ -222,6 +276,9 @@ static int sc_can_close(struct net_device *netdev)
 	netdev_dbg(netdev, "close device\n");
 	(void)close_candev(netdev);
 
+	// reset time
+	ch->device_time_base = 0;
+
 	return 0;
 }
 // struct sc_msg_can_status {
@@ -258,7 +315,8 @@ static void sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_stat
 		return;
 	}
 
-	// can_stats->bus_error +=
+	sc_can_ch_update_ktime_from_us(ch, ch->usb_priv->host_to_dev32(status->timestamp_us));
+
 	net_stats->rx_over_errors += ch->usb_priv->host_to_dev16(status->rx_lost);
 
 	ch->bec.rxerr = ch->usb_priv->host_to_dev16(status->rx_errors);
@@ -299,6 +357,7 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 	struct sk_buff *skb;
 	unsigned data_len;
 	canid_t can_id;
+	u32 timestamp_us;
 
 	if (unlikely(rx->len < sizeof(*rx))) {
 		dev_err(
@@ -322,6 +381,9 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 			return;
 		}
 	}
+
+	timestamp_us = ch->usb_priv->host_to_dev32(rx->timestamp_us);
+
 
 	if (rx->flags & SC_CAN_FRAME_FLAG_EXT) {
 		can_id |= CAN_EFF_FLAG;
@@ -347,9 +409,10 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 			cf->flags |= CANFD_ESI;
 		}
 
-		if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR))
+		if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR) && data_len) {
 			memcpy(cf->data, rx->data, data_len);
-
+			netdev->stats.rx_bytes += data_len;
+		}
 	} else {
 		struct can_frame *cf;
 		skb = alloc_can_skb(netdev, &cf);
@@ -361,9 +424,15 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 		cf->can_id = can_id;
 		cf->can_dlc = can_len2dlc(data_len);
 
-		if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR) && data_len)
+		if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR) && data_len) {
 			memcpy(cf->data, rx->data, data_len);
+			netdev->stats.rx_bytes += data_len;
+		}
 	}
+
+	++netdev->stats.rx_packets;
+
+	sc_can_ch_ktime_from_us(ch, timestamp_us, &skb_hwtstamps(skb)->hwtstamp);
 
 	netif_rx(skb);
 }
@@ -392,8 +461,7 @@ static void sc_usb_process_can_txr(struct sc_chan *ch, struct sc_msg_can_txr *tx
 	struct sc_urb_data *urb_data;
 	unsigned long flags;
 	unsigned index;
-	unsigned len;
-	u32 timestamp_us;
+	u8 len;
 	bool wake = false;
 
 	if (unlikely(txr->len < sizeof(*txr))) {
@@ -405,13 +473,15 @@ static void sc_usb_process_can_txr(struct sc_chan *ch, struct sc_msg_can_txr *tx
 	}
 
 	index = ch->usb_priv->host_to_dev16(txr->track_id);
-	timestamp_us = ch->usb_priv->host_to_dev32(txr->timestamp_us);
+
 	if (index >= ch->tx_urb_count) {
 		netdev_warn(netdev, "out of bounds txr id %u (max %u)\n", index, ch->tx_urb_count);
 		return;
 	}
 
-	netdev_dbg(netdev, "txr id %u\n", index);
+	netdev_dbg(netdev, "txr id %u %s\n", index, (txr->flags & SC_CAN_FRAME_FLAG_DRP) ? "dropped" : "transmitted");
+
+	sc_can_ch_update_ktime_from_us(ch, ch->usb_priv->host_to_dev32(txr->timestamp_us));
 
 
 	spin_lock_irqsave(&ch->tx_lock, flags);
@@ -428,15 +498,9 @@ static void sc_usb_process_can_txr(struct sc_chan *ch, struct sc_msg_can_txr *tx
 
 	// place / remove echo buffer
 	if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
-		netdev_dbg(
-			netdev,
-			"txr id %u was dropped @ %u\n", index, timestamp_us);
 		++netdev->stats.tx_dropped;
 		can_free_echo_skb(netdev, index);
 	} else {
-		netdev_dbg(
-			netdev,
-			"txr id %u was transmitted @ %u\n", index, timestamp_us);
 		++netdev->stats.tx_packets;
 		netdev->stats.tx_bytes += len;
 		can_get_echo_skb(netdev, index);
@@ -457,7 +521,7 @@ static void sc_usb_process_msg(struct sc_chan *ch, struct sc_msg_header *hdr)
 		sc_usb_process_can_txr(ch, (struct sc_msg_can_txr *)hdr);
 		break;
 	default:
-		netdev_dbg(ch->netdev, "ignore msg id %#02x len %u\n", hdr->id, hdr->len);
+		netdev_dbg(ch->netdev, "skip unknown msg id %#02x len %u\n", hdr->id, hdr->len);
 		/* unhandled messages are expected as the protocol evolves */
 		break;
 	}
@@ -845,7 +909,7 @@ static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *net
 		else
 			netdev_warn(netdev, "URB submit failed with %d\n", error);
 	} else {
-		dev_dbg(&ch->usb_priv->intf->dev, "submitted tx URB index %u\n", (unsigned)urb_index);
+		netdev_dbg(netdev, "submitted tx URB index %u\n", (unsigned)urb_index);
 	}
 
 	return rc;
@@ -1073,10 +1137,10 @@ static int sc_can_chan_init(struct sc_chan *ch, struct sc_chan_info *info)
 	BUG_ON(!ch->usb_priv);
 	BUG_ON(!info);
 
-	ch->registered = 0;
 	ch->cmd_epp = info->cmd_epp;
 	ch->msg_epp = info->msg_epp;
 	spin_lock_init(&ch->tx_lock);
+	spin_lock_init(&ch->ts_lock);
 	init_usb_anchor(&ch->rx_anchor);
 	init_usb_anchor(&ch->tx_anchor);
 
