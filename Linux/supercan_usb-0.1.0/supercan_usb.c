@@ -14,6 +14,9 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+
 #include <linux/can.h>
 #include <linux/can/dev.h>
 #include <linux/can/error.h>
@@ -22,6 +25,11 @@
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/usb.h>
+
+#pragma GCC diagnostic pop
+#pragma GCC diagnostic error "-Wall"
+#pragma GCC diagnostic error "-Wextra"
+
 
 
 #define SC_PACKED __packed
@@ -62,7 +70,7 @@ struct sc_urb_data {
 
 struct sc_usb_priv;
 struct sc_chan {
-	struct sc_usb_priv *usb_priv;  /* filled in by sc_usb_probe */
+	struct sc_usb_priv *usb_priv;   /* filled in by sc_usb_probe */
 	struct net_device *netdev;
 	struct usb_anchor rx_anchor;
 	struct usb_anchor tx_anchor;
@@ -70,19 +78,19 @@ struct sc_chan {
 	struct sc_urb_data *rx_urb_ptr;
 	struct sc_urb_data *tx_urb_ptr;
 	u8 *tx_cmd_buffer;
-	u8 *rx_cmd_buffer;             /* points into tx_cmd_buffer mem, don't free */
+	u8 *rx_cmd_buffer;              /* points into tx_cmd_buffer mem, don't free */
 	u8 *tx_urb_available_ptr;
 	ktime_t device_time_now;
 	u32 device_time_base;
 	u8 cmd_epp;
 	u8 msg_epp;
-	u8 index;                      /* filled in by sc_usb_probe */
+	u8 index;                       /* filled in by sc_usb_probe */
 	u8 registered;
 	u8 rx_urb_count;
 	u8 tx_urb_count;
 	u8 tx_urb_available_count;
+	atomic_t rx_urbs_submitted;
 	spinlock_t tx_lock;
-	spinlock_t ts_lock;
 };
 
 /* usb interface struct */
@@ -132,10 +140,12 @@ static int sc_usb_map_error(int error)
 		return -ENODEV;
 	case SC_ERROR_NONE:
 		return 0;
+	case SC_ERROR_SHORT:
+		return -ETOOSMALL;
 	case SC_ERROR_PARAM:
 		return -EINVAL;
 	case SC_ERROR_MODE:
-		return EBUSY;
+		return -EBUSY;
 	default:
 		return -ENODEV;
 	}
@@ -154,13 +164,10 @@ static inline bool sc_usb_tx_urb_done(struct sc_urb_data const *urb_data)
 static inline void sc_can_ch_ktime_from_us(
 	struct sc_chan *ch, u32 timestamp_us, ktime_t *duration)
 {
-	unsigned long flags;
-	ktime_t result;
+	ktime_t result = 0;
 	const u32 HALF_TIME = __UINT32_MAX__ / 2;
-	u32 diff_us;
+	u32 diff_us = 0;
 
-	spin_lock_irqsave(&ch->ts_lock, flags);
-	// BUG_ON(!ch->time_base_established);
 	diff_us = timestamp_us - ch->device_time_base;
 
 	if (timestamp_us < ch->device_time_base) {
@@ -187,8 +194,6 @@ static inline void sc_can_ch_ktime_from_us(
 
 		result = ktime_add_us(ch->device_time_now, diff_us);
 	}
-
-	spin_unlock_irqrestore(&ch->ts_lock, flags);
 
 	*duration = result;
 }
@@ -240,10 +245,8 @@ static int sc_usb_cmd_send_receive(
 static inline int sc_can_ch_cmd_send_receive(struct sc_chan *ch, unsigned cmd_len)
 {
 	BUG_ON(!ch);
-	// BUG_ON(!cmd);
 	BUG_ON(!cmd_len);
 	BUG_ON(cmd_len > ch->usb_priv->cmd_buffer_size);
-	// memcpy(ch->tx_cmd_buffer, cmd, size);
 	return sc_usb_cmd_send_receive(ch->usb_priv, ch->cmd_epp, ch->tx_cmd_buffer, cmd_len, ch->rx_cmd_buffer);
 }
 
@@ -252,9 +255,15 @@ static int sc_can_close(struct net_device *netdev)
 	struct sc_net_priv *priv = netdev_priv(netdev);
 	struct sc_chan *ch = priv->ch;
 	struct sc_msg_config *bus_off = (struct sc_msg_config *)ch->tx_cmd_buffer;
-	int rc;
+	int rc = 0;
+	unsigned i = 0;
 
 	netif_stop_queue(netdev);
+
+	netdev_dbg(netdev, "close device\n");
+	(void)close_candev(netdev);
+	netdev_dbg(netdev, "device closed\n");
+	priv->can.state = CAN_STATE_STOPPED;
 
 	memset(bus_off, 0, sizeof(*bus_off));
 	bus_off->id = SC_MSG_BUS;
@@ -263,48 +272,40 @@ static int sc_can_close(struct net_device *netdev)
 	if (rc)
 		netdev_dbg(netdev, "failed to go off bus (%d)\n", rc);
 
-	netdev_dbg(netdev, "kill rx anchored URBs\n");
-	usb_kill_anchored_urbs(&ch->rx_anchor);
+	// netdev_dbg(netdev, "kill rx anchored URBs\n");
+	// usb_kill_anchored_urbs(&ch->rx_anchor);
 
-	netdev_dbg(netdev, "kill tx anchored URBs\n");
-	usb_kill_anchored_urbs(&ch->tx_anchor);
+	for (i = 0; i < ch->rx_urb_count; ++i) {
+		struct sc_urb_data *urb_data = &ch->rx_urb_ptr[i];
+		usb_kill_urb(urb_data->urb);
+	}
 
-	WRITE_ONCE(priv->ch->tx_urb_available_count, priv->ch->tx_urb_count);
+	// netdev_dbg(netdev, "kill tx anchored URBs\n");
+	// usb_kill_anchored_urbs(&ch->tx_anchor);
+	for (i = 0; i < ch->tx_urb_count; ++i) {
+		struct sc_urb_data *urb_data = &ch->tx_urb_ptr[i];
+		usb_kill_urb(urb_data->urb);
+	}
 
-	priv->can.state = CAN_STATE_STOPPED;
-
-	netdev_dbg(netdev, "close device\n");
-	(void)close_candev(netdev);
+	// WRITE_ONCE(priv->ch->tx_urb_available_count, priv->ch->tx_urb_count);
 
 	// reset time
 	ch->device_time_base = 0;
 
+	// atomic_set(&ch->rx_urbs_submitted, 0);
+
+
+
 	return 0;
 }
-// struct sc_msg_can_status {
-//     uint8_t id;
-//     uint8_t len;
-//     uint8_t channel;
-//     uint8_t flags;
-//     uint32_t timestamp_us;
-//     uint16_t rx_lost;       ///< messages CAN -> USB lost since last time due to full rx fifo
-//     uint16_t tx_dropped;    ///< messages USB-> CAN dropped since last time due of full tx fifo
-// } SC_PACKED;
 
-// #define SC_CAN_STATUS_FLAG_BUS_OFF       0x01
-// #define SC_CAN_STATUS_FLAG_ERROR_WARNING 0x02
-// #define SC_CAN_STATUS_FLAG_ERROR_PASSIVE 0x04
-// #define SC_CAN_STATUS_FLAG_RX_FULL       0x08 ///< rx queue is full, CAN -> USB messages were lost
-// #define SC_CAN_STATUS_FLAG_TX_FULL       0x10 ///< tx queue is full, USB -> CAN messages were lost
-// #define SC_CAN_STATUS_FLAG_TXR_DESYNC    0x20 ///< no USB buffer space to queue TXR message
-
-static void sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_status *status)
+static int sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_status *status)
 {
 	struct net_device *netdev = ch->netdev;
 	struct sc_net_priv *net_priv = netdev_priv(netdev);
 	struct net_device_stats *net_stats = &netdev->stats;
 	struct can_device_stats *can_stats = &net_priv->can.can_stats;
-	enum can_state curr_state, next_state;
+	enum can_state curr_state = 0, next_state = 0;
 	struct can_frame cf;
 
 	if (unlikely(status->len < sizeof(*status))) {
@@ -312,7 +313,15 @@ static void sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_stat
 			&ch->usb_priv->intf->dev,
 			"short sc_msg_can_status (%u)\n",
 			status->len);
-		return;
+		return -EINVAL;
+	}
+
+	if (status->rx_fifo_size >= ch->usb_priv->rx_fifo_size) {
+		netdev_dbg(netdev, "rx fs=%u\n", status->rx_fifo_size);
+	}
+
+	if (status->tx_fifo_size >= ch->usb_priv->tx_fifo_size) {
+		netdev_dbg(netdev, "tx fs=%u\n", status->tx_fifo_size);
 	}
 
 	sc_can_ch_update_ktime_from_us(ch, ch->usb_priv->host_to_dev32(status->timestamp_us));
@@ -348,9 +357,11 @@ static void sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_stat
 			break;
 		}
 	}
+
+	return 0;
 }
 
-static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
+static int sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 {
 	struct net_device *netdev = ch->netdev;
 	struct net_device_stats *net_stats = &netdev->stats;
@@ -364,7 +375,7 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 			&ch->usb_priv->intf->dev,
 			"short sc_msg_can_rx (%u)\n",
 			rx->len);
-		return;
+		return -EINVAL;
 	}
 
 	data_len = can_dlc2len(rx->dlc);
@@ -378,7 +389,7 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 				&ch->usb_priv->intf->dev,
 				"short sc_msg_can_rx (%u)\n",
 				rx->len);
-			return;
+			return -EINVAL;
 		}
 	}
 
@@ -395,7 +406,7 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 		skb = alloc_canfd_skb(netdev, &cf);
 		if (!skb) {
 			++net_stats->rx_dropped;
-			return;
+			return 0;
 		}
 
 		cf->can_id = can_id;
@@ -418,7 +429,7 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 		skb = alloc_can_skb(netdev, &cf);
 		if (!skb) {
 			net_stats->rx_dropped++;
-			return;
+			return 0;
 		}
 
 		cf->can_id = can_id;
@@ -435,33 +446,42 @@ static void sc_usb_process_can_rx(struct sc_chan *ch, struct sc_msg_can_rx *rx)
 	sc_can_ch_ktime_from_us(ch, timestamp_us, &skb_hwtstamps(skb)->hwtstamp);
 
 	netif_rx(skb);
+
+	return 0;
 }
 
 static inline void sc_usb_tx_return_urb_unsafe(struct sc_urb_data *urb_data, bool *wake_netdev)
 {
 	struct sc_chan *ch = urb_data->ch;
-	unsigned index = urb_data - ch->tx_urb_ptr;
-
+	const unsigned index = urb_data - ch->tx_urb_ptr;
+#if DEBUG
+	unsigned i;
+#endif
 	BUG_ON(!sc_usb_tx_urb_done(urb_data));
 
 	urb_data->flags = 0;
 
-	BUG_ON(ch->tx_urb_available_count >= ch->tx_urb_count);
+	BUG_ON(ch->tx_urb_available_count > ch->tx_urb_count);
+	BUG_ON(index >= ch->tx_urb_count);
+#if DEBUG
+	for (i = 0; i < ch->tx_urb_available_count; ++i) {
+		BUG_ON(index == ch->tx_urb_available_ptr[i]);
+	}
+#endif
 	*wake_netdev = !ch->tx_urb_available_count;
 	ch->tx_urb_available_ptr[ch->tx_urb_available_count++] = index;
 
 
-	netdev_dbg(ch->netdev, "returned URB index %u\n", index);
+	// netdev_dbg(ch->netdev, "returned URB index %u\n", index);
 }
 
-
-static void sc_usb_process_can_txr(struct sc_chan *ch, struct sc_msg_can_txr *txr)
+static int sc_usb_process_can_txr(struct sc_chan *ch, struct sc_msg_can_txr *txr)
 {
 	struct net_device *netdev = ch->netdev;
-	struct sc_urb_data *urb_data;
-	unsigned long flags;
-	unsigned index;
-	u8 len;
+	struct sc_urb_data *urb_data = NULL;
+	unsigned long flags = 0;
+	unsigned index = 0;
+	u8 len = 0;
 	bool wake = false;
 
 	if (unlikely(txr->len < sizeof(*txr))) {
@@ -469,23 +489,23 @@ static void sc_usb_process_can_txr(struct sc_chan *ch, struct sc_msg_can_txr *tx
 			netdev,
 			"short sc_msg_can_txr (%u)\n",
 			txr->len);
-		return;
+		return -EINVAL;
 	}
 
 	index = ch->usb_priv->host_to_dev16(txr->track_id);
 
 	if (index >= ch->tx_urb_count) {
 		netdev_warn(netdev, "out of bounds txr id %u (max %u)\n", index, ch->tx_urb_count);
-		return;
+		return -EINVAL;
 	}
 
-	netdev_dbg(netdev, "txr id %u %s\n", index, (txr->flags & SC_CAN_FRAME_FLAG_DRP) ? "dropped" : "transmitted");
+	// netdev_dbg(netdev, "txr id %u %s\n", index, (txr->flags & SC_CAN_FRAME_FLAG_DRP) ? "dropped" : "transmitted");
 
 	sc_can_ch_update_ktime_from_us(ch, ch->usb_priv->host_to_dev32(txr->timestamp_us));
 
 
 	spin_lock_irqsave(&ch->tx_lock, flags);
-	BUG_ON(ch->tx_urb_available_count >= ch->tx_urb_count);
+	BUG_ON(index >= ch->tx_urb_count);
 	urb_data = &ch->tx_urb_ptr[index];
 	BUG_ON(urb_data->flags & SC_TX_URB_FLAG_TXR_BACK);
 	urb_data->flags |= SC_TX_URB_FLAG_TXR_BACK;
@@ -506,29 +526,31 @@ static void sc_usb_process_can_txr(struct sc_chan *ch, struct sc_msg_can_txr *tx
 		can_get_echo_skb(netdev, index);
 	}
 	spin_unlock_irqrestore(&ch->tx_lock, flags);
+
+	return 0;
 }
 
-static void sc_usb_process_msg(struct sc_chan *ch, struct sc_msg_header *hdr)
+static int sc_usb_process_msg(struct sc_chan *ch, struct sc_msg_header *hdr)
 {
 	switch (hdr->id) {
 	case SC_MSG_CAN_STATUS:
-		sc_usb_process_can_status(ch, (struct sc_msg_can_status *)hdr);
-		break;
+		return sc_usb_process_can_status(ch, (struct sc_msg_can_status *)hdr);
 	case SC_MSG_CAN_RX:
-		sc_usb_process_can_rx(ch, (struct sc_msg_can_rx *)hdr);
+		return sc_usb_process_can_rx(ch, (struct sc_msg_can_rx *)hdr);
 		break;
 	case SC_MSG_CAN_TXR:
-		sc_usb_process_can_txr(ch, (struct sc_msg_can_txr *)hdr);
-		break;
+		return sc_usb_process_can_txr(ch, (struct sc_msg_can_txr *)hdr);
 	default:
 		netdev_dbg(ch->netdev, "skip unknown msg id %#02x len %u\n", hdr->id, hdr->len);
 		/* unhandled messages are expected as the protocol evolves */
-		break;
+		return -EINVAL;
 	}
 }
 
 static void sc_usb_process_rx_buffer(struct sc_chan *ch, u8 *ptr, unsigned size)
 {
+	int error = 0;
+	u8 * const sptr = ptr;
 	u8 * const eptr = ptr + size;
 
 	while (ptr + SC_MSG_HEADER_LEN <= eptr) {
@@ -542,22 +564,31 @@ static void sc_usb_process_rx_buffer(struct sc_chan *ch, u8 *ptr, unsigned size)
 				&ch->usb_priv->intf->dev,
 				"malformed msg id %02x, remaining %u bytes of payload will be skipped\n",
 				hdr->id, (unsigned)(eptr-ptr));
+			error = -EINVAL;
 			break;
 		}
 
 		ptr += hdr->len;
 
-		sc_usb_process_msg(ch, hdr);
+		error = sc_usb_process_msg(ch, hdr);
+		if (unlikely(error)) {
+			break;
+		}
+	}
+
+	if (unlikely(error || ptr < eptr)) {
+		netdev_info(ch->netdev, "rx msg dump (%u bytes)\n", size);
+		print_hex_dump(KERN_INFO, SC_NAME " ", DUMP_PREFIX_NONE, 16, 1, sptr, size, false);
 	}
 }
 
 static void sc_usb_tx_completed(struct urb *urb)
 {
-	struct sc_urb_data *urb_data;
-	struct sc_chan *ch;
-	unsigned long flags;
-	unsigned index;
-	bool wake;
+	struct sc_urb_data *urb_data = NULL;
+	struct sc_chan *ch = NULL;
+	unsigned long flags = 0;
+	unsigned index = 0;
+	bool wake = false;
 
 	BUG_ON(!urb);
 	BUG_ON(!urb->context);
@@ -567,41 +598,40 @@ static void sc_usb_tx_completed(struct urb *urb)
 	urb_data->flags |= SC_TX_URB_FLAG_TX_BACK;
 	ch = urb_data->ch;
 	index = urb_data - ch->tx_urb_ptr;
-	netdev_dbg(ch->netdev, "tx URB index %u back\n", index);
+	// netdev_dbg(ch->netdev, "tx URB index %u back\n", index);
 	BUG_ON(index >= ch->tx_urb_count);
 	(void)index;
 
 	usb_unanchor_urb(urb_data->urb);
 
-	switch (urb->status) {
-	case 0:
-		break;
-	case -ENOENT:
-	case -EPIPE:
-	case -EPROTO:
-	case -ESHUTDOWN:
-		return;
-	default:
-		netdev_dbg(ch->netdev, "tx URB status %d\n", urb->status);
-		break;
-	}
-
 	spin_lock_irqsave(&ch->tx_lock, flags);
 	if (sc_usb_tx_urb_done(urb_data)) {
 		sc_usb_tx_return_urb_unsafe(urb_data, &wake);
 	}
-	spin_unlock_irqrestore(&ch->tx_lock, flags);
 
-	if (wake)
-		netif_wake_queue(ch->netdev);
+	if (0 == urb->status) {
+		if (wake)
+			netif_wake_queue(ch->netdev);
+	} else {
+		switch (urb->status) {
+		case -ENOENT:
+		case -EILSEQ:
+		case -ESHUTDOWN:
+		case -EPIPE:
+			break;
+		default:
+			netdev_info(ch->netdev, "tx URB status %d\n", urb->status);
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&ch->tx_lock, flags);
 }
 
 static void sc_usb_rx_completed(struct urb *urb)
 {
-	struct sc_urb_data *urb_data;
-	struct sc_chan *ch;
-	// struct usb_device *udev;
-	int rc;
+	struct sc_urb_data *urb_data = NULL;
+	struct sc_chan *ch = NULL;
+	int rc = 0;
 
 	BUG_ON(!urb);
 	BUG_ON(!urb->context);
@@ -609,51 +639,79 @@ static void sc_usb_rx_completed(struct urb *urb)
 	urb_data = (struct sc_urb_data *)urb->context;
 	ch = urb_data->ch;
 
-	usb_unanchor_urb(urb_data->urb);
+	// if (unlikely(!netif_device_present(ch->netdev))) {
+	// 	usb_unanchor_urb(urb);
+	// 	return;
+	// }
 
-	switch (urb->status) {
-	case 0:
-		break;
-	case -ENOENT:
-	case -EPIPE:
-	case -EPROTO:
-	case -ESHUTDOWN:
-		return;
-	default:
-		dev_info(&ch->usb_priv->intf->dev, "rx URB status %d\n", urb->status);
-		goto resubmit_urb;
-	}
+	if (likely(0 == urb->status)) {
+		if (likely(urb->actual_length > 0))
+			sc_usb_process_rx_buffer(ch, (u8*)urb->transfer_buffer, (unsigned)urb->actual_length);
 
-	/* sanity check */
-	if (!netif_device_present(ch->netdev))
-		return;
-
-	/* sanity check */
-	if (likely(urb->actual_length >= 0))
-		sc_usb_process_rx_buffer(ch, (u8*)urb->transfer_buffer, (unsigned)urb->actual_length);
-
-
-resubmit_urb:
-	// udev = interface_to_usbdev(ch->usb_priv->intf);
-	// usb_fill_bulk_urb(
-	// 	urb, udev, usb_rcvbulkpipe(udev, ch->msg_epp),
-	// 	urb->transfer_buffer, ch->usb_priv->msg_buffer_size,
-	// 	&sc_usb_rx_completed, ch);
-
-	rc = usb_submit_urb(urb, GFP_ATOMIC);
-	if (unlikely(rc)) {
-		switch (rc) {
-		case -ENODEV:
-			// oopsie daisy, USB device gone, remove can dev
-			netif_device_detach(ch->netdev);
-			break;
-		default:
-			dev_err(&ch->usb_priv->intf->dev, "URB resubmit failed: %d\n", rc);
-			break;
+		rc = usb_submit_urb(urb, GFP_ATOMIC);
+		if (unlikely(rc)) {
+			dev_dbg(&ch->usb_priv->intf->dev, "unanchor rx URB index %u\n", (unsigned)(urb_data - ch->rx_urb_ptr));
+			// usb_unanchor_urb(urb);
+			atomic_dec(&ch->rx_urbs_submitted);
+			switch (rc) {
+			case -ENODEV:
+				// oopsie daisy, USB device gone, remove can dev
+				netif_device_detach(ch->netdev);
+				break;
+			default:
+				dev_err(&ch->usb_priv->intf->dev, "rx URB resubmit failed: %d\n", rc);
+				break;
+			}
 		}
 	} else {
-		usb_anchor_urb(urb_data->urb, &ch->rx_anchor);
+		dev_dbg(&ch->usb_priv->intf->dev, "unanchor rx URB index %u\n", (unsigned)(urb_data - ch->rx_urb_ptr));
+		// usb_unanchor_urb(urb);
+		atomic_dec(&ch->rx_urbs_submitted);
+		switch (urb->status) {
+		case -ENOENT:
+		case -EILSEQ:
+		case -ESHUTDOWN:
+		case -EPIPE:
+			break;
+		default:
+			dev_info(&ch->usb_priv->intf->dev, "rx URB status %d\n", urb->status);
+			break;
+		}
 	}
+
+// 	switch (urb->status) {
+// 	case 0:
+// 		break;
+// 	// case -ENOENT:
+// 	// case -EPIPE:
+// 	// case -EPROTO:
+// 	// case -ESHUTDOWN:
+// 	// 	usb_unanchor_urb()
+// 	// 	return;
+// 	default:
+
+// 		return;
+// 	}
+
+// 	/* sanity check */
+
+
+// // resubmit_urb:
+// 	rc = usb_submit_urb(urb, GFP_ATOMIC);
+// 	if (unlikely(rc)) {
+// 		usb_unanchor_urb(urb);
+// 		switch (rc) {
+// 		case -ENODEV:
+// 			// oopsie daisy, USB device gone, remove can dev
+// 			netif_device_detach(ch->netdev);
+// 			break;
+// 		default:
+// 			dev_err(&ch->usb_priv->intf->dev, "URB resubmit failed: %d\n", rc);
+// 			break;
+// 		}
+// 	} else {
+// 		//
+// 	}
 }
 
 
@@ -661,7 +719,7 @@ resubmit_urb:
 static int sc_usb_submit_rx_urbs(struct sc_chan *ch)
 {
 	int rc = 0;
-	unsigned i;
+	unsigned i = 0;
 
 
 	BUG_ON(!ch);
@@ -669,11 +727,16 @@ static int sc_usb_submit_rx_urbs(struct sc_chan *ch)
 
 	for (i = 0; i < ch->rx_urb_count; ++i) {
 		struct sc_urb_data *urb_data = &ch->rx_urb_ptr[i];
-		usb_anchor_urb(urb_data->urb, &ch->rx_anchor);
+		// usb_anchor_urb(urb_data->urb, &ch->rx_anchor);
+		atomic_inc(&ch->rx_urbs_submitted);
 		rc = usb_submit_urb(urb_data->urb, GFP_KERNEL);
-		if (rc) {
-			usb_unanchor_urb(urb_data->urb);
+		if (unlikely(rc)) {
+			netdev_dbg(ch->netdev, "rx urb submit index %u failed: %d\n", i, rc);
+			atomic_dec(&ch->rx_urbs_submitted);
+			// usb_unanchor_urb(urb_data->urb);
 			break;
+		} else {
+			netdev_dbg(ch->netdev, "submit rx URB index %u\n", i);
 		}
 	}
 
@@ -683,25 +746,10 @@ static int sc_usb_submit_rx_urbs(struct sc_chan *ch)
 
 static int sc_usb_apply_configuration(struct sc_chan *ch)
 {
-	struct sc_usb_priv *usb_priv = ch->usb_priv;
 	struct sc_net_priv *net_priv = netdev_priv(ch->netdev);
-	struct sc_msg_config *conf;
-	struct sc_msg_bittiming *bt;
+	struct sc_msg_config *conf = (struct sc_msg_config *)ch->tx_cmd_buffer;
+	struct sc_msg_bittiming *bt = (struct sc_msg_bittiming *)ch->tx_cmd_buffer;
 	int rc = 0;
-	u8 *tx_buf = NULL;
-	u8 *rx_buf = NULL;
-
-	// netdev_dbg(ch->netdev, "malloc\n");
-	tx_buf = kmalloc(2 * usb_priv->cmd_buffer_size, GFP_KERNEL);
-	if (!tx_buf) {
-		rc = -ENOMEM;
-		goto cleanup;
-	}
-
-	rx_buf = tx_buf + usb_priv->cmd_buffer_size;
-
-	conf = (struct sc_msg_config *)tx_buf;
-	bt = (struct sc_msg_bittiming *)tx_buf;
 
 	// bus off
 	memset(conf, 0, sizeof(*conf));
@@ -711,10 +759,9 @@ static int sc_usb_apply_configuration(struct sc_chan *ch)
 	conf->args[0] = 0;
 
 	netdev_dbg(ch->netdev, "bus off\n");
-	rc = sc_usb_cmd_send_receive(
-		usb_priv, ch->cmd_epp, conf, sizeof(*conf), rx_buf);
+	rc = sc_can_ch_cmd_send_receive(ch, sizeof(*conf));
 	if (rc)
-		goto cleanup;
+		return rc;
 
 	// classic or fd?
 	memset(conf, 0, sizeof(*conf));
@@ -726,10 +773,9 @@ static int sc_usb_apply_configuration(struct sc_chan *ch)
 		SC_MODE_NORMAL;
 
 	netdev_dbg(ch->netdev, "set mode\n");
-	rc = sc_usb_cmd_send_receive(
-		usb_priv, ch->cmd_epp, conf, sizeof(*conf), rx_buf);
+	rc = sc_can_ch_cmd_send_receive(ch, sizeof(*conf));
 	if (rc)
-		goto cleanup;
+		return rc;
 
 	// bittiming
 	memset(bt, 0, sizeof(*bt));
@@ -754,10 +800,9 @@ static int sc_usb_apply_configuration(struct sc_chan *ch)
 		(unsigned long)net_priv->can.data_bittiming.phase_seg2, (unsigned long)net_priv->can.data_bittiming.bitrate);
 
 	netdev_dbg(ch->netdev, "set bittiming\n");
-	rc = sc_usb_cmd_send_receive(
-		usb_priv, ch->cmd_epp, bt, sizeof(*bt), rx_buf);
+	rc = sc_can_ch_cmd_send_receive(ch, sizeof(*bt));
 	if (rc)
-		goto cleanup;
+		return rc;
 
 	// bus on
 	memset(conf, 0, sizeof(*conf));
@@ -767,15 +812,12 @@ static int sc_usb_apply_configuration(struct sc_chan *ch)
 	conf->args[0] = 1;
 
 	netdev_dbg(ch->netdev, "bus on\n");
-	rc = sc_usb_cmd_send_receive(
-		usb_priv, ch->cmd_epp, conf, sizeof(*conf), rx_buf);
+	rc = sc_can_ch_cmd_send_receive(ch, sizeof(*conf));
 	if (rc)
-		goto cleanup;
+		return rc;
 
-cleanup:
-	kfree(tx_buf);
 
-	return rc;
+	return 0;
 }
 
 static int sc_can_open(struct net_device *netdev)
@@ -783,20 +825,23 @@ static int sc_can_open(struct net_device *netdev)
 	struct sc_net_priv *priv = netdev_priv(netdev);
 	int rc = 0;
 
-	netdev_dbg(netdev, "candev open\n");
 	rc = open_candev(netdev);
-	if (rc)
+	if (rc) {
+		netdev_dbg(netdev, "candev open failed: %d\n", rc);
 		goto fail;
+	}
 
-	netdev_dbg(netdev, "submit rx urbs\n");
 	rc = sc_usb_submit_rx_urbs(priv->ch);
-	if (rc)
+	if (rc) {
+		netdev_dbg(netdev, "submit rx urbs failed: %d\n", rc);
 		goto fail;
+	}
 
-	netdev_dbg(netdev, "apply config\n");
 	rc = sc_usb_apply_configuration(priv->ch);
-	if (rc)
+	if (rc) {
+		netdev_dbg(netdev, "apply config failed: %d\n", rc);
 		goto fail;
+	}
 
 
 	priv->can.state = CAN_STATE_ERROR_ACTIVE;
@@ -817,9 +862,9 @@ static void sc_can_fill_tx_urb(struct sk_buff *skb, struct sc_chan *ch, struct s
 {
 	struct canfd_frame *cfd = (struct canfd_frame *)skb->data;
 	struct sc_msg_can_tx *tx = urb_data->mem;
-	unsigned data_len;
+	unsigned data_len = 0;
 
-	netdev_dbg(ch->netdev, "tx can_id %x\n", CAN_EFF_MASK & cfd->can_id);
+	// netdev_dbg(ch->netdev, "tx can_id %x\n", CAN_EFF_MASK & cfd->can_id);
 
 	tx->id = SC_MSG_CAN_TX;
 	tx->channel = ch->index;
@@ -828,7 +873,7 @@ static void sc_can_fill_tx_urb(struct sk_buff *skb, struct sc_chan *ch, struct s
 	tx->dlc = can_len2dlc(cfd->len);
 
 	data_len = can_dlc2len(tx->dlc);
-	netdev_dbg(ch->netdev, "data len %u\n", data_len);
+	// netdev_dbg(ch->netdev, "data len %u\n", data_len);
 
 	tx->flags = 0;
 
@@ -861,10 +906,10 @@ static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *net
 	struct sc_net_priv *priv = netdev_priv(netdev);
 	struct sc_chan *ch = priv->ch;
 	struct sc_urb_data *urb_data = NULL;
-	unsigned long flags;
+	unsigned long flags = 0;
 	u8 urb_index = -1;
 	netdev_tx_t rc = NETDEV_TX_OK;
-	int error;
+	int error = 0;
 
 	if (can_dropped_invalid_skb(netdev, skb))
 		return NETDEV_TX_OK;
@@ -872,7 +917,9 @@ static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *net
 	spin_lock_irqsave(&ch->tx_lock, flags);
 	if (ch->tx_urb_available_count) {
 		urb_index = ch->tx_urb_available_ptr[--ch->tx_urb_available_count];
+		BUG_ON(urb_index >= ch->tx_urb_count);
 		urb_data = &ch->tx_urb_ptr[urb_index];
+		BUG_ON(urb_data->flags);
 		can_put_echo_skb(skb, netdev, urb_index);
 	} else {
 		netif_stop_queue(netdev);
@@ -883,9 +930,8 @@ static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *net
 	if (NETDEV_TX_OK != rc)
 		return rc;
 
+
 	sc_can_fill_tx_urb(skb, ch, urb_data);
-
-
 
 	// anchor, so that we can later kill it
 	usb_anchor_urb(urb_data->urb, &ch->tx_anchor);
@@ -900,16 +946,15 @@ static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *net
 		// // remove echo
 		can_free_echo_skb(netdev, urb_index);
 		// but tx urb back
-		spin_lock_irqsave(&ch->tx_lock, flags);
 		ch->tx_urb_available_ptr[ch->tx_urb_available_count++] = urb_index;
 		spin_unlock_irqrestore(&ch->tx_lock, flags);
 
 		if (-ENODEV == error)
 			netif_device_detach(netdev);
 		else
-			netdev_warn(netdev, "URB submit failed with %d\n", error);
+			netdev_warn(netdev, "URB submit failed: %d\n", error);
 	} else {
-		netdev_dbg(netdev, "submitted tx URB index %u\n", (unsigned)urb_index);
+		// netdev_dbg(netdev, "submitted tx URB index %u\n", (unsigned)urb_index);
 	}
 
 	return rc;
@@ -951,8 +996,8 @@ static const struct net_device_ops sc_can_netdev_ops = {
 
 static void sc_can_chan_cleanup_urbs(struct sc_chan *ch)
 {
-	struct usb_device *udev;
-	unsigned i;
+	struct usb_device *udev = 0;
+	unsigned i = 0;
 
 	BUG_ON(!ch);
 	BUG_ON(!ch->usb_priv);
@@ -1013,10 +1058,10 @@ static void sc_can_chan_uninit(struct sc_chan *ch)
 
 static int sc_can_chan_alloc_urbs(struct sc_chan *ch)
 {
-	struct usb_device *udev;
-	struct device *dev;
-	unsigned rx_pipe, rx_urbs, tx_pipe, tx_urbs;
-	size_t bytes;
+	struct usb_device *udev = NULL;
+	struct device *dev = NULL;
+	unsigned rx_pipe = 0, rx_urbs = 0, tx_pipe = 0, tx_urbs = 0;
+	size_t bytes = 0;
 
 	BUG_ON(!ch);
 	BUG_ON(!ch->usb_priv);
@@ -1140,7 +1185,6 @@ static int sc_can_chan_init(struct sc_chan *ch, struct sc_chan_info *info)
 	ch->cmd_epp = info->cmd_epp;
 	ch->msg_epp = info->msg_epp;
 	spin_lock_init(&ch->tx_lock);
-	spin_lock_init(&ch->ts_lock);
 	init_usb_anchor(&ch->rx_anchor);
 	init_usb_anchor(&ch->tx_anchor);
 
@@ -1150,6 +1194,7 @@ static int sc_can_chan_init(struct sc_chan *ch, struct sc_chan_info *info)
 		goto fail;
 	}
 
+	/* rx cmd buffer is part of tx cmd buffer */
 	ch->rx_cmd_buffer = ch->tx_cmd_buffer + ch->usb_priv->cmd_buffer_size;
 
 	rc = sc_can_chan_alloc_urbs(ch);
@@ -1208,7 +1253,7 @@ fail:
 
 static void sc_usb_cleanup(struct sc_usb_priv *priv)
 {
-	unsigned i;
+	unsigned i = 0;
 
 	if (priv) {
 		if (priv->chan_ptr) {
@@ -1282,10 +1327,10 @@ static int sc_usb_probe_dev(struct sc_usb_priv *priv, u8 cmd_epp, u16 ep_size)
 	void *rx_buf = NULL;
 	char serial_str[1 + sizeof(device_info->sn_bytes)*2];
 	char name_str[1 + sizeof(device_info->name_bytes)];
-	unsigned i;
+	unsigned i = 0;
 	int rc = 0;
-	int actual_len;
-	int msg_buffer_size_supports_canfd;
+	int actual_len = 0;
+	int msg_buffer_size_supports_canfd = 0;
 
 
 	BUG_ON(!priv);
@@ -1516,8 +1561,8 @@ err:
 static int sc_usb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 {
 	int rc = 0;
-	u8 cmd_epp;
-	u16 ep_size;
+	u8 cmd_epp = 0;
+	u16 ep_size = 0;
 	struct sc_usb_priv *priv = NULL;
 
 	(void)id; // unused
