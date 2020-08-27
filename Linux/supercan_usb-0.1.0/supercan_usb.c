@@ -72,8 +72,8 @@ struct sc_usb_priv;
 struct sc_chan {
 	struct sc_usb_priv *usb_priv;   /* filled in by sc_usb_probe */
 	struct net_device *netdev;
-	struct usb_anchor rx_anchor;
-	struct usb_anchor tx_anchor;
+	// struct usb_anchor rx_anchor;
+	// struct usb_anchor tx_anchor;
 	struct can_berr_counter bec;
 	struct sc_urb_data *rx_urb_ptr;
 	struct sc_urb_data *tx_urb_ptr;
@@ -81,6 +81,9 @@ struct sc_chan {
 	u8 *rx_cmd_buffer;              /* points into tx_cmd_buffer mem, don't free */
 	u8 *tx_urb_available_ptr;
 	ktime_t device_time_now;
+	spinlock_t tx_lock;
+	atomic_t rx_urbs_submitted;
+	// atomic_t tx_urbs_available_atomic;
 	u32 device_time_base;
 	u8 cmd_epp;
 	u8 msg_epp;
@@ -89,8 +92,8 @@ struct sc_chan {
 	u8 rx_urb_count;
 	u8 tx_urb_count;
 	u8 tx_urb_available_count;
-	atomic_t rx_urbs_submitted;
-	spinlock_t tx_lock;
+	u8 device_time_received;
+	volatile u8 ready;
 };
 
 /* usb interface struct */
@@ -168,32 +171,60 @@ static inline void sc_can_ch_ktime_from_us(
 	const u32 HALF_TIME = __UINT32_MAX__ / 2;
 	u32 diff_us = 0;
 
-	diff_us = timestamp_us - ch->device_time_base;
+	netdev_dbg(ch->netdev, "recv=%u\n", ch->device_time_received);
 
-	if (timestamp_us < ch->device_time_base) {
-		if (diff_us > HALF_TIME) {
-			/* jitter */
+	if (likely(ch->device_time_received)) {
+		// netdev_dbg(ch->netdev, "ts=%lu\n", (unsigned long)timestamp_us);
+
+		diff_us = timestamp_us - ch->device_time_base;
+
+		if (diff_us >= HALF_TIME) {
+			/* delayed */
 			diff_us = ch->device_time_base - timestamp_us;
-			netdev_dbg(ch->netdev, "jitter base=%u ts=%u diff=%u\n", ch->device_time_base, timestamp_us, diff_us);
+			netdev_dbg(ch->netdev, "delayed ts=%u base=%u diff=%u\n", timestamp_us, ch->device_time_base, diff_us);
 			result = ktime_sub_us(ch->device_time_now, diff_us);
 		} else {
-			// wrap around
-			netdev_dbg(ch->netdev, "wrap base=%u ts=%u diff=%u\n", ch->device_time_base, timestamp_us, diff_us);
+			/* wrap around / track */
+			netdev_dbg(ch->netdev, "%s ts=%u base=%u diff=%u\n", (timestamp_us < ch->device_time_base ? "wrap" : "track"), timestamp_us, ch->device_time_base, diff_us);
 			ch->device_time_base = timestamp_us;
 			ch->device_time_now = ktime_add_us(ch->device_time_now, diff_us);
 			result = ch->device_time_now;
 		}
 	} else {
-		if (diff_us > HALF_TIME) {
-			/* keep track of device time within half time */
-			netdev_dbg(ch->netdev, "track base=%u ts=%u diff=%u\n", ch->device_time_base, timestamp_us, diff_us);
-			ch->device_time_base += HALF_TIME;
-			ch->device_time_now = ktime_add_us(ch->device_time_now, HALF_TIME);
-			diff_us -= HALF_TIME;
-		}
-
-		result = ktime_add_us(ch->device_time_now, diff_us);
+		netdev_dbg(ch->netdev, "init ts=%lu\n", (unsigned long)timestamp_us);
+		ch->device_time_received = 1;
+		ch->device_time_base = timestamp_us;
+		ch->device_time_now = ktime_set(0, 0);
+		result = ch->device_time_now;
 	}
+
+	// if (timestamp_us < ch->device_time_base) {
+	// 	if (diff_us > HALF_TIME) {
+	// 		/* delayed */
+	// 		diff_us = ch->device_time_base - timestamp_us;
+	// 		netdev_dbg(ch->netdev, "delayed base=%u ts=%u diff=%u\n", ch->device_time_base, timestamp_us, diff_us);
+	// 		result = ktime_sub_us(ch->device_time_now, diff_us);
+	// 	} else {
+	// 		// wrap around
+	// 		netdev_dbg(ch->netdev, "wrap base=%u ts=%u diff=%u\n", ch->device_time_base, timestamp_us, diff_us);
+	// 		ch->device_time_base = timestamp_us;
+	// 		ch->device_time_now = ktime_add_us(ch->device_time_now, diff_us);
+	// 		result = ch->device_time_now;
+	// 	}
+	// } else {
+	// 	if (diff_us > HALF_TIME) {
+	// 		/* delayed */
+	// 		diff_us = ch->device_time_base - timestamp_us;
+	// 		netdev_dbg(ch->netdev, "delayed base=%u ts=%u diff=%u\n", ch->device_time_base, timestamp_us, diff_us);
+	// 		result = ktime_sub_us(ch->device_time_now, diff_us);
+	// 	} else {
+	// 		/* keep track of device time within half time */
+	// 		netdev_dbg(ch->netdev, "track base=%u ts=%u diff=%u\n", ch->device_time_base, timestamp_us, diff_us);
+	// 		ch->device_time_base = timestamp_us;
+	// 		ch->device_time_now = ktime_add_us(ch->device_time_now, diff_us);
+	// 		result = ch->device_time_now;
+	// 	}
+	// }
 
 	*duration = result;
 }
@@ -209,8 +240,8 @@ static int sc_usb_cmd_send_receive(
 {
 	struct usb_device *udev = interface_to_usbdev(priv->intf);
 	struct sc_msg_error *error_msg = rx_ptr;
-	int rc;
-	int tx_actual_len, rx_actual_len;
+	int rc = 0;
+	int tx_actual_len = 0, rx_actual_len = 0;
 
 	/* send */
 	dev_dbg(&priv->intf->dev, "send %d bytes on ep %u\n", tx_len, ep);
@@ -291,8 +322,10 @@ static int sc_can_close(struct net_device *netdev)
 
 	// reset time
 	ch->device_time_base = 0;
+	ch->device_time_received = 0;
 
 	// atomic_set(&ch->rx_urbs_submitted, 0);
+	WRITE_ONCE(priv->ch->ready, 0);
 
 
 
@@ -632,6 +665,7 @@ static void sc_usb_rx_completed(struct urb *urb)
 	struct sc_urb_data *urb_data = NULL;
 	struct sc_chan *ch = NULL;
 	int rc = 0;
+	unsigned ready = 0;
 
 	BUG_ON(!urb);
 	BUG_ON(!urb->context);
@@ -645,8 +679,11 @@ static void sc_usb_rx_completed(struct urb *urb)
 	// }
 
 	if (likely(0 == urb->status)) {
-		if (likely(urb->actual_length > 0))
-			sc_usb_process_rx_buffer(ch, (u8*)urb->transfer_buffer, (unsigned)urb->actual_length);
+		ready = READ_ONCE(ch->ready);
+		if (likely(ready)) {
+			if (likely(urb->actual_length > 0))
+				sc_usb_process_rx_buffer(ch, (u8*)urb->transfer_buffer, (unsigned)urb->actual_length);
+		}
 
 		rc = usb_submit_urb(urb, GFP_ATOMIC);
 		if (unlikely(rc)) {
@@ -844,11 +881,13 @@ static int sc_can_open(struct net_device *netdev)
 	}
 
 
+
 	priv->can.state = CAN_STATE_ERROR_ACTIVE;
 
 	netdev_dbg(netdev, "start queue\n");
 	netif_start_queue(netdev);
 
+	WRITE_ONCE(priv->ch->ready, 1);
 out:
 	return rc;
 
@@ -934,13 +973,13 @@ static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *net
 	sc_can_fill_tx_urb(skb, ch, urb_data);
 
 	// anchor, so that we can later kill it
-	usb_anchor_urb(urb_data->urb, &ch->tx_anchor);
+	// usb_anchor_urb(urb_data->urb, &ch->tx_anchor);
 
 	error = usb_submit_urb(urb_data->urb, GFP_ATOMIC);
 
 	if (error) {
 		// remove from anchor
-		usb_unanchor_urb(urb_data->urb);
+		// usb_unanchor_urb(urb_data->urb);
 
 		spin_lock_irqsave(&ch->tx_lock, flags);
 		// // remove echo
@@ -1175,8 +1214,8 @@ err_no_mem:
 
 static int sc_can_chan_init(struct sc_chan *ch, struct sc_chan_info *info)
 {
-	int rc = 0;
 	struct sc_net_priv *priv = NULL;
+	int rc = 0;
 
 	BUG_ON(!ch);
 	BUG_ON(!ch->usb_priv);
@@ -1185,8 +1224,8 @@ static int sc_can_chan_init(struct sc_chan *ch, struct sc_chan_info *info)
 	ch->cmd_epp = info->cmd_epp;
 	ch->msg_epp = info->msg_epp;
 	spin_lock_init(&ch->tx_lock);
-	init_usb_anchor(&ch->rx_anchor);
-	init_usb_anchor(&ch->tx_anchor);
+	// init_usb_anchor(&ch->rx_anchor);
+	// init_usb_anchor(&ch->tx_anchor);
 
 	ch->tx_cmd_buffer = kmalloc(2 * ch->usb_priv->cmd_buffer_size, GFP_KERNEL);
 	if (!ch->tx_cmd_buffer) {
