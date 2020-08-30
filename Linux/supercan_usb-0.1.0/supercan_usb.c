@@ -72,8 +72,6 @@ struct sc_usb_priv;
 struct sc_chan {
 	struct sc_usb_priv *usb_priv;   /* filled in by sc_usb_probe */
 	struct net_device *netdev;
-	// struct usb_anchor rx_anchor;
-	// struct usb_anchor tx_anchor;
 	struct can_berr_counter bec;
 	struct sc_urb_data *rx_urb_ptr;
 	struct sc_urb_data *tx_urb_ptr;
@@ -82,7 +80,6 @@ struct sc_chan {
 	u8 *tx_urb_available_ptr;
 	ktime_t device_time_now;
 	spinlock_t tx_lock;
-	// atomic_t rx_urbs_submitted;
 	u32 device_time_base;
 	u8 cmd_epp;
 	u8 msg_epp;
@@ -162,8 +159,6 @@ static inline bool sc_usb_tx_urb_done(struct sc_urb_data const *urb_data)
 	const u8 done_flags = SC_TX_URB_FLAG_TX_BACK | SC_TX_URB_FLAG_TXR_BACK;
 	return (urb_data->flags & done_flags) == done_flags;
 }
-
-
 
 static inline void sc_can_ch_ktime_from_us(
 	struct sc_chan *ch, u32 timestamp_us, ktime_t *duration)
@@ -283,16 +278,11 @@ static int sc_can_close(struct net_device *netdev)
 	if (rc)
 		netdev_dbg(netdev, "failed to go off bus (%d)\n", rc);
 
-	// netdev_dbg(netdev, "kill rx anchored URBs\n");
-	// usb_kill_anchored_urbs(&ch->rx_anchor);
-
 	for (i = 0; i < ch->rx_urb_count; ++i) {
 		struct sc_urb_data *urb_data = &ch->rx_urb_ptr[i];
 		usb_kill_urb(urb_data->urb);
 	}
 
-	// netdev_dbg(netdev, "kill tx anchored URBs\n");
-	// usb_kill_anchored_urbs(&ch->tx_anchor);
 	for (i = 0; i < ch->tx_urb_count; ++i) {
 		struct sc_urb_data *urb_data = &ch->tx_urb_ptr[i];
 		usb_kill_urb(urb_data->urb);
@@ -311,7 +301,7 @@ static int sc_can_close(struct net_device *netdev)
 	ch->device_time_base = 0;
 	ch->device_time_received = 0;
 
-	// atomic_set(&ch->rx_urbs_submitted, 0);
+
 	WRITE_ONCE(ch->ready, 0);
 
 	ch->prev_rx_fifo_size = 0;
@@ -637,8 +627,6 @@ static void sc_usb_tx_completed(struct urb *urb)
 	BUG_ON(index >= ch->tx_urb_count);
 	(void)index;
 
-	usb_unanchor_urb(urb_data->urb);
-
 	spin_lock_irqsave(&ch->tx_lock, flags);
 	if (sc_usb_tx_urb_done(urb_data)) {
 		sc_usb_tx_return_urb_unsafe(urb_data, &wake);
@@ -675,11 +663,6 @@ static void sc_usb_rx_completed(struct urb *urb)
 	urb_data = (struct sc_urb_data *)urb->context;
 	ch = urb_data->ch;
 
-	// if (unlikely(!netif_device_present(ch->netdev))) {
-	// 	usb_unanchor_urb(urb);
-	// 	return;
-	// }
-
 	if (likely(0 == urb->status)) {
 		ready = READ_ONCE(ch->ready);
 		if (likely(ready)) {
@@ -689,11 +672,10 @@ static void sc_usb_rx_completed(struct urb *urb)
 
 		rc = usb_submit_urb(urb, GFP_ATOMIC);
 		if (unlikely(rc)) {
-			dev_dbg(&ch->usb_priv->intf->dev, "unanchor rx URB index %u\n", (unsigned)(urb_data - ch->rx_urb_ptr));
-			// usb_unanchor_urb(urb);
-			// atomic_dec(&ch->rx_urbs_submitted);
+			dev_dbg(&ch->usb_priv->intf->dev, "rx URB index %u\n", (unsigned)(urb_data - ch->rx_urb_ptr));
 			switch (rc) {
 			case -ENOENT:
+			case -ETIME:
 				// dev_dbg(&ch->usb_priv->intf->dev, "rx URB resubmit failed: %d\n", rc);
 				break;
 			case -ENODEV:
@@ -706,9 +688,7 @@ static void sc_usb_rx_completed(struct urb *urb)
 			}
 		}
 	} else {
-		dev_dbg(&ch->usb_priv->intf->dev, "unanchor rx URB index %u\n", (unsigned)(urb_data - ch->rx_urb_ptr));
-		// usb_unanchor_urb(urb);
-		// atomic_dec(&ch->rx_urbs_submitted);
+		dev_dbg(&ch->usb_priv->intf->dev, "rx URB index %u\n", (unsigned)(urb_data - ch->rx_urb_ptr));
 		switch (urb->status) {
 		case -ENOENT:
 		case -EILSEQ:
@@ -735,13 +715,9 @@ static int sc_usb_submit_rx_urbs(struct sc_chan *ch)
 
 	for (i = 0; i < ch->rx_urb_count; ++i) {
 		struct sc_urb_data *urb_data = &ch->rx_urb_ptr[i];
-		// usb_anchor_urb(urb_data->urb, &ch->rx_anchor);
-		// atomic_inc(&ch->rx_urbs_submitted);
 		rc = usb_submit_urb(urb_data->urb, GFP_KERNEL);
 		if (unlikely(rc)) {
-			netdev_dbg(ch->netdev, "rx urb submit index %u failed: %d\n", i, rc);
-			// atomic_dec(&ch->rx_urbs_submitted);
-			// usb_unanchor_urb(urb_data->urb);
+			netdev_dbg(ch->netdev, "rx URB submit index %u failed: %d\n", i, rc);
 			break;
 		} else {
 			netdev_dbg(ch->netdev, "submit rx URB index %u\n", i);
@@ -941,19 +917,13 @@ static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *net
 
 	sc_can_fill_tx_urb(skb, ch, urb_data);
 
-	// anchor, so that we can later kill it
-	// usb_anchor_urb(urb_data->urb, &ch->tx_anchor);
-
 	error = usb_submit_urb(urb_data->urb, GFP_ATOMIC);
 
 	if (error) {
-		// remove from anchor
-		// usb_unanchor_urb(urb_data->urb);
-
 		spin_lock_irqsave(&ch->tx_lock, flags);
 		// // remove echo
 		can_free_echo_skb(netdev, urb_index);
-		// but tx urb back
+		// put tx urb back
 		ch->tx_urb_available_ptr[ch->tx_urb_available_count++] = urb_index;
 		spin_unlock_irqrestore(&ch->tx_lock, flags);
 
@@ -1016,7 +986,6 @@ static void sc_can_chan_cleanup_urbs(struct sc_chan *ch)
 	if (ch->rx_urb_ptr) {
 		for (i = 0; i < ch->rx_urb_count; ++i) {
 			struct sc_urb_data *urb_data = &ch->rx_urb_ptr[i];
-			// usb_unanchor_urb(urb_data->urb);
 			usb_free_coherent(udev, ch->usb_priv->msg_buffer_size, urb_data->mem, urb_data->dma_addr);
 			usb_free_urb(urb_data->urb);
 		}
@@ -1028,7 +997,6 @@ static void sc_can_chan_cleanup_urbs(struct sc_chan *ch)
 	if (ch->tx_urb_ptr) {
 		for (i = 0; i < ch->tx_urb_count; ++i) {
 			struct sc_urb_data *urb_data = &ch->tx_urb_ptr[i];
-			// usb_unanchor_urb(urb_data->urb);
 			usb_free_coherent(udev, ch->usb_priv->msg_buffer_size, urb_data->mem, urb_data->dma_addr);
 			usb_free_urb(urb_data->urb);
 		}
@@ -1126,7 +1094,6 @@ static int sc_can_chan_alloc_urbs(struct sc_chan *ch)
 		usb_fill_bulk_urb(urb_data->urb, udev, rx_pipe, urb_data->mem, bytes, &sc_usb_rx_completed, urb_data);
 		urb_data->urb->transfer_dma = urb_data->dma_addr;
 		urb_data->urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
-		// usb_anchor_urb(urb_data->urb, &ch->rx_anchor);
 	}
 
 	if (0 == ch->rx_urb_count) {
@@ -1158,7 +1125,6 @@ static int sc_can_chan_alloc_urbs(struct sc_chan *ch)
 		usb_fill_bulk_urb(urb_data->urb, udev, tx_pipe, urb_data->mem, bytes, &sc_usb_tx_completed, urb_data);
 		urb_data->urb->transfer_dma = urb_data->dma_addr;
 		urb_data->urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
-		// usb_anchor_urb(urb_data->urb, &ch->tx_anchor);
 
 		ch->tx_urb_available_ptr[ch->tx_urb_count] = ch->tx_urb_count;
 	}
@@ -1193,8 +1159,6 @@ static int sc_can_chan_init(struct sc_chan *ch, struct sc_chan_info *info)
 	ch->cmd_epp = info->cmd_epp;
 	ch->msg_epp = info->msg_epp;
 	spin_lock_init(&ch->tx_lock);
-	// init_usb_anchor(&ch->rx_anchor);
-	// init_usb_anchor(&ch->tx_anchor);
 
 	ch->tx_cmd_buffer = kmalloc(2 * ch->usb_priv->cmd_buffer_size, GFP_KERNEL);
 	if (!ch->tx_cmd_buffer) {
