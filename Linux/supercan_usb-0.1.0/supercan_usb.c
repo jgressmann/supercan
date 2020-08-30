@@ -152,7 +152,19 @@ static int sc_usb_map_error(int error)
 	}
 }
 
-
+static inline u8 sc_usb_map_proto_error_type(u8 error)
+{
+	switch (error) {
+	case SC_CAN_ERROR_NONE: return CAN_ERR_PROT_UNSPEC;
+	case SC_CAN_ERROR_STUFF: return CAN_ERR_PROT_STUFF;
+	case SC_CAN_ERROR_FORM: return CAN_ERR_PROT_FORM;
+	case SC_CAN_ERROR_ACK: return CAN_ERR_PROT_UNSPEC;
+	case SC_CAN_ERROR_BIT1: return CAN_ERR_PROT_BIT;
+	case SC_CAN_ERROR_BIT0: return CAN_ERR_PROT_BIT;
+	case SC_CAN_ERROR_CRC: return CAN_ERR_PROT_UNSPEC;
+	default: return CAN_ERR_PROT_UNSPEC;
+	}
+}
 
 static inline bool sc_usb_tx_urb_done(struct sc_urb_data const *urb_data)
 {
@@ -316,8 +328,15 @@ static int sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_statu
 	struct sc_net_priv *net_priv = netdev_priv(netdev);
 	struct net_device_stats *net_stats = &netdev->stats;
 	struct can_device_stats *can_stats = &net_priv->can.can_stats;
+	struct sk_buff *skb = NULL;
+	struct can_frame *cf = NULL;
+	struct can_frame f = {
+		.can_id = CAN_ERR_FLAG,
+		.can_dlc = CAN_ERR_DLC,
+		.data = {0, 0, 0, 0, 0, 0, 0, 0},
+	};
 	enum can_state curr_state = 0, next_state = 0;
-	struct can_frame cf;
+	u16 rx_lost = 0;
 
 	if (unlikely(status->len < sizeof(*status))) {
 		netdev_err(netdev, "short sc_msg_can_status (%u)\n", status->len);
@@ -348,25 +367,71 @@ static int sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_statu
 
 	sc_can_ch_update_ktime_from_us(ch, ch->usb_priv->host_to_dev32(status->timestamp_us));
 
-	net_stats->rx_over_errors += ch->usb_priv->host_to_dev16(status->rx_lost);
+	rx_lost = ch->usb_priv->host_to_dev16(status->rx_lost);
 
-	ch->bec.rxerr = ch->usb_priv->host_to_dev16(status->rx_errors);
-	ch->bec.txerr = ch->usb_priv->host_to_dev16(status->tx_errors);
+
+	if (unlikely(rx_lost)) {
+		if (net_ratelimit())
+			netdev_dbg(netdev, "rx lost %u frames\n", rx_lost);
+		net_stats->rx_over_errors += rx_lost;
+		f.can_id |= CAN_ERR_CRTL;
+		f.data[1] |= CAN_ERR_CRTL_RX_OVERFLOW;
+	}
+
+	if (unlikely(SC_CAN_ERROR_NONE != status->arbt_phase_error)) {
+		if (SC_CAN_ERROR_ACK == status->arbt_phase_error)
+			f.can_id |= CAN_ERR_ACK | CAN_ERR_BUSERROR;
+		else {
+			f.can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
+			f.data[2] |= sc_usb_map_proto_error_type(status->arbt_phase_error);
+			if (SC_CAN_STATE_TX == status->node_state)
+				f.data[2] |= CAN_ERR_PROT_TX;
+		}
+	}
+
+	if (unlikely(SC_CAN_ERROR_NONE != status->data_phase_error)) {
+		if (SC_CAN_ERROR_ACK == status->data_phase_error)
+			f.can_id |= CAN_ERR_ACK | CAN_ERR_BUSERROR;
+		else {
+			f.can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
+			f.data[2] |= sc_usb_map_proto_error_type(status->data_phase_error);
+			if (SC_CAN_STATE_TX == status->node_state)
+				f.data[2] |= CAN_ERR_PROT_TX;
+		}
+	}
+
+	if (ch->bec.rxerr < status->rx_errors || ch->bec.txerr < status->tx_errors)
+		f.can_id |= CAN_ERR_BUSERROR;
+
+
+	f.data[5] = status->rx_errors;
+	f.data[6] = status->tx_errors;
+	f.data[7] = (status->arbt_phase_error << 4) | status->data_phase_error;
+
+
+	if (f.can_id & CAN_ERR_BUSERROR)
+		++can_stats->bus_error;
+
+
+	ch->bec.rxerr = status->rx_errors;
+	ch->bec.txerr = status->tx_errors;
+
 
 	curr_state = net_priv->can.state;
 
-	if (status->bus_status & SC_CAN_STATUS_FLAG_TXR_DESYNC) {
+	if (status->flags & SC_CAN_STATUS_FLAG_TXR_DESYNC) {
 		/* go bus off. restarting the bus will clear desync */
 		next_state = CAN_STATE_BUS_OFF;
-		netdev_err(netdev, "txr desync\n");
+		if (net_ratelimit())
+			netdev_err(netdev, "txr desync\n");
 	} else if (SC_CAN_STATUS_BUS_OFF == status->bus_status) {
-		can_stats->bus_off++;
+		++can_stats->bus_off;
 		next_state = CAN_STATE_BUS_OFF;
 	} else if (SC_CAN_STATUS_ERROR_PASSIVE == status->bus_status) {
-		can_stats->error_passive++;
+		++can_stats->error_passive;
 		next_state = CAN_STATE_ERROR_PASSIVE;
 	} else if (SC_CAN_STATUS_ERROR_WARNING == status->bus_status) {
-		can_stats->error_warning++;
+		++can_stats->error_warning;
 		next_state = CAN_STATE_ERROR_WARNING;
 	} else {
 		next_state = CAN_STATE_ERROR_ACTIVE;
@@ -379,9 +444,27 @@ static int sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_statu
 			can_bus_off(netdev);
 			break;
 		default:
-			can_change_state(netdev, &cf, next_state, next_state);
+			can_change_state(netdev, cf, next_state, next_state);
 			break;
 		}
+	}
+
+	/* generate error frame */
+	if (f.can_id != CAN_ERR_FLAG) {
+		skb = alloc_can_err_skb(netdev, &cf);
+		if (unlikely(!skb))
+			return -ENOMEM;
+
+		*cf = f;
+
+		if (net_ratelimit())
+			netdev_dbg(netdev, "error frame %08x: %02x%02x%02x%02x%02x%02x%02x%02x\n",
+				cf->can_id, cf->data[0], cf->data[1], cf->data[2], cf->data[3],
+				cf->data[4], cf->data[5], cf->data[6], cf->data[7]);
+
+		++net_stats->rx_packets;
+		net_stats->rx_bytes += cf->can_dlc;
+		netif_rx(skb);
 	}
 
 	return 0;
