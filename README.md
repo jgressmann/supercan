@@ -10,15 +10,17 @@ hardware to form a working USB 2.0 to CAN-FD interface.
 
 # Status
 
-SuperCAN works on Windows 10. Linux drivers are in an early alpha stadium.
+SuperCAN supports Windows 10 and Linux. The protocol should be considered in alpha stadium as the driver code for both platforms is maturing. With the release of version 1.0.0 the protocol will be frozen.
 
-To use a SuperCAN device on Windows, simply plug it in.
+To use a SuperCAN device, simply plug it in.
 
 ## Build
 
-*Firmware* [![Build status](https://ci.appveyor.com/api/projects/status/i398eskxl418rwf9?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-firmware)
-*Windows* [![Build status](https://ci.appveyor.com/api/projects/status/p25qholxtadg71ej?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-windows)
-
+Build        | Status
+------------ | -------------
+*Firmware*   | [![Build status](https://ci.appveyor.com/api/projects/status/i398eskxl418rwf9?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-firmware)
+*Linux*      | [![Build status](https://ci.appveyor.com/api/projects/status/knw9udgvlal4u3b0/branch/devel?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-linux/branch/devel)
+*Windows*    | [![Build status](https://ci.appveyor.com/api/projects/status/p25qholxtadg71ej?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-windows)
 
 
 
@@ -32,12 +34,13 @@ Clone this repository and initialize the submodules.
 $ git submodule update --init --recursive
 ```
 
-You will need the the ARM GNU toolchain.
-On Debian derived Linux distribution `apt-get install gcc-arm-none-eabi` will get you set up.
 
 ## 1. Firmware
 
 SuperCAN uses a customized [TinyUSB](https://github.com/hathach/tinyusb) stack.
+
+You will need the the ARM GNU toolchain.
+On Debian derived Linux distribution `apt-get install gcc-arm-none-eabi` will get you set up.
 
 ### Options
 
@@ -111,6 +114,9 @@ Simply build the Visual Studio solution in the Windows folder. I use Visual Stud
 
 The solution contains code for a demo application that sends and dumps CAN traffic.
 
+## 3. Linux
+
+To build the Linux kernel module follow [these instructions](Linux/supercan_usb-0.1.0/README.md).
 
 # License
 
