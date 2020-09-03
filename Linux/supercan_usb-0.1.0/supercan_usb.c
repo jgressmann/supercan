@@ -81,8 +81,8 @@ struct sc_chan {
 	ktime_t device_time_now;
 	spinlock_t tx_lock;
 	u32 device_time_base;
-	u8 cmd_epp;
-	u8 msg_epp;
+	u8 cmd_epp;                     /* OBSOLETE */
+	u8 msg_epp;                     /* OBSOLETE */
 	u8 index;                       /* filled in by sc_usb_probe */
 	u8 registered;
 	u8 rx_urb_count;
@@ -108,7 +108,9 @@ struct sc_usb_priv {
 	u16 features;
 	u16 cmd_buffer_size;
 	u16 msg_buffer_size;
-	u8 chan_count;
+	u8 cmd_epp;
+	u8 msg_epp;
+	u8 chan_count;                      /* OBSOLETE, always 1 */
 	u8 tx_fifo_size;
 	u8 rx_fifo_size;
 };
@@ -598,7 +600,7 @@ static int sc_usb_process_can_txr(struct sc_chan *ch, struct sc_msg_can_txr *txr
 		return -ETOOSMALL;
 	}
 
-	index = ch->usb_priv->host_to_dev16(txr->track_id);
+	index = txr->track_id;
 
 	if (index >= ch->tx_urb_count) {
 		netdev_warn(netdev, "out of bounds txr id %u (max %u)\n", index, ch->tx_urb_count);
@@ -724,6 +726,7 @@ static void sc_usb_tx_completed(struct urb *urb)
 		case -EILSEQ:
 		case -ESHUTDOWN:
 		case -EPIPE:
+		case -ETIME:
 			break;
 		default:
 			netdev_info(ch->netdev, "tx URB status %d\n", urb->status);
@@ -777,6 +780,7 @@ static void sc_usb_rx_completed(struct urb *urb)
 		case -EILSEQ:
 		case -ESHUTDOWN:
 		case -EPIPE:
+		case -ETIME:
 			break;
 		default:
 			dev_info(&ch->usb_priv->intf->dev, "rx URB status %d\n", urb->status);
@@ -818,23 +822,10 @@ static int sc_usb_apply_configuration(struct sc_chan *ch)
 	struct sc_msg_bittiming *bt = (struct sc_msg_bittiming *)ch->tx_cmd_buffer;
 	int rc = 0;
 
-	// bus off
-	memset(conf, 0, sizeof(*conf));
-	conf->id = SC_MSG_BUS;
-	conf->len = sizeof(*conf);
-	conf->channel = 0;
-	conf->args[0] = 0;
-
-	netdev_dbg(ch->netdev, "bus off\n");
-	rc = sc_can_ch_cmd_send_receive(ch, sizeof(*conf));
-	if (rc)
-		return rc;
-
 	// classic or fd?
 	memset(conf, 0, sizeof(*conf));
 	conf->id = SC_MSG_MODE;
 	conf->len = sizeof(*conf);
-	conf->channel = 0;
 	conf->args[0] =
 		((net_priv->can.ctrlmode & CAN_CTRLMODE_FD) ? SC_MODE_FLAG_FDF : 0) |
 		SC_MODE_NORMAL;
@@ -848,7 +839,6 @@ static int sc_usb_apply_configuration(struct sc_chan *ch)
 	memset(bt, 0, sizeof(*bt));
 	bt->id = SC_MSG_BITTIMING;
 	bt->len = sizeof(*bt);
-	bt->channel = 0;
 	bt->nmbt_brp = net_priv->can.bittiming.brp;
 	bt->nmbt_sjw = net_priv->can.bittiming.sjw;
 	bt->nmbt_tseg1 = net_priv->can.bittiming.prop_seg + net_priv->can.bittiming.phase_seg1;
@@ -875,7 +865,6 @@ static int sc_usb_apply_configuration(struct sc_chan *ch)
 	memset(conf, 0, sizeof(*conf));
 	conf->id = SC_MSG_BUS;
 	conf->len = sizeof(*conf);
-	conf->channel = 0;
 	conf->args[0] = 1;
 
 	netdev_dbg(ch->netdev, "bus on\n");
@@ -934,8 +923,7 @@ static void sc_can_fill_tx_urb(struct sk_buff *skb, struct sc_chan *ch, struct s
 	// netdev_dbg(ch->netdev, "tx can_id %x\n", CAN_EFF_MASK & cfd->can_id);
 
 	tx->id = SC_MSG_CAN_TX;
-	tx->channel = ch->index;
-	tx->track_id = ch->usb_priv->host_to_dev16(urb_data - ch->tx_urb_ptr);
+	tx->track_id = urb_data - ch->tx_urb_ptr;
 	tx->can_id = ch->usb_priv->host_to_dev32(CAN_EFF_MASK & cfd->can_id);
 	tx->dlc = can_len2dlc(cfd->len);
 
@@ -1230,17 +1218,14 @@ err_no_mem:
 	return -ENOMEM;
 }
 
-static int sc_can_chan_init(struct sc_chan *ch, struct sc_chan_info *info)
+static int sc_can_chan_init(struct sc_chan *ch)
 {
 	struct sc_net_priv *priv = NULL;
 	int rc = 0;
 
 	BUG_ON(!ch);
 	BUG_ON(!ch->usb_priv);
-	BUG_ON(!info);
 
-	ch->cmd_epp = info->cmd_epp;
-	ch->msg_epp = info->msg_epp;
 	spin_lock_init(&ch->tx_lock);
 
 	ch->tx_cmd_buffer = kmalloc(2 * ch->usb_priv->cmd_buffer_size, GFP_KERNEL);
@@ -1332,8 +1317,10 @@ static void sc_usb_disconnect(struct usb_interface *intf)
 		sc_usb_cleanup(priv);
 }
 
-static int sc_usb_probe_prelim(struct usb_interface *intf, u8 *cmd_epp, u16 *ep_size)
+static int sc_usb_probe_prelim(struct usb_interface *intf, u8 *cmd_epp, u16 *cmd_ep_size, u8 *msg_epp)
 {
+	struct usb_host_endpoint *ep = NULL;
+
 	// ensure interface is set
 	if (unlikely(!intf->cur_altsetting)) {
 		return -ENODEV;
@@ -1345,33 +1332,38 @@ static int sc_usb_probe_prelim(struct usb_interface *intf, u8 *cmd_epp, u16 *ep_
 		return -ENODEV;
 	}
 
-	// must have at least one endpoint pair
+	// must have at least two endpoint pairs
 	dev_dbg(&intf->dev, "device has %u eps\n", intf->cur_altsetting->desc.bNumEndpoints);
-	if (unlikely(!(intf->cur_altsetting->desc.bNumEndpoints / 2))) {
+	if (unlikely(intf->cur_altsetting->desc.bNumEndpoints / 2 < 2)) {
 		return -ENODEV;
 	}
+
+	ep = intf->cur_altsetting->endpoint;
 
 	// endpoint must be bulk
-	if (unlikely(usb_endpoint_type(&intf->cur_altsetting->endpoint->desc) != USB_ENDPOINT_XFER_BULK)) {
+	if (unlikely(usb_endpoint_type(&ep->desc) != USB_ENDPOINT_XFER_BULK)) {
 		return -ENODEV;
 	}
 
-	*ep_size = le16_to_cpu(intf->cur_altsetting->endpoint->desc.wMaxPacketSize);
-	dev_dbg(&intf->dev, "ep size %u\n", *ep_size);
+	*cmd_ep_size = le16_to_cpu(ep->desc.wMaxPacketSize);
+	dev_dbg(&intf->dev, "cmd ep size %u\n", *cmd_ep_size);
 
 	// endpoint too small?
-	if (unlikely(*ep_size < SC_MIN_SUPPORTED_TRANSFER_SIZE)) {
+	if (unlikely(*cmd_ep_size < SC_MIN_SUPPORTED_TRANSFER_SIZE)) {
 		return -ENODEV;
 	}
 
-	*cmd_epp = usb_endpoint_num(&intf->cur_altsetting->endpoint->desc);
-	dev_dbg(&intf->dev, "ep num %u\n", *cmd_epp);
+	*cmd_epp = usb_endpoint_num(&ep->desc);
+	dev_dbg(&intf->dev, "cmd ep num %u\n", *cmd_epp);
+
+	*msg_epp = usb_endpoint_num(&(ep + 2)->desc);
+	dev_dbg(&intf->dev, "msg ep num %u\n", *msg_epp);
 
 	return 0;
 }
 
 
-static int sc_usb_probe_dev(struct sc_usb_priv *priv, u8 cmd_epp, u16 ep_size)
+static int sc_usb_probe_dev(struct sc_usb_priv *priv, u16 ep_size)
 {
 	struct sc_msg_req *req;
 	struct sc_msg_hello *device_hello;
@@ -1394,7 +1386,7 @@ static int sc_usb_probe_dev(struct sc_usb_priv *priv, u8 cmd_epp, u16 ep_size)
 
 	udev = interface_to_usbdev(priv->intf);
 
-	tx_buf = kmalloc(2 * ep_size, GFP_KERNEL);
+	tx_buf = kmalloc(ep_size, GFP_KERNEL);
 	if (!tx_buf) {
 		rc = -ENOMEM;
 		goto err;
@@ -1412,15 +1404,15 @@ static int sc_usb_probe_dev(struct sc_usb_priv *priv, u8 cmd_epp, u16 ep_size)
 	req->len = sizeof(*req);
 
 
-	dev_dbg(&priv->intf->dev, "sending SC_MSG_HELLO_DEVICE on %02x\n", cmd_epp);
-	rc = usb_bulk_msg(udev, usb_sndbulkpipe(udev, cmd_epp), req,
+	dev_dbg(&priv->intf->dev, "sending SC_MSG_HELLO_DEVICE on %02x\n", priv->cmd_epp);
+	rc = usb_bulk_msg(udev, usb_sndbulkpipe(udev, priv->cmd_epp), req,
 			sizeof(*req), &actual_len, SC_USB_TIMEOUT_MS);
 	if (rc)
 		goto err;
 
 	/* wait for response */
 	dev_dbg(&priv->intf->dev, "waiting for SC_MSG_HELLO_HOST\n");
-	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, cmd_epp), rx_buf, ep_size, &actual_len, SC_USB_TIMEOUT_MS);
+	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, priv->cmd_epp), rx_buf, ep_size, &actual_len, SC_USB_TIMEOUT_MS);
 	if (rc)
 		goto err;
 
@@ -1436,14 +1428,12 @@ static int sc_usb_probe_dev(struct sc_usb_priv *priv, u8 cmd_epp, u16 ep_size)
 	}
 
 	priv->cmd_buffer_size = ntohs(device_hello->cmd_buffer_size);
-	priv->msg_buffer_size = ntohs(device_hello->msg_buffer_size);
 
 	if (0 == device_hello->proto_version
-		|| priv->cmd_buffer_size < SC_MIN_SUPPORTED_TRANSFER_SIZE
-		|| priv->msg_buffer_size < SC_MIN_SUPPORTED_TRANSFER_SIZE) {
+		|| priv->cmd_buffer_size < SC_MIN_SUPPORTED_TRANSFER_SIZE) {
 		dev_err(&priv->intf->dev,
-			"badly configured device: proto_version=%u cmd_buffer_size=%u msg_buffer_size=%u\n",
-			device_hello->proto_version, priv->cmd_buffer_size, priv->msg_buffer_size);
+			"badly configured device: proto_version=%u cmd_buffer_size=%u\n",
+			device_hello->proto_version, priv->cmd_buffer_size);
 		rc = -ENODEV;
 		goto err;
 	}
@@ -1481,12 +1471,12 @@ static int sc_usb_probe_dev(struct sc_usb_priv *priv, u8 cmd_epp, u16 ep_size)
 		}
 
 	req->id = SC_MSG_DEVICE_INFO;
-	rc = usb_bulk_msg(udev, usb_sndbulkpipe(udev, cmd_epp), req, sizeof(*req), &actual_len, SC_USB_TIMEOUT_MS);
+	rc = usb_bulk_msg(udev, usb_sndbulkpipe(udev, priv->cmd_epp), req, sizeof(*req), &actual_len, SC_USB_TIMEOUT_MS);
 	if (rc)
 		goto err;
 
 	/* wait for response */
-	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, cmd_epp), rx_buf, priv->cmd_buffer_size, &actual_len, SC_USB_TIMEOUT_MS);
+	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, priv->cmd_epp), rx_buf, priv->cmd_buffer_size, &actual_len, SC_USB_TIMEOUT_MS);
 	if (rc)
 		goto err;
 
@@ -1515,12 +1505,12 @@ static int sc_usb_probe_dev(struct sc_usb_priv *priv, u8 cmd_epp, u16 ep_size)
 
 
 	req->id = SC_MSG_CAN_INFO;
-	rc = usb_bulk_msg(udev, usb_sndbulkpipe(udev, cmd_epp), req, sizeof(*req), &actual_len, SC_USB_TIMEOUT_MS);
+	rc = usb_bulk_msg(udev, usb_sndbulkpipe(udev, priv->cmd_epp), req, sizeof(*req), &actual_len, SC_USB_TIMEOUT_MS);
 	if (rc)
 		goto err;
 
 	/* wait for response */
-	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, cmd_epp), rx_buf, priv->cmd_buffer_size, &actual_len, SC_USB_TIMEOUT_MS);
+	rc = usb_bulk_msg(udev, usb_rcvbulkpipe(udev, priv->cmd_epp), rx_buf, priv->cmd_buffer_size, &actual_len, SC_USB_TIMEOUT_MS);
 	if (rc)
 		goto err;
 
@@ -1529,22 +1519,29 @@ static int sc_usb_probe_dev(struct sc_usb_priv *priv, u8 cmd_epp, u16 ep_size)
 	if (unlikely(actual_len < 0 ||
 				 (size_t)actual_len < sizeof(*can_info) ||
 				 SC_MSG_CAN_INFO != can_info->id ||
-				 can_info->len < sizeof(*can_info) + sizeof(struct sc_chan_info) * can_info->chan_count ||
-				 (size_t)actual_len < sizeof(*can_info) + sizeof(struct sc_chan_info) * can_info->chan_count)) {
+				 can_info->len < sizeof(*can_info))) {
 		dev_err(&priv->intf->dev, "bad reply to SC_MSG_CAN_INFO (%d bytes)\n", actual_len);
 		rc = -ENODEV;
 		goto err;
 	}
 
-	msg_buffer_size_supports_canfd =
-		priv->msg_buffer_size >= CANFD_MAX_DLEN
-			+ max(sizeof(struct sc_msg_can_rx), sizeof(struct sc_msg_can_tx));
-
-	priv->chan_count = can_info->chan_count;
+	priv->chan_count = 1;
 	priv->can_clock_hz = priv->host_to_dev32(can_info->can_clk_hz);
 	priv->features = priv->host_to_dev16(can_info->features);
 	priv->tx_fifo_size = min(can_info->tx_fifo_size, (u8)SC_MAX_TX_URBS);
 	priv->rx_fifo_size = min(can_info->rx_fifo_size, (u8)SC_MAX_RX_URBS);
+	priv->msg_buffer_size = priv->host_to_dev16(can_info->msg_buffer_size);
+
+	if (priv->msg_buffer_size < round_up(
+			CAN_MAX_DLEN + max(sizeof(struct sc_msg_can_rx), sizeof(struct sc_msg_can_tx)), 4)) {
+		rc = -ENODEV;
+		goto err;
+	}
+
+	msg_buffer_size_supports_canfd =
+		priv->msg_buffer_size >= round_up(CANFD_MAX_DLEN
+			+ max(sizeof(struct sc_msg_can_rx), sizeof(struct sc_msg_can_tx)), 4);
+
 
 	// nominal bitrate
 	strlcpy(priv->nominal.name, SC_NAME, sizeof(priv->nominal.name));
@@ -1603,7 +1600,9 @@ static int sc_usb_probe_dev(struct sc_usb_priv *priv, u8 cmd_epp, u16 ep_size)
 	for (i = 0; i < priv->chan_count; ++i) {
 		priv->chan_ptr[i].usb_priv = priv;
 		priv->chan_ptr[i].index = i;
-		rc = sc_can_chan_init(&priv->chan_ptr[i], &can_info->chan_info[i]);
+		priv->chan_ptr[i].cmd_epp = priv->cmd_epp;
+		priv->chan_ptr[i].msg_epp = priv->msg_epp;
+		rc = sc_can_chan_init(&priv->chan_ptr[i]);
 		if (rc)
 			goto err;
 	}
@@ -1622,12 +1621,13 @@ static int sc_usb_probe(struct usb_interface *intf, const struct usb_device_id *
 {
 	int rc = 0;
 	u8 cmd_epp = 0;
-	u16 ep_size = 0;
+	u8 msg_epp = 0;
+	u16 cmd_ep_size = 0;
 	struct sc_usb_priv *priv = NULL;
 
 	(void)id; // unused
 
-	rc = sc_usb_probe_prelim(intf, &cmd_epp, &ep_size);
+	rc = sc_usb_probe_prelim(intf, &cmd_epp, &cmd_ep_size, &msg_epp);
 	if (rc)
 		goto err;
 
@@ -1638,8 +1638,10 @@ static int sc_usb_probe(struct usb_interface *intf, const struct usb_device_id *
 	}
 
 	priv->intf = intf;
+	priv->cmd_epp = cmd_epp;
+	priv->msg_epp = msg_epp;
 
-	rc = sc_usb_probe_dev(priv, cmd_epp, ep_size);
+	rc = sc_usb_probe_dev(priv, cmd_ep_size);
 	if (rc)
 		goto err;
 
