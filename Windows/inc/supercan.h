@@ -31,36 +31,36 @@ extern "C" {
 
 /**
  * INTERFACE DESIGN
- * 
- * For monetary reasons a signed Windows kernel driver is not an option. 
- * 
+ *
+ * For monetary reasons a signed Windows kernel driver is not an option.
+ *
  * Windows 10 supports arbitrary USB devices through the WinUSB driver. In order
- * to make the magic work, each interface exposed by the device must be tagged with 
- * a MS OS 2.0 descriptor. 
+ * to make the magic work, each interface exposed by the device must be tagged with
+ * a MS OS 2.0 descriptor.
  *
  * https://docs.microsoft.com/en-us/windows-hardware/drivers/usbcon/microsoft-os-2-0-descriptors-specification
- * 
- * This descriptor can include a GUID which can later on be used to 
- * find and open the USB device exposing the interface. This requires no special 
+ *
+ * This descriptor can include a GUID which can later on be used to
+ * find and open the USB device exposing the interface. This requires no special
  * permissions and can be done from userspace.
- * 
- * Since here is no single code path that applications go through (such 
+ *
+ * Since here is no single code path that applications go through (such
  * as a driver for example), sharing a configuration channel on a multi CAN channel
  * USB device has to be handled in userspace. This could be done by a system service
  * since on Windows afaik a device can only be opened by a single application.
  * Userspace code would then talk to the service to gain access to the CAN channel.
- * 
- * The solution adopted here sidesteps this whole issue by requiring each CAN channel 
- * to have its own configuration channel. This nicely isolates each CAN channel and 
+ *
+ * The solution adopted here sidesteps this whole issue by requiring each CAN channel
+ * to have its own configuration channel. This nicely isolates each CAN channel and
  * doesn't require the use of a system service.
- * 
+ *
  * ENDPOINTS
- * 
- * SuperCAN uses bulk endpoints only. Endpoints must be paired (in/out). 
- * On an interface, the first endpoint pair must be the configuration channel. If there is 
+ *
+ * SuperCAN uses bulk endpoints only. Endpoints must be paired (in/out).
+ * On an interface, the first endpoint pair must be the configuration channel. If there is
  * another endpoint pair, this endpoint pair is assumed to be the CAN channel. Else CAN
  * shares the configuration channel. This has implications for the application.
- * 
+ *
  */
 
 #define SC_NAME "SuperCAN"
