@@ -63,6 +63,7 @@
 #define SC_DLL_ERROR_DEVICE_FAILURE         8
 #define SC_DLL_ERROR_DEVICE_BUSY            9
 #define SC_DLL_ERROR_ABORTED                10
+#define SC_DLL_ERROR_DEV_NOT_IMPLEMENTED    11
 
 typedef uint16_t(*sc_dev_to_host16)(uint16_t value);
 typedef uint32_t(*sc_dev_to_host32)(uint32_t value);
@@ -70,11 +71,9 @@ typedef uint32_t(*sc_dev_to_host32)(uint32_t value);
 typedef struct sc_dev {
     sc_dev_to_host16 dev_to_host16;
     sc_dev_to_host32 dev_to_host32;
-    uint8_t* msg_pipe_ptr;    
     uint16_t cmd_buffer_size;
-    uint16_t msg_buffer_size;
-    uint8_t cmd_pipe;
-    uint8_t msg_pipe_count;
+    uint8_t cmd_epp;
+    uint8_t can_epp;
 } sc_dev_t;
 
 SC_DLL_API void sc_init(void);
@@ -85,7 +84,7 @@ SC_DLL_API int sc_dev_count(uint32_t* count);
 SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t** dev);
 SC_DLL_API void sc_dev_close(sc_dev_t* dev);
 SC_DLL_API int sc_dev_read(sc_dev_t *dev, uint8_t pipe, uint8_t *buffer, ULONG bytes, OVERLAPPED* ov);
-SC_DLL_API int sc_dev_write(sc_dev_t *dev, uint8_t pipe, uint8_t const * buffer, ULONG bytes, OVERLAPPED* ov);
-SC_DLL_API int sc_dev_result(sc_dev_t *dev, DWORD* bytes, OVERLAPPED* ov, int timeout_ms);
-SC_DLL_API int sc_dev_cancel(sc_dev_t *dev, OVERLAPPED* ov);
+SC_DLL_API int sc_dev_write(sc_dev_t *dev, uint8_t pipe, uint8_t const *buffer, ULONG bytes, OVERLAPPED* ov);
+SC_DLL_API int sc_dev_result(sc_dev_t *dev, DWORD* bytes, OVERLAPPED *ov, int timeout_ms);
+SC_DLL_API int sc_dev_cancel(sc_dev_t *dev, OVERLAPPED *ov);
 

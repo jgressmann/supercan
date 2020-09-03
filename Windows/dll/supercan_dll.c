@@ -51,6 +51,11 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 #include <supercan_dll.h>
 #include <supercan_winapi.h>
 
+
+// I am going to assume Windows on ARM is little endian
+#define NATIVE_BYTE_ORDER SC_BYTE_ORDER_LE
+
+
 static struct sc_data {
     wchar_t *dev_list;
     size_t *dev_name_indices;
@@ -232,10 +237,6 @@ SC_DLL_API void sc_dev_close(sc_dev_t* dev)
             CloseHandle(d->dev_handle);
         }
 
-        if (d->exposed.msg_pipe_ptr) {
-            free(d->exposed.msg_pipe_ptr);
-        }
-
         free(d);
     }
 }
@@ -243,7 +244,7 @@ SC_DLL_API void sc_dev_close(sc_dev_t* dev)
 SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
 {
     int error = SC_DLL_ERROR_NONE;
-    struct sc_dev_ex* dev = NULL;
+    struct sc_dev_ex *dev = NULL;
     USB_DEVICE_DESCRIPTOR deviceDesc;
     PUCHAR cmd_tx_buffer = NULL;
     PUCHAR cmd_rx_buffer = NULL;
@@ -355,45 +356,44 @@ SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
     }
 
     dev->exposed.cmd_buffer_size = pipeInfo.MaximumPacketSize;
-    dev->exposed.cmd_pipe = ~0x80 & pipeInfo.PipeId;
+    dev->exposed.cmd_epp = ~0x80 & pipeInfo.PipeId;
+    
+    if (ifaceDescriptor.bNumEndpoints < 4) {
+        error = SC_DLL_ERROR_DEV_NOT_IMPLEMENTED;
+        goto Error;
+    }
 
-    // get other pipes
-    dev->exposed.msg_pipe_count = (ifaceDescriptor.bNumEndpoints - 2) / 2;
-    dev->exposed.msg_pipe_ptr = malloc(sizeof(*dev->exposed.msg_pipe_ptr) * dev->exposed.msg_pipe_count);
-    for (unsigned i = 2, j = 0; i < ifaceDescriptor.bNumEndpoints; i += 2, ++j) {
-        WINUSB_PIPE_INFORMATION pipeInfo;
-        if (!WinUsb_QueryPipe(
-            dev->usb_handle,
-            0,
-            i,
-            &pipeInfo)) {
-            DWORD e = GetLastError();
-            HRESULT hr = HRESULT_FROM_WIN32(e);
-            error = HrToError(hr);
-            goto Error;
-        }
+    if (!WinUsb_QueryPipe(
+        dev->usb_handle,
+        0,
+        2,
+        &pipeInfo)) {
+        DWORD e = GetLastError();
+        HRESULT hr = HRESULT_FROM_WIN32(e);
+        error = HrToError(hr);
+        goto Error;
+    }
 
-        if (pipeInfo.PipeType != UsbdPipeTypeBulk) {
-            error = SC_DLL_ERROR_DEV_UNSUPPORTED;
-            goto Error;
-        }
+    if (pipeInfo.PipeType != UsbdPipeTypeBulk) {
+        error = SC_DLL_ERROR_DEV_UNSUPPORTED;
+        goto Error;
+    }
 
-        dev->exposed.msg_pipe_ptr[j] = ~0x80 & pipeInfo.PipeId;
+    dev->exposed.can_epp = ~0x80 & pipeInfo.PipeId;
 
-        // make bulk in pipe raw i/o
-        // https://docs.microsoft.com/en-us/windows-hardware/drivers/usbcon/winusb-functions-for-pipe-policy-modification
-        BOOL value = TRUE;
-        if (!WinUsb_SetPipePolicy(
-            dev->usb_handle,
-            dev->exposed.msg_pipe_ptr[j] | 0x80,
-            RAW_IO,
-            sizeof(value),
-            &value)) {
-            DWORD e = GetLastError();
-            HRESULT hr = HRESULT_FROM_WIN32(e);
-            error = HrToError(hr);
-            goto Error;
-        }
+    // make bulk in pipe raw i/o
+    // https://docs.microsoft.com/en-us/windows-hardware/drivers/usbcon/winusb-functions-for-pipe-policy-modification
+    BOOL value = TRUE;
+    if (!WinUsb_SetPipePolicy(
+        dev->usb_handle,
+        dev->exposed.can_epp | 0x80,
+        RAW_IO,
+        sizeof(value),
+        &value)) {
+        DWORD e = GetLastError();
+        HRESULT hr = HRESULT_FROM_WIN32(e);
+        error = HrToError(hr);
+        goto Error;
     }
 
     cmd_tx_buffer = calloc(dev->exposed.cmd_buffer_size, 1);
@@ -408,10 +408,10 @@ SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
         goto Error;
     }
 
-    BOOL value = TRUE;
+    // make cmd pipe raw
     if (!WinUsb_SetPipePolicy(
         dev->usb_handle,
-        dev->exposed.cmd_pipe | 0x80,
+        dev->exposed.cmd_epp | 0x80,
         RAW_IO,
         sizeof(value),
         &value)) {
@@ -424,7 +424,7 @@ SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
     // submit in token
     if (!WinUsb_ReadPipe(
         dev->usb_handle,
-        dev->exposed.cmd_pipe | 0x80,
+        dev->exposed.cmd_epp | 0x80,
         cmd_rx_buffer,
         pipeInfo.MaximumPacketSize,
         NULL,
@@ -436,16 +436,16 @@ SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
         goto Error;
     }
 
-    struct sc_msg_header* hello = (struct sc_msg_header* )cmd_tx_buffer;
+    struct sc_msg_req* hello = (struct sc_msg_req*)cmd_tx_buffer;
     hello->id = SC_MSG_HELLO_DEVICE;
-    hello->len = SC_HEADER_LEN;
+    hello->len = sizeof(*hello);
     
 
     if (!WinUsb_WritePipe(
         dev->usb_handle,
-        dev->exposed.cmd_pipe,
+        dev->exposed.cmd_epp,
         cmd_tx_buffer,
-        SC_HEADER_LEN,
+        hello->len,
         NULL,
         &cmd_tx_overlapped)) {
         if (ERROR_IO_PENDING != GetLastError()) {
@@ -483,7 +483,7 @@ SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
         goto Error;
     }
 
-    if (transferred != SC_HEADER_LEN) {
+    if (transferred != sizeof(*hello)) {
         DWORD e = GetLastError();
         HRESULT hr = HRESULT_FROM_WIN32(e);
         error = HrToError(hr);
@@ -524,24 +524,29 @@ SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
 
     struct sc_msg_hello *host_hello = (struct sc_msg_hello*)cmd_rx_buffer;
     if (host_hello->id != SC_MSG_HELLO_HOST ||
-        host_hello->len != sizeof(*host_hello)) {
+        host_hello->len < sizeof(*host_hello)) {
         error = SC_DLL_ERROR_DEV_UNSUPPORTED;
         goto Error;
     }
 
-    if (host_hello->proto_version > SC_VERSION) {
+    if (!host_hello->proto_version
+        || host_hello->proto_version > SC_VERSION) {
         error = SC_DLL_ERROR_VERSION_UNSUPPORTED;
         goto Error;
     }
 
-    
-    dev->exposed.msg_buffer_size = Swap16(host_hello->msg_buffer_size); // network byte order
-    if (dev->exposed.msg_buffer_size < 64) {
+    // network byte order
+#if NATIVE_BYTE_ORDER == SC_BYTE_ORDER_LE    
+    dev->exposed.cmd_buffer_size = Swap16(host_hello->cmd_buffer_size); 
+#else
+    dev->exposed.cmd_buffer_size = host_hello->cmd_buffer_size;
+#endif
+    if (dev->exposed.cmd_buffer_size < 64) {
         error = SC_DLL_ERROR_VERSION_UNSUPPORTED;
         goto Error;
     }
 
-    if (SC_BYTE_ORDER_LE == host_hello->byte_order) {
+    if (NATIVE_BYTE_ORDER == host_hello->byte_order) {
         dev->exposed.dev_to_host16 = &Nop16;
         dev->exposed.dev_to_host32 = &Nop32;
     }
@@ -720,6 +725,8 @@ SC_DLL_API char const* sc_strerror(int error)
         return "device busy";
     case SC_DLL_ERROR_ABORTED:
         return "operation aborted";
+    case SC_DLL_ERROR_DEV_NOT_IMPLEMENTED:
+        return "feature not implemented";
     default:
         return "sc_strerror not implemented";
     }
