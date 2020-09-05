@@ -105,7 +105,8 @@ struct sc_usb_priv {
 	u32 ctrlmode_supported;
 	struct can_bittiming_const nominal;
 	struct can_bittiming_const data;
-	u16 features;
+	u16 feat_perm;
+	u16 feat_conf;
 	u16 cmd_buffer_size;
 	u16 msg_buffer_size;
 	u8 cmd_epp;
@@ -147,8 +148,10 @@ static int sc_usb_map_error(int error)
 		return -ETOOSMALL;
 	case SC_ERROR_PARAM:
 		return -EINVAL;
-	case SC_ERROR_MODE:
+	case SC_ERROR_BUSY:
 		return -EBUSY;
+	case SC_ERROR_UNSUPPORTED:
+		return -ENOTSUPP;
 	default:
 		return -ENODEV;
 	}
@@ -819,53 +822,74 @@ static int sc_usb_apply_configuration(struct sc_chan *ch)
 {
 	struct sc_net_priv *net_priv = netdev_priv(ch->netdev);
 	struct sc_msg_config *conf = (struct sc_msg_config *)ch->tx_cmd_buffer;
+	struct sc_msg_features *feat = (struct sc_msg_features *)ch->tx_cmd_buffer;
 	struct sc_msg_bittiming *bt = (struct sc_msg_bittiming *)ch->tx_cmd_buffer;
 	int rc = 0;
+	int can_fd_mode = (net_priv->can.ctrlmode & CAN_CTRLMODE_FD) == CAN_CTRLMODE_FD;
+	int single_shot_mode = (net_priv->can.ctrlmode & CAN_CTRLMODE_ONE_SHOT) == CAN_CTRLMODE_ONE_SHOT;
+	u32 features = SC_FEATURE_FLAG_TXR |
+			(can_fd_mode ? SC_FEATURE_FLAG_FDF : 0) | (single_shot_mode ? SC_FEATURE_FLAG_DAR : 0);
 
-	// classic or fd?
-	memset(conf, 0, sizeof(*conf));
-	conf->id = SC_MSG_MODE;
-	conf->len = sizeof(*conf);
-	conf->args[0] =
-		((net_priv->can.ctrlmode & CAN_CTRLMODE_FD) ? SC_MODE_FLAG_FDF : 0) |
-		SC_MODE_NORMAL;
+	// clear previous features
+	memset(feat, 0, sizeof(*feat));
+	feat->id = SC_MSG_FEATURES;
+	feat->len = sizeof(*feat);
+	feat->op = SC_FEAT_OP_CLEAR;
 
-	netdev_dbg(ch->netdev, "set mode\n");
-	rc = sc_can_ch_cmd_send_receive(ch, sizeof(*conf));
+	netdev_dbg(ch->netdev, "clear features\n");
+	rc = sc_can_ch_cmd_send_receive(ch, sizeof(*feat));
+	if (rc)
+		return rc;
+
+	// set target features
+	feat->op = SC_FEAT_OP_OR;
+	feat->arg = ch->usb_priv->host_to_dev32(features);
+
+	netdev_dbg(ch->netdev, "add features %#x\n", features);
+	rc = sc_can_ch_cmd_send_receive(ch, sizeof(*feat));
 	if (rc)
 		return rc;
 
 	// bittiming
 	memset(bt, 0, sizeof(*bt));
-	bt->id = SC_MSG_BITTIMING;
+	bt->id = SC_MSG_NM_BITTIMING;
 	bt->len = sizeof(*bt);
-	bt->nmbt_brp = net_priv->can.bittiming.brp;
-	bt->nmbt_sjw = net_priv->can.bittiming.sjw;
-	bt->nmbt_tseg1 = net_priv->can.bittiming.prop_seg + net_priv->can.bittiming.phase_seg1;
-	bt->nmbt_tseg2 = net_priv->can.bittiming.phase_seg2;
+	bt->brp = ch->usb_priv->host_to_dev16(net_priv->can.bittiming.brp);
+	bt->sjw = net_priv->can.bittiming.sjw;
+	bt->tseg1 = ch->usb_priv->host_to_dev16(net_priv->can.bittiming.prop_seg + net_priv->can.bittiming.phase_seg1);
+	bt->tseg2 = net_priv->can.bittiming.phase_seg2;
 	netdev_dbg(ch->netdev, "nominal brp=%lu sjw=%lu tseg1=%lu, tseg2=%lu bitrate=%lu\n",
 		(unsigned long)net_priv->can.bittiming.brp, (unsigned long)net_priv->can.bittiming.sjw,
 		(unsigned long)(net_priv->can.bittiming.prop_seg + net_priv->can.bittiming.phase_seg1),
 		(unsigned long)net_priv->can.bittiming.phase_seg2, (unsigned long)net_priv->can.bittiming.bitrate);
-	bt->dtbt_brp = net_priv->can.data_bittiming.brp;
-	bt->dtbt_sjw = net_priv->can.data_bittiming.sjw;
-	bt->dtbt_tseg1 = net_priv->can.data_bittiming.prop_seg + net_priv->can.data_bittiming.phase_seg1;
-	bt->dtbt_tseg2 = net_priv->can.data_bittiming.phase_seg2;
-	netdev_dbg(ch->netdev, "data brp=%lu sjw=%lu tseg1=%lu, tseg2=%lu bitrate=%lu\n",
-		(unsigned long)net_priv->can.data_bittiming.brp, (unsigned long)net_priv->can.data_bittiming.sjw,
-		(unsigned long)(net_priv->can.data_bittiming.prop_seg + net_priv->can.data_bittiming.phase_seg1),
-		(unsigned long)net_priv->can.data_bittiming.phase_seg2, (unsigned long)net_priv->can.data_bittiming.bitrate);
 
-	netdev_dbg(ch->netdev, "set bittiming\n");
+	netdev_dbg(ch->netdev, "set nomimal bittiming\n");
 	rc = sc_can_ch_cmd_send_receive(ch, sizeof(*bt));
 	if (rc)
 		return rc;
+
+	if (can_fd_mode) {
+		bt->id = SC_MSG_DT_BITTIMING;
+		bt->brp = ch->usb_priv->host_to_dev16(net_priv->can.data_bittiming.brp);
+		bt->sjw = net_priv->can.data_bittiming.sjw;
+		bt->tseg1 = ch->usb_priv->host_to_dev16(net_priv->can.data_bittiming.prop_seg + net_priv->can.data_bittiming.phase_seg1);
+		bt->tseg2 = net_priv->can.data_bittiming.phase_seg2;
+		netdev_dbg(ch->netdev, "data brp=%lu sjw=%lu tseg1=%lu, tseg2=%lu bitrate=%lu\n",
+			(unsigned long)net_priv->can.data_bittiming.brp, (unsigned long)net_priv->can.data_bittiming.sjw,
+			(unsigned long)(net_priv->can.data_bittiming.prop_seg + net_priv->can.data_bittiming.phase_seg1),
+			(unsigned long)net_priv->can.data_bittiming.phase_seg2, (unsigned long)net_priv->can.data_bittiming.bitrate);
+
+		netdev_dbg(ch->netdev, "set data bittiming\n");
+		rc = sc_can_ch_cmd_send_receive(ch, sizeof(*bt));
+		if (rc)
+			return rc;
+	}
 
 	// bus on
 	memset(conf, 0, sizeof(*conf));
 	conf->id = SC_MSG_BUS;
 	conf->len = sizeof(*conf);
-	conf->args[0] = 1;
+	conf->arg = ch->usb_priv->host_to_dev16(1);
 
 	netdev_dbg(ch->netdev, "bus on\n");
 	rc = sc_can_ch_cmd_send_receive(ch, sizeof(*conf));
@@ -962,7 +986,7 @@ static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *net
 	struct sc_chan *ch = priv->ch;
 	struct sc_urb_data *urb_data = NULL;
 	unsigned long flags = 0;
-	u8 urb_index = -1;
+	unsigned urb_index = -1;
 	netdev_tx_t rc = NETDEV_TX_OK;
 	int error = 0;
 
@@ -1011,7 +1035,7 @@ static netdev_tx_t sc_can_start_xmit(struct sk_buff *skb, struct net_device *net
 
 static int sc_can_set_bittiming(struct net_device *netdev)
 {
-	netdev_dbg(netdev, "set bittiming\n");
+	netdev_dbg(netdev, "set nominal bittiming\n");
 	return 0;
 }
 
@@ -1491,6 +1515,12 @@ static int sc_usb_probe_dev(struct sc_usb_priv *priv, u16 ep_size)
 		goto err;
 	}
 
+	priv->feat_perm = priv->host_to_dev16(device_info->feat_perm);
+	priv->feat_conf = priv->host_to_dev16(device_info->feat_conf);
+	dev_info(&priv->intf->dev, "device features perm=%04x conf=%04x\n",
+		priv->feat_perm, priv->feat_conf);
+
+
 	for (i = 0; i < min((size_t)device_info->sn_len, ARRAY_SIZE(serial_str)-1); ++i)
 		snprintf(&serial_str[i*2], 3, "%02x", device_info->sn_bytes[i]);
 
@@ -1527,7 +1557,6 @@ static int sc_usb_probe_dev(struct sc_usb_priv *priv, u16 ep_size)
 
 	priv->chan_count = 1;
 	priv->can_clock_hz = priv->host_to_dev32(can_info->can_clk_hz);
-	priv->features = priv->host_to_dev16(can_info->features);
 	priv->tx_fifo_size = min(can_info->tx_fifo_size, (u8)SC_MAX_TX_URBS);
 	priv->rx_fifo_size = min(can_info->rx_fifo_size, (u8)SC_MAX_RX_URBS);
 	priv->msg_buffer_size = priv->host_to_dev16(can_info->msg_buffer_size);
@@ -1565,9 +1594,10 @@ static int sc_usb_probe_dev(struct sc_usb_priv *priv, u16 ep_size)
 	priv->data.brp_max = can_info->dtbt_brp_max;
 	priv->data.brp_inc = 1;
 
+	// FIX ME: add code paths for permanently enabled features
 	priv->ctrlmode_static |= CAN_CTRLMODE_BERR_REPORTING;
 
-	if (priv->features & SC_FEATURE_FLAG_FDF) {
+	if (priv->feat_conf & SC_FEATURE_FLAG_FDF) {
 		dev_info(&priv->intf->dev, "device supports CAN-FD\n");
 		if (msg_buffer_size_supports_canfd)
 			priv->ctrlmode_supported |= CAN_CTRLMODE_FD;
@@ -1575,17 +1605,22 @@ static int sc_usb_probe_dev(struct sc_usb_priv *priv, u16 ep_size)
 			dev_warn(&priv->intf->dev, "CAN-FD disabled, device message buffer too small (%u)\n", priv->msg_buffer_size);
 	}
 
-	if (priv->features & SC_FEATURE_FLAG_MON_MODE) {
+	if (priv->feat_conf & SC_FEATURE_FLAG_MON_MODE) {
 		dev_info(&priv->intf->dev, "device supports monitoring mode\n");
 		priv->ctrlmode_supported |= CAN_CTRLMODE_LISTENONLY;
 	}
 
-	if (priv->features & SC_FEATURE_FLAG_EXT_LOOP_MODE) {
+	if (priv->feat_conf & SC_FEATURE_FLAG_EXT_LOOP_MODE) {
 		dev_info(&priv->intf->dev, "device supports external loopback mode\n");
 		priv->ctrlmode_supported |= CAN_CTRLMODE_LOOPBACK;
 	}
 
-	if (!(priv->features & SC_FEATURE_FLAG_TXR)) {
+	if (priv->feat_conf & SC_FEATURE_FLAG_DAR) {
+		dev_info(&priv->intf->dev, "device supports one-shot mode\n");
+		priv->ctrlmode_supported |= CAN_CTRLMODE_ONE_SHOT;
+	}
+
+	if (!((priv->feat_perm | priv->feat_conf) & SC_FEATURE_FLAG_TXR)) {
 		dev_err(&priv->intf->dev, "device doesn't support txr feature required by this driver\n");
 		rc = -ENODEV;
 		goto err;
