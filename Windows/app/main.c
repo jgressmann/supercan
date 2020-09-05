@@ -40,6 +40,8 @@
 
 
 #define MAX_PENDING_READS 16
+#define SC_DLL_ERROR_BUFFER_TOO_SMALL 1000
+#define SC_DLL_ERROR_INSUFFICIENT_DATA 1001
 
 
 static inline uint8_t dlc_to_len(uint8_t dlc)
@@ -50,61 +52,176 @@ static inline uint8_t dlc_to_len(uint8_t dlc)
     return map[dlc & 0xf];
 }
 
+
+typedef struct sc_dev_context {
+    sc_dev_t* dev;
+    PUCHAR cmd_tx_buffer;
+    PUCHAR cmd_rx_buffer;
+    OVERLAPPED cmd_tx_ov, cmd_rx_ov;
+} sc_dev_context_t;
+
+static void sc_dev_ctx_uninit(sc_dev_context_t* ctx)
+{
+    if (ctx->cmd_tx_ov.hEvent) {
+        CloseHandle(ctx->cmd_tx_ov.hEvent);
+        ctx->cmd_tx_ov.hEvent = NULL;
+    }
+
+    if (ctx->cmd_rx_ov.hEvent) {
+        CloseHandle(ctx->cmd_rx_ov.hEvent);
+        ctx->cmd_rx_ov.hEvent = NULL;
+    }
+
+    if (ctx->cmd_tx_buffer) {
+        free(ctx->cmd_tx_buffer);
+        ctx->cmd_tx_buffer = NULL;
+    }
+
+    if (ctx->cmd_rx_buffer) {
+        free(ctx->cmd_rx_buffer);
+        ctx->cmd_rx_buffer = NULL;
+    }
+}
+
+static int sc_dev_ctx_init(sc_dev_context_t* ctx, sc_dev_t* dev)
+{
+    int error = SC_DLL_ERROR_NONE;
+
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->dev = dev;
+
+    ctx->cmd_tx_ov.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
+    if (!ctx->cmd_tx_ov.hEvent) {
+        error = SC_DLL_ERROR_OUT_OF_MEM;
+        goto Error;
+    }
+    
+    ctx->cmd_rx_ov.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
+    if (!ctx->cmd_rx_ov.hEvent) {
+        error = SC_DLL_ERROR_OUT_OF_MEM;
+        goto Error;
+    }
+
+    ctx->cmd_tx_buffer = malloc(ctx->dev->cmd_buffer_size);
+    if (!ctx->cmd_tx_buffer) {
+        error = SC_DLL_ERROR_OUT_OF_MEM;
+        goto Error;
+    }
+    ctx->cmd_rx_buffer = malloc(ctx->dev->cmd_buffer_size);
+    if (!ctx->cmd_rx_buffer) {
+        error = SC_DLL_ERROR_OUT_OF_MEM;
+        goto Error;
+    }
+
+Exit:
+    return error;
+Error:
+    sc_dev_ctx_uninit(ctx);
+    goto Exit;
+}
+
+static int sc_dev_ctx_send_receive_cmd(
+    sc_dev_context_t* ctx, 
+    size_t cmd_len, 
+    size_t *response_len)
+{
+    int error = SC_DLL_ERROR_NONE;
+    DWORD transferred = 0;
+    sc_dev_t* dev = ctx->dev;
+
+
+    if (cmd_len > dev->cmd_buffer_size) {
+        return SC_DLL_ERROR_INVALID_PARAM;
+    }
+
+    // submit in token
+    while (1) {
+        error = sc_dev_read(dev, dev->cmd_epp | 0x80, ctx->cmd_rx_buffer, dev->cmd_buffer_size, &ctx->cmd_rx_ov);
+        if (SC_DLL_ERROR_NONE == error) {
+            continue; // clear pending data
+        }
+
+        if (SC_DLL_ERROR_IO_PENDING != error) {
+            return error;
+        }
+
+        break;
+    }
+
+    error = sc_dev_write(dev, dev->cmd_epp, ctx->cmd_tx_buffer, cmd_len, &ctx->cmd_tx_ov);
+    switch (error) {
+    case SC_DLL_ERROR_NONE:
+    case SC_DLL_ERROR_IO_PENDING:
+        break;
+    default:
+        return error;
+    }
+    
+
+    error = sc_dev_result(dev, &transferred, &ctx->cmd_tx_ov, -1);
+    if (error) {
+        fprintf(stderr, "sc_dev_result failed: %s (%d)\n", sc_strerror(error), error);
+        return error;
+    }
+
+    if (transferred != cmd_len) {
+        fprintf(stderr, "sc_dev_write incomplete\n");
+        return SC_DLL_ERROR_UNKNOWN;
+    }
+
+    error = sc_dev_result(dev, &transferred, &ctx->cmd_rx_ov, -1);
+    if (error) {
+        fprintf(stderr, "sc_dev_result failed: %s (%d)\n", sc_strerror(error), error);
+        return error;
+    }
+
+    *response_len = transferred;
+
+    return error;
+}
+
 int main(int argc, char** argv)
 {
     int error = SC_DLL_ERROR_NONE;
     uint32_t count;
     sc_dev_t* dev = NULL;
-
-    PUCHAR cmd_tx_buffer = NULL;
-    PUCHAR cmd_rx_buffer = NULL;
-    HANDLE cmd_tx_event = NULL;
-    HANDLE cmd_rx_event = NULL;
-    PUCHAR msg0_rx_buffers = NULL;
-    PUCHAR msg0_tx_buffer = NULL;
-    OVERLAPPED cmd_tx_ov, cmd_rx_ov;
-    HANDLE msg0_read_events[MAX_PENDING_READS] = { 0 };
-    OVERLAPPED msg0_read_ovs[MAX_PENDING_READS] = { 0 };
-    HANDLE msg0_tx_event = NULL;
-    OVERLAPPED msg0_tx_ov;
+    sc_dev_context_t dev_ctx;
+    
+    PUCHAR msg_rx_buffers = NULL;
+    PUCHAR msg_tx_buffer = NULL;
+    HANDLE msg_read_events[MAX_PENDING_READS] = { 0 };
+    OVERLAPPED msg_read_ovs[MAX_PENDING_READS] = { 0 };
+    HANDLE msg_tx_event = NULL;
+    OVERLAPPED msg_tx_ov;
     struct sc_msg_dev_info dev_info;
-    DWORD transferred;
+    struct sc_msg_can_info can_info;
+    DWORD transferred = 0;
+    char serial_str[1 + sizeof(dev_info.sn_bytes) * 2] = { 0 };
+    char name_str[1 + sizeof(dev_info.name_bytes)] = { 0 };
+    uint8_t track_id = 0;
+
+    memset(&dev_ctx, 0, sizeof(dev_ctx));
 
     sc_init();
 
-    cmd_tx_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-    if (!cmd_tx_event) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Exit;
-    }
-
-    cmd_rx_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-    if (!cmd_rx_event) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Exit;
-    }
-
-    cmd_tx_ov.hEvent = cmd_tx_event;
-    cmd_rx_ov.hEvent = cmd_rx_event;
-
-    for (size_t i = 0; i < _countof(msg0_read_events); ++i) {
+    for (size_t i = 0; i < _countof(msg_read_events); ++i) {
         HANDLE h = CreateEventW(NULL, FALSE, FALSE, NULL);
         if (!h) {
             error = -1;
             goto Exit;
         }
 
-        msg0_read_events[i] = h;
-        msg0_read_ovs[i].hEvent = h;
+        msg_read_events[i] = h;
+        msg_read_ovs[i].hEvent = h;
     }
 
-    msg0_tx_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-    if (!msg0_tx_event) {
+    msg_tx_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    if (!msg_tx_event) {
         error = -1;
         goto Exit;
     }
 
-    msg0_tx_ov.hEvent = msg0_tx_event;
+    msg_tx_ov.hEvent = msg_tx_event;
 
     error = sc_dev_scan();
     if (error) {
@@ -132,182 +249,205 @@ int main(int argc, char** argv)
         goto Exit;
     }
 
-    fprintf(stdout, "cmd pipe %#02x\n", dev->cmd_pipe);
-    for (uint8_t i = 0; i < dev->msg_pipe_count; ++i) {
-        fprintf(stdout, "ch%u pipe %#02x\n", i, dev->msg_pipe_ptr[i]);
+    fprintf(stdout, "cmd epp %#02x, can epp %#02x\n", dev->cmd_epp, dev->can_epp);
+    error = sc_dev_ctx_init(&dev_ctx, dev);
+    if (error) {
+        goto Exit;
     }
 
-    msg0_rx_buffers = malloc(dev->msg_buffer_size * _countof(msg0_read_events));
-    if (!msg0_rx_buffers) {
+    // fetch device info
+    {
+        struct sc_msg_req* req = (struct sc_msg_req*)dev_ctx.cmd_tx_buffer;
+        memset(req, 0, sizeof(*req));
+        req->id = SC_MSG_DEVICE_INFO;
+        req->len = sizeof(*req);
+        size_t rep_len;
+        error = sc_dev_ctx_send_receive_cmd(&dev_ctx, req->len, &rep_len);
+        if (error) {
+            goto Exit;
+        }
+
+        if (rep_len < sizeof(dev_info)) {
+            fprintf(stderr, "failed to get device info\n");
+            error = -1;
+            goto Exit;
+        }
+
+        memcpy(&dev_info, dev_ctx.cmd_rx_buffer, sizeof(dev_info));
+
+        dev_info.feat_perm = dev->dev_to_host16(dev_info.feat_perm);
+        dev_info.feat_conf = dev->dev_to_host16(dev_info.feat_conf);
+
+        fprintf(stdout, "device features perm=%#04x conf=%#04x\n", dev_info.feat_perm, dev_info.feat_conf);
+
+        for (size_t i = 0; i < min((size_t)dev_info.sn_len, _countof(serial_str) - 1); ++i) {
+            snprintf(&serial_str[i * 2], 3, "%02x", dev_info.sn_bytes[i]);
+        }
+
+        dev_info.name_len = min((size_t)dev_info.name_len, sizeof(name_str) - 1);
+        memcpy(name_str, dev_info.name_bytes, dev_info.name_len);
+        name_str[dev_info.name_len] = 0;
+
+        fprintf(stdout, "device identifies as %s, serial no %s, firmware version %u.% u.% u\n",
+            name_str, serial_str, dev_info.fw_ver_major, dev_info.fw_ver_minor, dev_info.fw_ver_patch);
+
+    }
+
+    // fetch can info
+    {
+        struct sc_msg_req* req = (struct sc_msg_req*)dev_ctx.cmd_tx_buffer;
+        memset(req, 0, sizeof(*req));
+        req->id = SC_MSG_CAN_INFO;
+        req->len = sizeof(*req);
+        size_t rep_len;
+        error = sc_dev_ctx_send_receive_cmd(&dev_ctx, req->len, &rep_len);
+        if (error) {
+            goto Exit;
+        }
+
+        if (rep_len < sizeof(can_info)) {
+            fprintf(stderr, "failed to get can info\n");
+            error = -1;
+            goto Exit;
+        }
+
+        memcpy(&can_info, dev_ctx.cmd_rx_buffer, sizeof(can_info));
+
+        can_info.can_clk_hz = dev->dev_to_host32(can_info.can_clk_hz);
+        can_info.msg_buffer_size = dev->dev_to_host16(can_info.msg_buffer_size);
+        can_info.nmbt_brp_max = dev->dev_to_host16(can_info.nmbt_brp_max);
+        can_info.nmbt_tseg1_max = dev->dev_to_host16(can_info.nmbt_tseg1_max);
+    }
+
+    // allocate buffers
+    msg_rx_buffers = malloc(can_info.msg_buffer_size * _countof(msg_read_events));
+    if (!msg_rx_buffers) {
+        error = SC_DLL_ERROR_OUT_OF_MEM;
+        goto Exit;
+    }
+    
+    msg_tx_buffer = malloc(can_info.msg_buffer_size);
+    if (!msg_tx_buffer) {
         error = SC_DLL_ERROR_OUT_OF_MEM;
         goto Exit;
     }
 
 
-    // submit all reads tokens for ch0
-    for (size_t i = 0; i < _countof(msg0_read_events); ++i) {
-        error = sc_dev_read(dev, dev->msg_pipe_ptr[0] | 0x80, msg0_rx_buffers + i * dev->msg_buffer_size, dev->msg_buffer_size, &msg0_read_ovs[i]);
+    // submit all reads tokens
+    for (size_t i = 0; i < _countof(msg_read_events); ++i) {
+        error = sc_dev_read(dev, dev->can_epp | 0x80, msg_rx_buffers + i * can_info.msg_buffer_size, can_info.msg_buffer_size, &msg_read_ovs[i]);
         if (SC_DLL_ERROR_IO_PENDING != error) {
             goto Exit;
         }
     }
 
+    
+
+    // setup device
+    {
+        unsigned cmd_count = 0;
+        PUCHAR cmd_tx_ptr = dev_ctx.cmd_tx_buffer;
+
+        // clear features
+        struct sc_msg_features* feat = (struct sc_msg_features*)cmd_tx_ptr;
+        memset(feat, 0, sizeof(*feat));
+        feat->id = SC_MSG_FEATURES;
+        feat->len = sizeof(*feat);
+        feat->op = SC_FEAT_OP_CLEAR;
+        cmd_tx_ptr += feat->len;
+        ++cmd_count;
+
+        feat = (struct sc_msg_features*)cmd_tx_ptr;
+        memset(feat, 0, sizeof(*feat));
+        feat->id = SC_MSG_FEATURES;
+        feat->len = sizeof(*feat);
+        feat->op = SC_FEAT_OP_OR;
+        // try to enable CAN-FD and TXR
+        feat->arg = (dev_info.feat_perm | dev_info.feat_conf) & (SC_FEATURE_FLAG_FDF | SC_FEATURE_FLAG_TXR);
+        cmd_tx_ptr += feat->len;
+        ++cmd_count;
+
+        
+        // set nominal bittiming
+        struct sc_msg_bittiming* bt = (struct sc_msg_bittiming*)cmd_tx_ptr;
+        memset(bt, 0, sizeof(*bt));
+        bt->id = SC_MSG_NM_BITTIMING;
+        bt->len = sizeof(*bt);
+        // 500KBit@80MHz CAN clock
+        // nominal brp=1 sjw=1 tseg1=139 tseg2=20 bitrate=500000 sp=874/1000
+        bt->brp = dev->dev_to_host16(1);
+        bt->sjw = 1;
+        bt->tseg1 = dev->dev_to_host16(139);
+        bt->tseg2 = 20;
+        cmd_tx_ptr += bt->len;
+        ++cmd_count;
+
+        if ((dev_info.feat_perm | dev_info.feat_conf) & SC_FEATURE_FLAG_FDF) {
+            // CAN-FD capable -> configure data bitrate
+
+            bt = (struct sc_msg_bittiming*)cmd_tx_ptr;
+            memset(bt, 0, sizeof(*bt));
+            bt->id = SC_MSG_DT_BITTIMING;
+            bt->len = sizeof(*bt);
+            // 2MBit@80MHz CAN clock
+            // data brp = 1 sjw = 1 tseg1 = 29 tseg2 = 10 bitrate = 2000000 sp = 743 / 1000       
+            bt->brp = 1;
+            bt->sjw = 1;
+            bt->tseg1 = 29;
+            bt->tseg2 = 10;
+            cmd_tx_ptr += bt->len;
+            ++cmd_count;
+        }        
+
+        struct sc_msg_config* bus_on = (struct sc_msg_config*)cmd_tx_ptr;
+        memset(bus_on, 0, sizeof(*bus_on));
+        bus_on->id = SC_MSG_BUS;
+        bus_on->len = sizeof(*bus_on);
+        bus_on->arg = dev->dev_to_host16(1);
+        cmd_tx_ptr += bus_on->len;
+        ++cmd_count;
+
+        size_t rep_len;
+        error = sc_dev_ctx_send_receive_cmd(&dev_ctx, cmd_tx_ptr - dev_ctx.cmd_tx_buffer, &rep_len);
+        if (error) {
+            goto Exit;
+        }
 
 
-    msg0_tx_buffer = malloc(dev->msg_buffer_size);
-    if (!msg0_tx_buffer) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Exit;
+        if (rep_len < cmd_count * sizeof(struct sc_msg_error)) {
+            fprintf(stderr, "failed to setup device\n");
+            error = -1;
+            goto Exit;
+        }
+
+        struct sc_msg_error* error_msgs = (struct sc_msg_error*)dev_ctx.cmd_rx_buffer;
+        for (unsigned i = 0; i < cmd_count; ++i) {            
+            struct sc_msg_error* error_msg = &error_msgs[i];
+            if (SC_ERROR_NONE != error_msg->error) {
+                fprintf(stderr, "cmd index %u failed: %d\n", i, error_msg->error);
+                error = -1;
+                goto Exit;
+            }
+        }
     }
 
-
-
-    cmd_tx_buffer = calloc(dev->cmd_buffer_size, 1);
-    if (!cmd_tx_buffer) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Exit;
-    }
-    cmd_rx_buffer = calloc(dev->cmd_buffer_size, 1);
-    if (!cmd_rx_buffer) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Exit;
-    }
-
-    // submit in token
-    //
-    error = sc_dev_read(dev, dev->cmd_pipe | 0x80, cmd_rx_buffer, dev->cmd_buffer_size, &cmd_rx_ov);
-    if (SC_DLL_ERROR_IO_PENDING != error) {
-        error = -1;
-        goto Exit;
-    }
-
-    PUCHAR cmd_tx_ptr = cmd_tx_buffer;
-    // get device info
-    struct sc_msg_header* info = (struct sc_msg_header* )cmd_tx_ptr;
-    info->id = SC_MSG_DEVICE_INFO;
-    info->len = SC_HEADER_LEN;
-    cmd_tx_ptr += info->len;
-
-    ULONG bytes = (ULONG)(cmd_tx_ptr - cmd_tx_buffer);
-
-    error = sc_dev_write(dev, dev->cmd_pipe, cmd_tx_buffer, bytes, &cmd_tx_ov);
-    if (SC_DLL_ERROR_IO_PENDING != error) {
-        error = -1;
-        goto Exit;
-    }
-
-    error = sc_dev_result(dev, &transferred, &cmd_tx_ov, -1);
-    if (error) {
-        fprintf(stderr, "sc_dev_result failed: %s (%d)\n", sc_strerror(error), error);
-        goto Exit;
-    }
-
-    if (transferred != bytes) {
-        fprintf(stderr, "sc_dev_write incomplete\n");
-        error = -1;
-        goto Exit;
-    }
-
-    error = sc_dev_result(dev, &transferred, &cmd_rx_ov, -1);
-    if (error) {
-        fprintf(stderr, "sc_dev_result failed: %s (%d)\n", sc_strerror(error), error);
-        goto Exit;
-    }
-
-    if (transferred < sizeof(dev_info)) {
-        fprintf(stderr, "sc_dev_write incomplete\n");
-        error = -1;
-        goto Exit;
-    }
-
-    memcpy(&dev_info, cmd_rx_buffer, sizeof(dev_info));
-    dev_info.can_clk_hz = dev->dev_to_host32(dev_info.can_clk_hz);
-    dev_info.nmbt_brp_max = dev->dev_to_host16(dev_info.nmbt_brp_max);
-    dev_info.nmbt_tq_max = dev->dev_to_host16(dev_info.nmbt_tq_max);
-    dev_info.nmbt_tseg1_max = dev->dev_to_host16(dev_info.nmbt_tseg1_max);
-
-    fprintf(stdout, "device has %u CAN channels\n", dev_info.channels);
-
-    cmd_tx_ptr = cmd_tx_buffer;
-    // set bus off ch0
-    struct sc_msg_config* bus_off = (struct sc_msg_config*)cmd_tx_ptr;
-    bus_off->id = SC_MSG_BUS;
-    bus_off->len = sizeof(*bus_off);
-    cmd_tx_ptr += bus_off->len;
-
-    bus_off->channel = 0;
-    bus_off->args[0] = 0;
-
-    // set bittiming for ch0
-    struct sc_msg_bittiming* bt = (struct sc_msg_bittiming*)cmd_tx_ptr;
-    bt->id = SC_MSG_BITTIMING;
-    bt->len = sizeof(*bt);
-    cmd_tx_ptr += bt->len;
-
-    // 500KBit/2MBit @120MHz CAN clock
-    bt->channel = 0;
-    bt->nmbt_brp = dev->dev_to_host16(3);
-    bt->nmbt_sjw = 16;
-    bt->nmbt_tseg1 = dev->dev_to_host16(63);
-    bt->nmbt_tseg2 = 16;
-    bt->dtbt_brp = 3;
-    bt->dtbt_sjw = 6;
-    bt->dtbt_tseg1 = 13;
-    bt->dtbt_tseg2 = 6;
-
-    // set mode for ch0
-    struct sc_msg_config* mode = (struct sc_msg_config*)cmd_tx_ptr;
-    mode->id = SC_MSG_MODE;
-    mode->len = sizeof(*mode);
-    cmd_tx_ptr += mode->len;
-
-    mode->channel = 0;
-    mode->args[0] = SC_MODE_FLAG_BRS | SC_MODE_FLAG_FD | SC_MODE_FLAG_RX | SC_MODE_FLAG_TX | SC_MODE_FLAG_AUTO_RE | SC_MODE_FLAG_EH;
-
-    // set bus on ch0
-    struct sc_msg_config* bus_on = (struct sc_msg_config*)cmd_tx_ptr;
-    bus_on->id = SC_MSG_BUS;
-    bus_on->len = sizeof(*bus_on);
-    cmd_tx_ptr += bus_on->len;
-
-    bus_on->channel = 0;
-    bus_on->args[0] = 1;
-
-    bytes = (ULONG)(cmd_tx_ptr - cmd_tx_buffer);
-
-    error = sc_dev_write(dev, dev->cmd_pipe, cmd_tx_buffer, bytes, &cmd_tx_ov);
-    if (SC_DLL_ERROR_IO_PENDING != error) {
-        error = -1;
-        goto Exit;
-    }
-
-    error = sc_dev_result(dev, &transferred, &cmd_tx_ov, -1);
-    if (error) {
-        fprintf(stderr, "sc_dev_result failed: %s (%d)\n", sc_strerror(error), error);
-        goto Exit;
-    }
-
-    if (transferred != bytes) {
-        fprintf(stderr, "sc_dev_write incomplete\n");
-        error = -1;
-        goto Exit;
-    }
-
+    const DWORD WAIT_TIMEOUT_MS = 500;
+    DWORD last_send = GetTickCount();
     while (1) {
-        DWORD result = WaitForMultipleObjects(_countof(msg0_read_events), msg0_read_events, FALSE, 100);
-        if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + _countof(msg0_read_events)) {
+        DWORD result = WaitForMultipleObjects(_countof(msg_read_events), msg_read_events, FALSE, WAIT_TIMEOUT_MS);
+        if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + _countof(msg_read_events)) {
             size_t index = result - WAIT_OBJECT_0;
-            error = sc_dev_result(dev, &transferred, &msg0_read_ovs[index], 0);
+            error = sc_dev_result(dev, &transferred, &msg_read_ovs[index], 0);
             if (error) {
                 fprintf(stderr, "sc_dev_result failed: %s (%d)\n", sc_strerror(error), error);
                 goto Exit;
             }
 
             // process buffer
-            PUCHAR in_beg = msg0_rx_buffers + dev->msg_buffer_size * index;
+            PUCHAR in_beg = msg_rx_buffers + can_info.msg_buffer_size * index;
             PUCHAR in_end = in_beg + transferred;
             PUCHAR in_ptr = in_beg;
-            while (in_ptr + SC_HEADER_LEN <= in_end) {
+            while (in_ptr + SC_MSG_HEADER_LEN <= in_end) {
                 struct sc_msg_header const* msg = (struct sc_msg_header const*)in_ptr;
                 if (in_ptr + msg->len > in_end) {
                     fprintf(stderr, "malformed msg\n");
@@ -335,35 +475,33 @@ int main(int argc, char** argv)
                     uint16_t rx_lost = dev->dev_to_host16(status->rx_lost);
                     uint16_t tx_dropped = dev->dev_to_host16(status->tx_dropped);
 
-                    fprintf(stdout, "ch%u rxl=%u txd=%u\n", status->channel, rx_lost, tx_dropped);
-                    if (status->flags & SC_STATUS_FLAG_BUS_OFF) {
-                        fprintf(stdout, "ch%u bus off\n", status->channel);
+                    fprintf(stdout, "rxl=%u txd=%u rxe=%u txe=%u bus=", rx_lost, tx_dropped, status->rx_errors, status->tx_errors);
+                    switch (status->bus_status) {
+                    case SC_CAN_STATUS_ERROR_ACTIVE:
+                        fprintf(stdout, "error_active");
+                        break;
+                    case SC_CAN_STATUS_ERROR_WARNING:
+                        fprintf(stdout, "error_warning");
+                        break;
+                    case SC_CAN_STATUS_ERROR_PASSIVE:
+                        fprintf(stdout, "error_passive");
+                        break;
+                    case SC_CAN_STATUS_BUS_OFF:
+                        fprintf(stdout, "off");
+                        break;
+                    default:
+                        fprintf(stdout, "unknown");
+                        break;
                     }
-                    else if (status->flags & SC_STATUS_FLAG_ERROR_WARNING) {
-                        fprintf(stdout, "ch%u error warning\n", status->channel);
-                    }
-                    else if (status->flags & SC_STATUS_FLAG_ERROR_PASSIVE) {
-                        fprintf(stdout, "ch%u error passive\n", status->channel);
-                    }
-
-                    if (status->flags & SC_STATUS_FLAG_RX_FULL) {
-                        fprintf(stdout, "ch%u rx queue full\n", status->channel);
-                    }
-
-                    if (status->flags & SC_STATUS_FLAG_TX_FULL) {
-                        fprintf(stdout, "ch%u tx queue full\n", status->channel);
-                    }
-
-                    if (status->flags & SC_STATUS_FLAG_TXR_DESYNC) {
-                        fprintf(stdout, "ch%u txr desync\n", status->channel);
-                    }
+                    fprintf(stdout, "\n");
                 } break;
                 case SC_MSG_CAN_RX: {
                     struct sc_msg_can_rx const *rx = (struct sc_msg_can_rx const*)msg;
                     uint32_t can_id = dev->dev_to_host32(rx->can_id);
+                    uint32_t timestamp_us = dev->dev_to_host32(rx->timestamp_us);
                     uint8_t len = dlc_to_len(rx->dlc);
-                    bytes = sizeof(*rx);
-                    if (!(rx->flags & SC_CAN_FLAG_RTR)) {
+                    uint8_t bytes = sizeof(*rx);
+                    if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR)) {
                         bytes += len;
                     }
 
@@ -372,8 +510,8 @@ int main(int argc, char** argv)
                         break;
                     }
 
-                    fprintf(stdout, "ch%u %x [%u] ", rx->channel, can_id, len);
-                    if (rx->flags & SC_CAN_FLAG_RTR) {
+                    fprintf(stdout, "%x [%u] ", can_id, len);
+                    if (rx->flags & SC_CAN_FRAME_FLAG_RTR) {
                         fprintf(stdout, "RTR");
                     } else {
                         for (uint8_t i = 0; i < len; ++i) {
@@ -382,13 +520,24 @@ int main(int argc, char** argv)
                     }
                     fputc('\n', stdout);
                 } break;
+                case SC_MSG_CAN_TXR: {
+                    struct sc_msg_can_txr const* txr = (struct sc_msg_can_txr const*)msg;
+                    uint32_t timestamp_us = dev->dev_to_host32(txr->timestamp_us);
+                    
+                    if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
+                        fprintf(stdout, "tracked message %#02x was dropped @ %08x\n", txr->track_id, timestamp_us);
+                    } 
+                    else {
+                        fprintf(stdout, "tracked message %#02x was sent @ %08x\n", txr->track_id, timestamp_us);
+                    }
+                } break;
                 default:
                     break;
                 }
             }
 
             // re-queue in token
-            error = sc_dev_read(dev, dev->msg_pipe_ptr[0] | 0x80, in_beg, dev->msg_buffer_size, &msg0_read_ovs[index]);
+            error = sc_dev_read(dev, dev->can_epp | 0x80, in_beg, can_info.msg_buffer_size, &msg_read_ovs[index]);
             if (error) {
                 if (error != SC_DLL_ERROR_IO_PENDING) {
                     fprintf(stderr, "sc_dev_read failed: %s (%d)\n", sc_strerror(error), error);
@@ -398,25 +547,30 @@ int main(int argc, char** argv)
                 error = 0;
             }
 
-            goto send;
+            DWORD now = GetTickCount();
+            if (now - last_send >= WAIT_TIMEOUT_MS) {
+                goto send;
+            }
         }
         else if (WAIT_TIMEOUT == result) {
             struct sc_msg_can_tx* tx;
 send:
-            tx = (struct sc_msg_can_tx*)msg0_tx_buffer;
+            tx = (struct sc_msg_can_tx*)msg_tx_buffer;
             tx->id = SC_MSG_CAN_TX;
             tx->len = sizeof(*tx) + 4;
+            if (tx->len & 3) {
+                tx->len += 4 - (tx->len & 3);
+            }
             tx->can_id = 0x42;
-            tx->channel = 0;
             tx->dlc = 4;
             tx->flags = 0;
-            tx->track_id = 0;
+            tx->track_id = track_id++;
             tx->data[0] = 0xde;
             tx->data[1] = 0xad;
             tx->data[2] = 0xbe;
             tx->data[3] = 0xef;
 
-            error = sc_dev_write(dev, dev->msg_pipe_ptr[0], (uint8_t*)tx, tx->len, &msg0_tx_ov);
+            error = sc_dev_write(dev, dev->can_epp, (uint8_t*)tx, tx->len, &msg_tx_ov);
             if (error) {
                 if (error != SC_DLL_ERROR_IO_PENDING) {
                     fprintf(stderr, "sc_dev_write failed: %s (%d)\n", sc_strerror(error), error);
@@ -424,57 +578,50 @@ send:
                 }
             }
 
-            error = sc_dev_result(dev, &transferred, &cmd_tx_ov, -1);
+            error = sc_dev_result(dev, &transferred, &msg_tx_ov, -1);
             if (error) {
                 fprintf(stderr, "sc_dev_result failed: %s (%d)\n", sc_strerror(error), error);
                 goto Exit;
             }
+
+            last_send = GetTickCount();
         } else {
             fprintf(stderr, "WaitForMultipleObjects failed: %s (%d)\n", sc_strerror(error), error);
             break;
         }
     }
 
-
 Exit:
     if (dev) {
         // cancel any pending I/O prior to event / buffer cleanup
-        for (size_t i = 0; i < _countof(msg0_read_events); ++i) {
-            if (msg0_read_ovs[i].hEvent) {
-                sc_dev_cancel(dev, &msg0_read_ovs[i]);
+        for (size_t i = 0; i < _countof(msg_read_events); ++i) {
+            if (msg_read_ovs[i].hEvent) {
+                sc_dev_cancel(dev, &msg_read_ovs[i]);
             }
         }
 
-        if (msg0_tx_ov.hEvent) {
-            sc_dev_cancel(dev, &msg0_tx_ov);
+        if (msg_tx_ov.hEvent) {
+            sc_dev_cancel(dev, &msg_tx_ov);
         }
+
+        sc_dev_ctx_uninit(&dev_ctx);
 
         sc_dev_close(dev);
     }
 
-    for (size_t i = 0; i < _countof(msg0_read_events); ++i) {
-        if (msg0_read_events[i]) {
-            CloseHandle(msg0_read_events[i]);
+    for (size_t i = 0; i < _countof(msg_read_events); ++i) {
+        if (msg_read_events[i]) {
+            CloseHandle(msg_read_events[i]);
         }
     }
 
-    if (msg0_tx_event) {
-        CloseHandle(msg0_tx_event);
+    if (msg_tx_event) {
+        CloseHandle(msg_tx_event);
     }
 
-    if (cmd_tx_event) {
-        CloseHandle(cmd_tx_event);
-    }
-
-    if (cmd_rx_event) {
-        CloseHandle(cmd_rx_event);
-    }
-
-    free(msg0_rx_buffers);
-    free(msg0_tx_buffer);
-    free(cmd_tx_buffer);
-    free(cmd_rx_buffer);
-
+    free(msg_rx_buffers);
+    free(msg_tx_buffer);
+    
     sc_uninit();
     return error;
 }

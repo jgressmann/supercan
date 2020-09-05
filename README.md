@@ -4,21 +4,23 @@
 
 What is this?
 
-This is project SuperCAN. An open source USB to CAN-FD protocol. 
-SuperCAN works with the open source [D5035-01](https://github.com/RudolphRiedel/USB_CAN-FD) 
+This is project SuperCAN. An open source USB to CAN-FD protocol.
+SuperCAN works with the open source [D5035-01](https://github.com/RudolphRiedel/USB_CAN-FD)
 hardware to form a working USB 2.0 to CAN-FD interface.
 
 # Status
 
-SuperCAN works on Windows 10. Linux drivers are being developed.
+SuperCAN supports Windows 10 and Linux. The protocol should be considered in alpha stadium as the driver code for both platforms is maturing. With the release of version 1.0.0 the protocol will be frozen.
 
-To use a SuperCAN device on Windows, simply plug it in.
+To use a SuperCAN device, simply plug it in.
 
 ## Build
 
-*Firmware* [![Build status](https://ci.appveyor.com/api/projects/status/i398eskxl418rwf9?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-firmware)
-*Windows* [![Build status](https://ci.appveyor.com/api/projects/status/p25qholxtadg71ej?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-windows)
-
+Build        | Status
+------------ | -------------
+*Firmware*   | [![Build status](https://ci.appveyor.com/api/projects/status/i398eskxl418rwf9?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-firmware)
+*Linux*      | [![Build status](https://ci.appveyor.com/api/projects/status/knw9udgvlal4u3b0?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-linux)
+*Windows*    | [![Build status](https://ci.appveyor.com/api/projects/status/p25qholxtadg71ej?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-windows)
 
 
 
@@ -32,12 +34,13 @@ Clone this repository and initialize the submodules.
 $ git submodule update --init --recursive
 ```
 
-You will need the the ARM GNU toolchain. 
-On Debian derived Linux distribution `apt-get install gcc-arm-none-eabi` will get you set up.
 
 ## 1. Firmware
 
 SuperCAN uses a customized [TinyUSB](https://github.com/hathach/tinyusb) stack.
+
+You will need the the ARM GNU toolchain.
+On Debian derived Linux distribution `apt-get install gcc-arm-none-eabi` will get you set up.
 
 ### Options
 
@@ -53,10 +56,10 @@ If you have a debugger probe such as SEGGER's J-Link you can choose any option. 
 
 ```
 $ cd Boards/examples/device/supercan
-$ VERBOSE=1 make V=1 BOARD=d5035-01 HWREV=2 flash-jlink
+$ make V=1 BOARD=d5035-01 HWREV=3 flash-jlink
 ```
 
-This creates and flashes the firmware file. Make sure to replace _HWREV=2_ with the version of the board you are using.
+This creates and flashes the firmware file. Make sure to replace _HWREV=3_ with the version of the board you are using.
 
 ### 2. Build and flash SuperCAN and SuperDFU (bootloader)
 
@@ -70,16 +73,16 @@ This option installs the SuperDFU  bootloader on the device. SuperDFU implements
 
 ```
 $ cd Boards/examples/device/atsame51_dfu
-$ VERBOSE=1 make V=1 BOARD=d5035-01 HWREV=2 BOOTLOADER=1 flash-jlink
+$ make V=1 BOARD=d5035-01 HWREV=3 BOOTLOADER=1 flash-jlink
 ```
 
-This creates and flashes the bootloader. Make sure to replace _HWREV=2_ with the revision of the board you are using.
+This creates and flashes the bootloader. Make sure to replace _HWREV=3_ with the revision of the board you are using.
 
 Next, flash SuperCAN using these steps
 
 ```
 $ cd Boards/examples/device/supercan
-$ VERBOSE=1 make V=1 BOARD=d5035-01 HWREV=2 APP=1 flash-dfu
+$ make V=1 BOARD=d5035-01 HWREV=3 APP=1 VID=4243 PID=1 flash-dfu
 ```
 
 ### 3. Build and upload SuperCAN through SuperDFU
@@ -94,7 +97,7 @@ Build the SuperCAN DFU file
 
 ```
 $ cd Boards/examples/device/supercan
-$ VERBOSE=1 make V=1 BOARD=d5035-01 HWREV=2 APP=1 VID=4243 PID=1 dfu
+$ make V=1 BOARD=d5035-01 HWREV=3 APP=1 VID=4243 PID=1 dfu
 ```
 
 Ensure _HWREV_ matches the board you are using.
@@ -111,6 +114,9 @@ Simply build the Visual Studio solution in the Windows folder. I use Visual Stud
 
 The solution contains code for a demo application that sends and dumps CAN traffic.
 
+## 3. Linux
+
+To build the Linux kernel module follow [these instructions](Linux/supercan_usb-0.1.0/README.md).
 
 # License
 
