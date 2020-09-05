@@ -59,7 +59,8 @@ extern "C" {
  * SuperCAN uses bulk endpoints only. Endpoints must be paired (in/out).
  * On an interface, the first endpoint pair must be the configuration channel. If there is
  * another endpoint pair, this endpoint pair is assumed to be the CAN channel. Else CAN
- * shares the configuration channel. This has implications for the application.
+ * shares the configuration channel. This has implications for the application and is
+ * current not implemented.
  *
  */
 
@@ -75,11 +76,13 @@ extern "C" {
 #define SC_MSG_HELLO_HOST       0x02    ///< Device -> Host. See SC_MSG_HELLO_DEVICE.
 #define SC_MSG_DEVICE_INFO      0x03    ///< Host <-> Device. Query / Send device information.
 #define SC_MSG_CAN_INFO         0x04    ///< Host <-> Device. Query / Send CAN information.
+#define SC_MSG_FILTER_INFO      0x05    ///< Host <-> Device. Query / Send CAN message filter information.
 
-#define SC_MSG_BITTIMING        0x10    ///< Host <-> Device. Configures bittimings. Device responds with SC_MSG_ERROR
-#define SC_MSG_MODE             0x11    ///< Host <-> Device. Sets the device mode. Device responds with SC_MSG_ERROR
-#define SC_MSG_FEATURES         0x12    ///< Host <-> Device. Sets device features. Device responds with SC_MSG_ERROR
-#define SC_MSG_BUS              0x13    ///< Host <-> Device. Go on / off bus. Device responds with SC_MSG_ERROR
+#define SC_MSG_NM_BITTIMING     0x10    ///< Host <-> Device. Configures nominal bittimings. Device responds with SC_MSG_ERROR
+#define SC_MSG_DT_BITTIMING     0x11    ///< Host <-> Device. Configures data bittimings. Device responds with SC_MSG_ERROR
+
+#define SC_MSG_FEATURES         0x13    ///< Host <-> Device. Sets supported device features. Device responds with SC_MSG_ERROR
+#define SC_MSG_BUS              0x1e    ///< Host <-> Device. Go on / off bus. Device responds with SC_MSG_ERROR
 #define SC_MSG_ERROR            0x1f    ///< Device -> Host. Error code of last command.
 
 
@@ -95,10 +98,11 @@ extern "C" {
 #define SC_BYTE_ORDER_BE        1
 
 #define SC_FEATURE_FLAG_FDF             0x0001 ///< Device supports CAN-FD standard.
-#define SC_FEATURE_FLAG_EHD             0x0002 ///< Device supports disabling protocol exception handling. When disabled, a CAN error frame will be transmitted (during normal operation)
-#define SC_FEATURE_FLAG_TXR             0x0004 ///< Device supports CAN frame transmission receipts.
+#define SC_FEATURE_FLAG_EHD             0x0002 ///< Device supports disabling protocol exception handling in CAN-FD mode. When disabled, a CAN error frame will be transmitted (during normal operation) instead of switching from receiver to integrating node state.
+#define SC_FEATURE_FLAG_DAR             0x0004 ///< Device supports disabling of automatic re-transmissions. When disabled, a CAN frame that has lost arbitration or was interrupted by an bus error will not be re-transmitted.
 #define SC_FEATURE_FLAG_FLT             0x0008 ///< Device supports rx message filters
-#define SC_FEATURE_FLAG_GEN             0x0010 ///< Device supports tx message generators
+#define SC_FEATURE_FLAG_TXR             0x0010 ///< Device supports CAN frame transmission receipts.
+#define SC_FEATURE_FLAG_GEN             0x0020 ///< Device supports tx message generators
 #define SC_FEATURE_FLAG_MON_MODE        0x0100 ///< Device supports monitoring mode.
 #define SC_FEATURE_FLAG_RES_MODE        0x0200 ///< Device supports restricted mode.
 #define SC_FEATURE_FLAG_EXT_LOOP_MODE   0x0400 ///< Device supports external loopback mode. Transmitted messges are treated as received messages.
@@ -138,15 +142,11 @@ extern "C" {
 
 
 /**
- * Modes set with SC_MSG_MODE
+ * Features manipulated with SC_MSG_FEATURE
  */
-#define SC_MODE_NORMAL          0x00 ///< Normal mode of operation
-#define SC_MODE_MONITORING      0x01 ///< Bus monitoring mode (ISO 11898-1, 10.12 Bus monitoring)
-#define SC_MODE_RESTRICTED      0x02 ///< Restricted mode
-#define SC_MODE_EXT_LOOPBACK    0x03 ///< External loopback mode
-#define SC_MODE_FLAG_FDF        0x80 ///< Enables CAN-FD frame format
+#define SC_FEAT_OP_CLEAR        0x00 ///< Clear optional features
+#define SC_FEAT_OP_OR           0x01 ///< Or (add) features
 
-#define SC_MODE_MASK            0x7f ///< Mask of mode
 
 /**
  * Command error codes
@@ -154,8 +154,9 @@ extern "C" {
 #define SC_ERROR_UNKNOWN       -1 ///< Unknown error
 #define SC_ERROR_NONE           0 ///< No error
 #define SC_ERROR_SHORT          1 ///< Message too short
-#define SC_ERROR_PARAM          2 ///< Requested feature / setting not supported
-#define SC_ERROR_MODE           3 ///< Request cannot be processed in current device mode
+#define SC_ERROR_PARAM          2 ///< Invalid parameter in request
+#define SC_ERROR_BUSY           3 ///< Request cannot be processed currently. This typically happens when the device is on bus.
+#define SC_ERROR_UNSUPPORTED    4 ///< Feature not supported
 
 
 struct sc_msg_header {
@@ -197,6 +198,8 @@ struct sc_msg_error {
 struct sc_msg_dev_info {
     uint8_t id;
     uint8_t len;
+    uint16_t feat_perm;    ///< Features permanently enabled (cannot be be cleared with SC_MSG_FEATURES)
+    uint16_t feat_conf;    ///< Features enabled through configuration (SC_MSG_FEATURES)
     uint8_t unused;
     uint8_t sn_len;
     uint8_t sn_bytes[16];
@@ -210,9 +213,8 @@ struct sc_msg_dev_info {
 struct sc_msg_can_info {
     uint8_t id;
     uint8_t len;
-    uint16_t features;
-    uint32_t can_clk_hz;
     uint16_t msg_buffer_size;
+    uint32_t can_clk_hz;
     uint16_t nmbt_brp_max;
     uint16_t nmbt_tseg1_max;
     uint8_t nmbt_tseg1_min;
@@ -229,26 +231,36 @@ struct sc_msg_can_info {
     uint8_t dtbt_tseg2_max;
     uint8_t tx_fifo_size;
     uint8_t rx_fifo_size;
+    uint8_t unused[2];
+} SC_PACKED;
+
+struct sc_msg_filter_info {
+    uint8_t id;
+    uint8_t len;
+    uint8_t unused0[2];
 } SC_PACKED;
 
 struct sc_msg_config {
     uint8_t id;
     uint8_t len;
-    uint8_t unused[2];
-    uint32_t args[1];
+    uint16_t arg;
+} SC_PACKED;
+
+struct sc_msg_features {
+    uint8_t id;
+    uint8_t len;
+    uint8_t unused;
+    uint8_t op;
+    uint32_t arg;
 } SC_PACKED;
 
 struct sc_msg_bittiming {
     uint8_t id;
     uint8_t len;
-    uint8_t nmbt_sjw;
-    uint8_t nmbt_tseg2;
-    uint16_t nmbt_brp;
-    uint16_t nmbt_tseg1;
-    uint8_t dtbt_brp;
-    uint8_t dtbt_sjw;
-    uint8_t dtbt_tseg1;
-    uint8_t dtbt_tseg2;
+    uint8_t sjw;
+    uint8_t tseg2;
+    uint16_t brp;
+    uint16_t tseg1;
 } SC_PACKED;
 
 struct sc_msg_can_status {
@@ -309,6 +321,7 @@ enum {
     sc_static_assert_sc_msg_can_status_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_status) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_config_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_config) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_can_info_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_info) & 0x3) == 0 ? 1 : -1]),
+    sc_static_assert_sc_msg_features_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_features) & 0x3) == 0 ? 1 : -1]),
 };
 
 #ifdef __cplusplus

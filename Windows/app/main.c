@@ -258,6 +258,7 @@ int main(int argc, char** argv)
     // fetch device info
     {
         struct sc_msg_req* req = (struct sc_msg_req*)dev_ctx.cmd_tx_buffer;
+        memset(req, 0, sizeof(*req));
         req->id = SC_MSG_DEVICE_INFO;
         req->len = sizeof(*req);
         size_t rep_len;
@@ -273,6 +274,11 @@ int main(int argc, char** argv)
         }
 
         memcpy(&dev_info, dev_ctx.cmd_rx_buffer, sizeof(dev_info));
+
+        dev_info.feat_perm = dev->dev_to_host16(dev_info.feat_perm);
+        dev_info.feat_conf = dev->dev_to_host16(dev_info.feat_conf);
+
+        fprintf(stdout, "device features perm=%#04x conf=%#04x\n", dev_info.feat_perm, dev_info.feat_conf);
 
         for (size_t i = 0; i < min((size_t)dev_info.sn_len, _countof(serial_str) - 1); ++i) {
             snprintf(&serial_str[i * 2], 3, "%02x", dev_info.sn_bytes[i]);
@@ -290,6 +296,7 @@ int main(int argc, char** argv)
     // fetch can info
     {
         struct sc_msg_req* req = (struct sc_msg_req*)dev_ctx.cmd_tx_buffer;
+        memset(req, 0, sizeof(*req));
         req->id = SC_MSG_CAN_INFO;
         req->len = sizeof(*req);
         size_t rep_len;
@@ -307,14 +314,20 @@ int main(int argc, char** argv)
         memcpy(&can_info, dev_ctx.cmd_rx_buffer, sizeof(can_info));
 
         can_info.can_clk_hz = dev->dev_to_host32(can_info.can_clk_hz);
-        can_info.features = dev->dev_to_host16(can_info.features);
         can_info.msg_buffer_size = dev->dev_to_host16(can_info.msg_buffer_size);
         can_info.nmbt_brp_max = dev->dev_to_host16(can_info.nmbt_brp_max);
         can_info.nmbt_tseg1_max = dev->dev_to_host16(can_info.nmbt_tseg1_max);
     }
 
+    // allocate buffers
     msg_rx_buffers = malloc(can_info.msg_buffer_size * _countof(msg_read_events));
     if (!msg_rx_buffers) {
+        error = SC_DLL_ERROR_OUT_OF_MEM;
+        goto Exit;
+    }
+    
+    msg_tx_buffer = malloc(can_info.msg_buffer_size);
+    if (!msg_tx_buffer) {
         error = SC_DLL_ERROR_OUT_OF_MEM;
         goto Exit;
     }
@@ -328,47 +341,71 @@ int main(int argc, char** argv)
         }
     }
 
-    // allocate buffers
-    msg_tx_buffer = malloc(can_info.msg_buffer_size);
-    if (!msg_tx_buffer) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Exit;
-    }
+    
 
+    // setup device
     {
+        unsigned cmd_count = 0;
         PUCHAR cmd_tx_ptr = dev_ctx.cmd_tx_buffer;
-        // set bittiming
+
+        // clear features
+        struct sc_msg_features* feat = (struct sc_msg_features*)cmd_tx_ptr;
+        memset(feat, 0, sizeof(*feat));
+        feat->id = SC_MSG_FEATURES;
+        feat->len = sizeof(*feat);
+        feat->op = SC_FEAT_OP_CLEAR;
+        cmd_tx_ptr += feat->len;
+        ++cmd_count;
+
+        feat = (struct sc_msg_features*)cmd_tx_ptr;
+        memset(feat, 0, sizeof(*feat));
+        feat->id = SC_MSG_FEATURES;
+        feat->len = sizeof(*feat);
+        feat->op = SC_FEAT_OP_OR;
+        // try to enable CAN-FD and TXR
+        feat->arg = (dev_info.feat_perm | dev_info.feat_conf) & (SC_FEATURE_FLAG_FDF | SC_FEATURE_FLAG_TXR);
+        cmd_tx_ptr += feat->len;
+        ++cmd_count;
+
+        
+        // set nominal bittiming
         struct sc_msg_bittiming* bt = (struct sc_msg_bittiming*)cmd_tx_ptr;
-        bt->id = SC_MSG_BITTIMING;
+        memset(bt, 0, sizeof(*bt));
+        bt->id = SC_MSG_NM_BITTIMING;
         bt->len = sizeof(*bt);
-        cmd_tx_ptr += bt->len;
-
-        // 500KBit/2MBit @80MHz CAN clock
+        // 500KBit@80MHz CAN clock
         // nominal brp=1 sjw=1 tseg1=139 tseg2=20 bitrate=500000 sp=874/1000
-        // data brp = 1 sjw = 1 tseg1 = 29 tseg2 = 10 bitrate = 2000000 sp = 743 / 1000       
-        bt->nmbt_brp = dev->dev_to_host16(1);
-        bt->nmbt_sjw = 1;
-        bt->nmbt_tseg1 = dev->dev_to_host16(139);
-        bt->nmbt_tseg2 = 20;
-        bt->dtbt_brp = 1;
-        bt->dtbt_sjw = 1;
-        bt->dtbt_tseg1 = 29;
-        bt->dtbt_tseg2 = 10;
+        bt->brp = dev->dev_to_host16(1);
+        bt->sjw = 1;
+        bt->tseg1 = dev->dev_to_host16(139);
+        bt->tseg2 = 20;
+        cmd_tx_ptr += bt->len;
+        ++cmd_count;
 
-        // CAN-FD mode
-        struct sc_msg_config* mode = (struct sc_msg_config*)cmd_tx_ptr;
-        mode->id = SC_MSG_MODE;
-        mode->len = sizeof(*mode);
-        cmd_tx_ptr += mode->len;
+        if ((dev_info.feat_perm | dev_info.feat_conf) & SC_FEATURE_FLAG_FDF) {
+            // CAN-FD capable -> configure data bitrate
 
-        mode->args[0] = SC_MODE_NORMAL | SC_MODE_FLAG_FDF;
+            bt = (struct sc_msg_bittiming*)cmd_tx_ptr;
+            memset(bt, 0, sizeof(*bt));
+            bt->id = SC_MSG_DT_BITTIMING;
+            bt->len = sizeof(*bt);
+            // 2MBit@80MHz CAN clock
+            // data brp = 1 sjw = 1 tseg1 = 29 tseg2 = 10 bitrate = 2000000 sp = 743 / 1000       
+            bt->brp = 1;
+            bt->sjw = 1;
+            bt->tseg1 = 29;
+            bt->tseg2 = 10;
+            cmd_tx_ptr += bt->len;
+            ++cmd_count;
+        }        
 
         struct sc_msg_config* bus_on = (struct sc_msg_config*)cmd_tx_ptr;
+        memset(bus_on, 0, sizeof(*bus_on));
         bus_on->id = SC_MSG_BUS;
         bus_on->len = sizeof(*bus_on);
+        bus_on->arg = dev->dev_to_host16(1);
         cmd_tx_ptr += bus_on->len;
-
-        bus_on->args[0] = 1;
+        ++cmd_count;
 
         size_t rep_len;
         error = sc_dev_ctx_send_receive_cmd(&dev_ctx, cmd_tx_ptr - dev_ctx.cmd_tx_buffer, &rep_len);
@@ -377,36 +414,25 @@ int main(int argc, char** argv)
         }
 
 
-        if (rep_len < 3 * sizeof(struct sc_msg_error)) {
+        if (rep_len < cmd_count * sizeof(struct sc_msg_error)) {
             fprintf(stderr, "failed to setup device\n");
             error = -1;
             goto Exit;
         }
 
-        struct sc_msg_error* error_msg = (struct sc_msg_error*)dev_ctx.cmd_rx_buffer;
-        if (SC_ERROR_NONE != error_msg->error) {
-            fprintf(stderr, "failed to set bittiming: %d\n", error_msg->error);
-            error = -1;
-            goto Exit;
-        }
-
-        ++error;
-        if (SC_ERROR_NONE != error_msg->error) {
-            fprintf(stderr, "failed to set mode: %d\n", error_msg->error);
-            error = -1;
-            goto Exit;
-        }
-
-        ++error;
-        if (SC_ERROR_NONE != error_msg->error) {
-            fprintf(stderr, "failed to go on bus: %d\n", error_msg->error);
-            error = -1;
-            goto Exit;
+        struct sc_msg_error* error_msgs = (struct sc_msg_error*)dev_ctx.cmd_rx_buffer;
+        for (unsigned i = 0; i < cmd_count; ++i) {            
+            struct sc_msg_error* error_msg = &error_msgs[i];
+            if (SC_ERROR_NONE != error_msg->error) {
+                fprintf(stderr, "cmd index %u failed: %d\n", i, error_msg->error);
+                error = -1;
+                goto Exit;
+            }
         }
     }
 
-    const DWORD WAIT_TIMEOUT_MS = 200;
-    DWORD last_send = 0;
+    const DWORD WAIT_TIMEOUT_MS = 500;
+    DWORD last_send = GetTickCount();
     while (1) {
         DWORD result = WaitForMultipleObjects(_countof(msg_read_events), msg_read_events, FALSE, WAIT_TIMEOUT_MS);
         if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + _countof(msg_read_events)) {
@@ -532,6 +558,9 @@ send:
             tx = (struct sc_msg_can_tx*)msg_tx_buffer;
             tx->id = SC_MSG_CAN_TX;
             tx->len = sizeof(*tx) + 4;
+            if (tx->len & 3) {
+                tx->len += 4 - (tx->len & 3);
+            }
             tx->can_id = 0x42;
             tx->dlc = 4;
             tx->flags = 0;
@@ -540,10 +569,6 @@ send:
             tx->data[1] = 0xad;
             tx->data[2] = 0xbe;
             tx->data[3] = 0xef;
-
-            if (tx->len & 3) {
-                tx->len += 4 - (tx->len & 3);
-            }
 
             error = sc_dev_write(dev, dev->can_epp, (uint8_t*)tx, tx->len, &msg_tx_ov);
             if (error) {
