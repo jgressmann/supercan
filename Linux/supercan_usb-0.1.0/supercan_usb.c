@@ -327,6 +327,51 @@ static int sc_can_close(struct net_device *netdev)
 	return 0;
 }
 
+
+static int sc_usb_process_can_error(struct sc_chan *ch, struct sc_msg_can_error *error)
+{
+	struct net_device *netdev = ch->netdev;
+	struct sc_net_priv *net_priv = netdev_priv(netdev);
+	struct net_device_stats *net_stats = &netdev->stats;
+	struct can_device_stats *can_stats = &net_priv->can.can_stats;
+	struct sk_buff *skb = NULL;
+	struct can_frame *cf = NULL;
+
+	return 0;
+
+	if (unlikely(error->len < sizeof(*error))) {
+		netdev_err(netdev, "short sc_msg_can_error (%u)\n", error->len);
+		return -ETOOSMALL;
+	}
+
+	skb = alloc_can_err_skb(netdev, &cf);
+	if (unlikely(!skb))
+		return -ENOMEM;
+
+
+	if (SC_CAN_ERROR_ACK == error->error)
+		cf->can_id |= CAN_ERR_ACK | CAN_ERR_BUSERROR;
+	else {
+		cf->can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
+		cf->data[2] |= sc_usb_map_proto_error_type(error->error);
+		if (error->flags & SC_CAN_ERROR_FLAG_RXTX_TX)
+			cf->data[2] |= CAN_ERR_PROT_TX;
+	}
+
+	++can_stats->bus_error;
+
+	if (net_ratelimit())
+		netdev_dbg(netdev, "error frame %08x: %02x%02x%02x%02x%02x%02x%02x%02x\n",
+			cf->can_id, cf->data[0], cf->data[1], cf->data[2], cf->data[3],
+			cf->data[4], cf->data[5], cf->data[6], cf->data[7]);
+
+	++net_stats->rx_packets;
+	net_stats->rx_bytes += cf->can_dlc;
+	netif_rx(skb);
+
+	return 0;
+}
+
 static int sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_status *status)
 {
 	struct net_device *netdev = ch->netdev;
@@ -341,7 +386,7 @@ static int sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_statu
 		.data = {0, 0, 0, 0, 0, 0, 0, 0},
 	};
 	enum can_state curr_state = 0, next_state = 0;
-	u16 rx_lost = 0;
+	u16 rx_lost = 0, tx_dropped = 0;
 
 	if (unlikely(status->len < sizeof(*status))) {
 		netdev_err(netdev, "short sc_msg_can_status (%u)\n", status->len);
@@ -373,7 +418,7 @@ static int sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_statu
 	sc_can_ch_update_ktime_from_us(ch, ch->usb_priv->host_to_dev32(status->timestamp_us));
 
 	rx_lost = ch->usb_priv->host_to_dev16(status->rx_lost);
-
+	tx_dropped = ch->usb_priv->host_to_dev16(status->tx_dropped);
 
 	if (unlikely(rx_lost)) {
 		if (net_ratelimit())
@@ -383,39 +428,47 @@ static int sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_statu
 		f.data[1] |= CAN_ERR_CRTL_RX_OVERFLOW;
 	}
 
-	if (unlikely(SC_CAN_ERROR_NONE != status->arbt_phase_error)) {
-		if (SC_CAN_ERROR_ACK == status->arbt_phase_error)
-			f.can_id |= CAN_ERR_ACK | CAN_ERR_BUSERROR;
-		else {
-			f.can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
-			f.data[2] |= sc_usb_map_proto_error_type(status->arbt_phase_error);
-			if (SC_CAN_STATE_TX == status->node_state)
-				f.data[2] |= CAN_ERR_PROT_TX;
-		}
+	if (unlikely(tx_dropped)) {
+		if (net_ratelimit())
+			netdev_dbg(netdev, "tx dropped %u frames\n", tx_dropped);
+		net_stats->tx_dropped += tx_dropped;
+		f.can_id |= CAN_ERR_CRTL;
+		f.data[1] |= CAN_ERR_CRTL_TX_OVERFLOW;
 	}
 
-	if (unlikely(SC_CAN_ERROR_NONE != status->data_phase_error)) {
-		if (SC_CAN_ERROR_ACK == status->data_phase_error)
-			f.can_id |= CAN_ERR_ACK | CAN_ERR_BUSERROR;
-		else {
-			f.can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
-			f.data[2] |= sc_usb_map_proto_error_type(status->data_phase_error);
-			if (SC_CAN_STATE_TX == status->node_state)
-				f.data[2] |= CAN_ERR_PROT_TX;
-		}
-	}
+	// if (unlikely(SC_CAN_ERROR_NONE != status->arbt_phase_error)) {
+	// 	if (SC_CAN_ERROR_ACK == status->arbt_phase_error)
+	// 		f.can_id |= CAN_ERR_ACK | CAN_ERR_BUSERROR;
+	// 	else {
+	// 		f.can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
+	// 		f.data[2] |= sc_usb_map_proto_error_type(status->arbt_phase_error);
+	// 		if (SC_CAN_STATE_TX == status->node_state)
+	// 			f.data[2] |= CAN_ERR_PROT_TX;
+	// 	}
+	// }
 
-	if (ch->bec.rxerr < status->rx_errors || ch->bec.txerr < status->tx_errors)
-		f.can_id |= CAN_ERR_BUSERROR;
+	// if (unlikely(SC_CAN_ERROR_NONE != status->data_phase_error)) {
+	// 	if (SC_CAN_ERROR_ACK == status->data_phase_error)
+	// 		f.can_id |= CAN_ERR_ACK | CAN_ERR_BUSERROR;
+	// 	else {
+	// 		f.can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
+	// 		f.data[2] |= sc_usb_map_proto_error_type(status->data_phase_error);
+	// 		if (SC_CAN_STATE_TX == status->node_state)
+	// 			f.data[2] |= CAN_ERR_PROT_TX;
+	// 	}
+	// }
+
+	// if (ch->bec.rxerr < status->rx_errors || ch->bec.txerr < status->tx_errors) {
+	// 	f.can_id |= CAN_ERR_BUSERROR;
+	// }
 
 
 	f.data[5] = status->rx_errors;
 	f.data[6] = status->tx_errors;
-	f.data[7] = (status->arbt_phase_error << 4) | status->data_phase_error;
 
 
-	if (f.can_id & CAN_ERR_BUSERROR)
-		++can_stats->bus_error;
+	// if (f.can_id & CAN_ERR_BUSERROR)
+	// 	++can_stats->bus_error;
 
 
 	ch->bec.rxerr = status->rx_errors;
@@ -444,13 +497,9 @@ static int sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_statu
 
 	if (next_state != curr_state) {
 		netdev_info(netdev, "can bus status 0x%02x -> 0x%02x\n", curr_state, next_state);
-		switch (next_state) {
-		case CAN_STATE_BUS_OFF:
+		can_change_state(netdev, &f, next_state, next_state);
+		if (CAN_STATE_BUS_OFF == next_state) {
 			can_bus_off(netdev);
-			break;
-		default:
-			can_change_state(netdev, cf, next_state, next_state);
-			break;
 		}
 	}
 
@@ -646,6 +695,8 @@ static int sc_usb_process_msg(struct sc_chan *ch, struct sc_msg_header *hdr)
 	switch (hdr->id) {
 	case SC_MSG_CAN_STATUS:
 		return sc_usb_process_can_status(ch, (struct sc_msg_can_status *)hdr);
+	case SC_MSG_CAN_ERROR:
+		return sc_usb_process_can_error(ch, (struct sc_msg_can_error *)hdr);
 	case SC_MSG_CAN_RX:
 		return sc_usb_process_can_rx(ch, (struct sc_msg_can_rx *)hdr);
 		break;
