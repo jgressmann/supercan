@@ -337,9 +337,7 @@ static int sc_usb_process_can_error(struct sc_chan *ch, struct sc_msg_can_error 
 	struct sk_buff *skb = NULL;
 	struct can_frame *cf = NULL;
 
-	return 0;
-
-	if (unlikely(error->len < sizeof(*error))) {
+if (unlikely(error->len < sizeof(*error))) {
 		netdev_err(netdev, "short sc_msg_can_error (%u)\n", error->len);
 		return -ETOOSMALL;
 	}
@@ -436,40 +434,8 @@ static int sc_usb_process_can_status(struct sc_chan *ch, struct sc_msg_can_statu
 		f.data[1] |= CAN_ERR_CRTL_TX_OVERFLOW;
 	}
 
-	// if (unlikely(SC_CAN_ERROR_NONE != status->arbt_phase_error)) {
-	// 	if (SC_CAN_ERROR_ACK == status->arbt_phase_error)
-	// 		f.can_id |= CAN_ERR_ACK | CAN_ERR_BUSERROR;
-	// 	else {
-	// 		f.can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
-	// 		f.data[2] |= sc_usb_map_proto_error_type(status->arbt_phase_error);
-	// 		if (SC_CAN_STATE_TX == status->node_state)
-	// 			f.data[2] |= CAN_ERR_PROT_TX;
-	// 	}
-	// }
-
-	// if (unlikely(SC_CAN_ERROR_NONE != status->data_phase_error)) {
-	// 	if (SC_CAN_ERROR_ACK == status->data_phase_error)
-	// 		f.can_id |= CAN_ERR_ACK | CAN_ERR_BUSERROR;
-	// 	else {
-	// 		f.can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
-	// 		f.data[2] |= sc_usb_map_proto_error_type(status->data_phase_error);
-	// 		if (SC_CAN_STATE_TX == status->node_state)
-	// 			f.data[2] |= CAN_ERR_PROT_TX;
-	// 	}
-	// }
-
-	// if (ch->bec.rxerr < status->rx_errors || ch->bec.txerr < status->tx_errors) {
-	// 	f.can_id |= CAN_ERR_BUSERROR;
-	// }
-
-
 	f.data[5] = status->rx_errors;
 	f.data[6] = status->tx_errors;
-
-
-	// if (f.can_id & CAN_ERR_BUSERROR)
-	// 	++can_stats->bus_error;
-
 
 	ch->bec.rxerr = status->rx_errors;
 	ch->bec.txerr = status->tx_errors;
@@ -810,6 +776,7 @@ static void sc_usb_rx_completed(struct urb *urb)
 				sc_usb_process_rx_buffer(ch, (u8*)urb->transfer_buffer, (unsigned)urb->actual_length);
 		}
 
+		BUG_ON(urb->transfer_buffer_length != ch->usb_priv->msg_buffer_size);
 		rc = usb_submit_urb(urb, GFP_ATOMIC);
 		if (unlikely(rc)) {
 			dev_dbg(&ch->usb_priv->intf->dev, "rx URB index %u\n", (unsigned)(urb_data - ch->rx_urb_ptr));
