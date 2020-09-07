@@ -40,7 +40,7 @@ $ git submodule update --init --recursive
 SuperCAN uses a customized [TinyUSB](https://github.com/hathach/tinyusb) stack.
 
 You will need the the ARM GNU toolchain.
-On Debian derived Linux distribution `apt-get install gcc-arm-none-eabi` will get you set up.
+On Debian derived Linux distributions `apt-get install gcc-arm-none-eabi` will get you set up.
 
 ### Options
 
