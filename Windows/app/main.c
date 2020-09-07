@@ -495,6 +495,45 @@ int main(int argc, char** argv)
                     }
                     fprintf(stdout, "\n");
                 } break;
+                case SC_MSG_CAN_ERROR: {
+                    struct sc_msg_can_error const* error_msg = (struct sc_msg_can_error const*)msg;
+                    if (msg->len < sizeof(*error_msg)) {
+                        fprintf(stderr, "malformed sc_msg_can_error\n");
+                        break;
+                    }
+
+                    uint32_t timestamp_us = dev->dev_to_host32(error_msg->timestamp_us);
+                    if (SC_CAN_ERROR_NONE != error_msg->error) {
+                        fprintf(
+                            stdout, "%s %s ", 
+                            (error_msg->flags & SC_CAN_ERROR_FLAG_RXTX_TX) ? "tx" : "rx",
+                            (error_msg->flags& SC_CAN_ERROR_FLAG_NMDT_DT) ? "data" : "arbitration");
+                        switch (error_msg->error) {
+                        case SC_CAN_ERROR_STUFF:
+                            fprintf(stdout, "stuff ");
+                            break;
+                        case SC_CAN_ERROR_FORM:
+                            fprintf(stdout, "form ");
+                            break;
+                        case SC_CAN_ERROR_ACK:
+                            fprintf(stdout, "ack ");
+                            break;
+                        case SC_CAN_ERROR_BIT1:
+                            fprintf(stdout, "bit1 ");
+                            break;
+                        case SC_CAN_ERROR_BIT0:
+                            fprintf(stdout, "bit0 ");
+                            break;
+                        case SC_CAN_ERROR_CRC:
+                            fprintf(stdout, "crc ");
+                            break;
+                        default:
+                            fprintf(stdout, "<unknown> ");
+                            break;
+                        }
+                        fprintf(stdout, "error\n");
+                    }
+                } break;
                 case SC_MSG_CAN_RX: {
                     struct sc_msg_can_rx const *rx = (struct sc_msg_can_rx const*)msg;
                     uint32_t can_id = dev->dev_to_host32(rx->can_id);

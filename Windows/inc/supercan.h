@@ -91,6 +91,7 @@ extern "C" {
 #define SC_MSG_CAN_RX           0x21    ///< Device -> Host. Received CAN frame.
 #define SC_MSG_CAN_TX           0x22    ///< Host -> Device. Send CAN frame.
 #define SC_MSG_CAN_TXR          0x23    ///< Device -> Host. CAN frame transmission receipt.
+#define SC_MSG_CAN_ERROR        0x24    ///< Device -> Host. CAN frame error.
 
 #define SC_MSG_USER_OFFSET      0x80    ///< Custom device messages
 
@@ -129,6 +130,9 @@ extern "C" {
 #define SC_CAN_ERROR_BIT0       0x5 ///< Bit0 Error: During the transmission of a message (or acknowledge bit, or active error flag, or overload flag), the device wanted to send a dominant level (data or identifier bit logical value ‘0’), but the monitored bus value was recessive. During Bus_Off recovery this status is set each time a sequence of 11 recessive bits have been monitored. This enables the CPU to monitor the proceeding of the Bus_Off recovery sequence (indicating the bus is not stuck at dominant or continuously disturbed).
 #define SC_CAN_ERROR_CRC        0x6 ///< CRC Error: The CRC checksum of a received message was incorrect. The CRC of an incoming message does not match with the CRC calculated from the received data.
 
+#define SC_CAN_ERROR_FLAG_RXTX_TX   0x1 ///< Error on transmit, if unset on receive.
+#define SC_CAN_ERROR_FLAG_NMDT_DT   0x2 ///< Error during data, if unset during arbitration.
+
 
 #define SC_CAN_STATE_SYNC       0x0 ///< Node is synchronizing on CAN communication.
 #define SC_CAN_STATE_IDLE       0x1 ///< Node is neither receiver nor transmitter.
@@ -139,6 +143,8 @@ extern "C" {
 
 
 #define SC_CAN_STATUS_FLAG_TXR_DESYNC       0x1 ///< no USB buffer space to queue TXR message
+#define SC_CAN_STATUS_FLAG_IRQ_QUEUE_FULL   0x2 ///< no space in interrupt -> task queue
+
 
 
 /**
@@ -266,19 +272,23 @@ struct sc_msg_bittiming {
 struct sc_msg_can_status {
     uint8_t id;
     uint8_t len;
-    uint8_t unused;
+    uint8_t flags;              ///< CAN bus status flags
     uint8_t bus_status;
     uint32_t timestamp_us;
     uint16_t rx_lost;           ///< messages CAN -> USB lost since last time due to full rx fifo
     uint16_t tx_dropped;        ///< messages USB -> CAN dropped since last time due of full tx fifo
-    uint8_t arbt_phase_error;
-    uint8_t data_phase_error;
-    uint8_t node_state;
-    uint8_t flags;              ///< CAN bus status flags
     uint8_t rx_errors;          ///< CAN rx error counter
     uint8_t tx_errors;          ///< CAN tx error counter
-    uint8_t tx_fifo_size;
-    uint8_t rx_fifo_size;
+    uint8_t rx_fifo_size;       ///< CAN rx fifo fill state
+    uint8_t tx_fifo_size;       ///< CAN tx fifo fill state
+} SC_PACKED;
+
+struct sc_msg_can_error {
+    uint8_t id;
+    uint8_t len;
+    uint8_t error;
+    uint8_t flags;
+    uint32_t timestamp_us;
 } SC_PACKED;
 
 struct sc_msg_can_rx {
@@ -322,6 +332,7 @@ enum {
     sc_static_assert_sc_msg_config_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_config) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_can_info_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_info) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_features_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_features) & 0x3) == 0 ? 1 : -1]),
+    sc_static_assert_sc_msg_can_error_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_error) & 0x3) == 0 ? 1 : -1]),
 };
 
 #ifdef __cplusplus
