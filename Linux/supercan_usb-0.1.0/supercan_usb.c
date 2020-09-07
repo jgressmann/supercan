@@ -78,8 +78,10 @@ struct sc_chan {
 	u8 *tx_cmd_buffer;
 	u8 *rx_cmd_buffer;              /* points into tx_cmd_buffer mem, don't free */
 	u8 *tx_urb_available_ptr;
+	u8 *msg_reassembly_ptr;
 	ktime_t device_time_now;
 	spinlock_t tx_lock;
+	unsigned msg_reassembly_count;
 	u32 device_time_base;
 	u8 cmd_epp;                     /* OBSOLETE */
 	u8 msg_epp;                     /* OBSOLETE */
@@ -323,6 +325,8 @@ static int sc_can_close(struct net_device *netdev)
 
 	ch->prev_rx_fifo_size = 0;
 	ch->prev_tx_fifo_size = 0;
+
+	ch->msg_reassembly_count = 0;
 
 	return 0;
 }
@@ -677,24 +681,55 @@ static int sc_usb_process_msg(struct sc_chan *ch, struct sc_msg_header *hdr)
 
 static void sc_usb_process_rx_buffer(struct sc_chan *ch, u8 *ptr, unsigned size)
 {
+	u8 *sptr = NULL;
+	u8 *eptr = NULL;
 	int error = 0;
-	u8 * const sptr = ptr;
-	u8 * const eptr = ptr + size;
+
+
+	BUG_ON(size > ch->usb_priv->msg_buffer_size);
+
+	if (unlikely(ch->msg_reassembly_count)) {
+		memcpy(ch->msg_reassembly_ptr + ch->msg_reassembly_count, ptr, size);
+		ch->msg_reassembly_count += size;
+		sptr = ch->msg_reassembly_ptr;
+		eptr = ch->msg_reassembly_ptr + ch->msg_reassembly_count;
+		size = ch->msg_reassembly_count;
+		ch->msg_reassembly_count = 0;
+	} else {
+		sptr = ptr;
+		eptr = ptr + size;
+	}
+
+	if (unlikely(size % SC_MSG_HEADER_LEN)) {
+		if (net_ratelimit())
+			netdev_warn(ch->netdev, "rx msg size %u not multiple of %u\n", size, (unsigned)SC_MSG_HEADER_LEN);
+	}
 
 	while (ptr + SC_MSG_HEADER_LEN <= eptr) {
 		struct sc_msg_header *hdr = (struct sc_msg_header *)ptr;
 
-		if (SC_MSG_EOF == hdr->id || !hdr->len) {
+		if (unlikely(SC_MSG_EOF == hdr->id || !hdr->len)) {
+			if (ptr == sptr) {
+				error = 1;
+				if (net_ratelimit())
+					netdev_dbg(ch->netdev, "EOF @ 0 of %u byte message\n", size);
+			}
 			ptr = eptr;
 			break;
 		}
 
 		if (unlikely(ptr + hdr->len > eptr)) {
-			dev_err_ratelimited(
-				&ch->usb_priv->intf->dev,
-				"short msg: offset=%u id=%02x, remaining %u bytes will be skipped\n",
-				(unsigned)(ptr - sptr), hdr->id, (unsigned)(eptr-ptr));
-			error = -ETOOSMALL;
+			if (net_ratelimit())
+					netdev_dbg(ch->netdev, "save %u bytes of %u payload for next frame\n", (unsigned)(eptr-ptr), size);
+			// dev_err_ratelimited(
+			// 	&ch->usb_priv->intf->dev,
+			// 	"short msg: offset=%u id=%02x, remaining %u bytes will be skipped\n",
+			// 	(unsigned)(ptr - sptr), hdr->id, (unsigned)(eptr-ptr));
+			// error = -ETOOSMALL;
+			// break;
+			ch->msg_reassembly_count = eptr - ptr;
+			memmove(ch->msg_reassembly_ptr, ptr, ch->msg_reassembly_count);
+			ptr = eptr;
 			break;
 		}
 
@@ -1141,6 +1176,11 @@ static void sc_can_chan_uninit(struct sc_chan *ch)
 		ch->rx_cmd_buffer = NULL;
 	}
 
+	if (ch->msg_reassembly_ptr) {
+		kfree(ch->msg_reassembly_ptr);
+		ch->msg_reassembly_ptr = NULL;
+	}
+
 	sc_can_chan_cleanup_urbs(ch);
 }
 
@@ -1278,6 +1318,12 @@ static int sc_can_chan_init(struct sc_chan *ch)
 
 	/* rx cmd buffer is part of tx cmd buffer */
 	ch->rx_cmd_buffer = ch->tx_cmd_buffer + ch->usb_priv->cmd_buffer_size;
+
+	ch->msg_reassembly_ptr = kmalloc(2 * ch->usb_priv->msg_buffer_size, GFP_KERNEL);
+	if (!ch->msg_reassembly_ptr) {
+		rc = -ENOMEM;
+		goto fail;
+	}
 
 	rc = sc_can_chan_alloc_urbs(ch);
 	if (rc)
