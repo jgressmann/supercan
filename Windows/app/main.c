@@ -148,7 +148,7 @@ static int sc_dev_ctx_send_receive_cmd(
         break;
     }
 
-    error = sc_dev_write(dev, dev->cmd_epp, ctx->cmd_tx_buffer, cmd_len, &ctx->cmd_tx_ov);
+    error = sc_dev_write(dev, dev->cmd_epp, ctx->cmd_tx_buffer, (ULONG)cmd_len, &ctx->cmd_tx_ov);
     switch (error) {
     case SC_DLL_ERROR_NONE:
     case SC_DLL_ERROR_IO_PENDING:
