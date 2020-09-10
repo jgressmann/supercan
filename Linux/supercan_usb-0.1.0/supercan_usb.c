@@ -1761,7 +1761,7 @@ MODULE_LICENSE("GPL v2");
 
 
 static const struct usb_device_id sc_usb_device_id_table[] = {
-	{ USB_DEVICE(0x4243, 0x0002) },
+	{ USB_DEVICE(0x1d50, 0x5035) },
 	{ }
 };
 
