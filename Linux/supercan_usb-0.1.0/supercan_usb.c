@@ -341,7 +341,7 @@ static int sc_usb_process_can_error(struct sc_chan *ch, struct sc_msg_can_error 
 	struct sk_buff *skb = NULL;
 	struct can_frame *cf = NULL;
 
-if (unlikely(error->len < sizeof(*error))) {
+	if (unlikely(error->len < sizeof(*error))) {
 		netdev_err(netdev, "short sc_msg_can_error (%u)\n", error->len);
 		return -ETOOSMALL;
 	}
