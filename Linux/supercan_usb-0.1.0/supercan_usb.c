@@ -346,6 +346,10 @@ static int sc_usb_process_can_error(struct sc_chan *ch, struct sc_msg_can_error 
 		return -ETOOSMALL;
 	}
 
+	if (unlikely(SC_CAN_ERROR_NONE == error->error))
+		return 0;
+
+
 	skb = alloc_can_err_skb(netdev, &cf);
 	if (unlikely(!skb))
 		return -ENOMEM;
