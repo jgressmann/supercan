@@ -22,7 +22,25 @@ Build        | Status
 *Linux*      | [![Build status](https://ci.appveyor.com/api/projects/status/knw9udgvlal4u3b0?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-linux)
 *Windows*    | [![Build status](https://ci.appveyor.com/api/projects/status/p25qholxtadg71ej?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-windows)
 
+# Firmware update
 
+This assumes you have a board with the SuperDFU bootloader already installed. If not, see below on how to build & flash the bootloader.
+
+## Prequisites
+
+Ensure you have `dfu-util` available on your system. Windows users can [download dfu-util binaries here](http://dfu-util.sourceforge.net/releases/). On a Debian derived distro such as Ubuntu, `apt install dfu-util` will get you set up.
+
+## Flashing
+
+### Linux
+
+```
+sudo dfu-util -R -D supercan.dfu
+```
+
+### Windows
+
+Please follow [these instructions](Windows/README.md).
 
 # Building
 
@@ -89,7 +107,7 @@ $ make V=1 HWREV=3 APP=1 flash-dfu
 
 #### Prequisites
 
-Ensure you have `python3` and `fwupd` installed. The latter provides dfu-tool.
+Ensure you have `python3` and `dfu-util` installed.
 
 #### Build
 
@@ -105,18 +123,21 @@ Ensure _HWREV_ matches the board you are using.
 Next, upload the DFU file to the board.
 ```
 $ cd Boards/examples/device/supercan
-$ sudo  dfu-tool write _build/build-d5035-01/d5035-01-firmware.dfu
+$ sudo dfu-util -R -D _build/build-d5035-01/d5035-01-firmware.dfu
 ```
 
-## 2. Windows API
+## 2. Windows API & demo app
 
 Simply build the Visual Studio solution in the Windows folder. I use Visual Studio Community 2019 which is available free of charge for non-commercial products (as of this writing).
 
 The solution contains code for a demo application that sends and dumps CAN traffic.
 
-## 3. Linux
+## 3. Linux socketcan driver
 
 To build the Linux kernel module follow [these instructions](Linux/supercan_usb-0.1.0/README.md).
+
+
+
 
 # License
 
