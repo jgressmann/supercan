@@ -23,7 +23,7 @@
 
 
 #define SC_PACKED __packed
-#include "supercan.h"
+#include "sc.h"
 
 #if defined(__LITTLE_ENDIAN)
 #define SC_NATIVE_BYTE_ORDER SC_BYTE_ORDER_LE

@@ -1,11 +1,19 @@
-# Building
+# DKMS setup
 
-Install `dkms` if you haven't already. Then, from `Linux/supercan_usb-0.1.0`, do
+Install `dkms` if you haven't already.
+
+## Add, build & install the kernel module
 
 ```
-make V=1 KERNELRELEASE=$(uname -r) -C /lib/modules/$(uname -r)/build M=$PWD
+$ <path to supercan>/Linux/dkms-init.sh
+$ sudo dkms add <path to supercan>/Linux/supercan_usb-<version>
+$ sudo dkms build supercan_usb/<version>
+$ sudo dkms install supercan_usb/<version>
+```
 
-sudo modprobe can-dev
-sudo rmmod supercan_usb 2>/dev/null || true && sudo insmod $PWD/supercan_usb.ko
+## Uninstall and remove the kernel module
+
+$ sudo dkms uninstall supercan_usb/<version>
+$ sudo dkms remove supercan_usb/<version> --all
 ```
 
