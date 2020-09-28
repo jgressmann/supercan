@@ -33,6 +33,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #ifndef _countof
 #   define _countof(x) (sizeof(x)/sizeof((x)[0]))
@@ -180,12 +181,48 @@ static int sc_dev_ctx_send_receive_cmd(
     return error;
 }
 
+static bool is_false(char const* str)
+{
+    return  
+        0 == _stricmp(str, "0") ||
+        0 == _stricmp(str, "false") ||
+        0 == _stricmp(str, "no") ||
+        0 == _stricmp(str, "off");
+}
+
+static void usage(FILE* stream)
+{
+    fprintf(stream, "SuperCAN demo app (c) 2020 Jean Gressmann <jean@0x42.de>\n");
+    fprintf(stream, "supercan_app [options]\n");
+    fprintf(stream, "\n");
+    fprintf(stream, "-h, --help, /?     print this help\n");
+    fprintf(stream, "--fd BOOL          enable or disable CAN-FD format\n");
+    fprintf(stream, "--log ITEM         enables logging of ITEM which is one of\n");
+    fprintf(stream, "   NONE:       no logging\n");
+    fprintf(stream, "   RX_DT:      log rx message timestamp deltas\n");
+    fprintf(stream, "   RX_MSG:     log rx message content\n");
+    fprintf(stream, "   BUS_STATE:  log bus status information\n");
+    fprintf(stream, "   TX:         log tx message information\n");
+    fprintf(stream, "   TXR:        log tx message receipts\n");
+    fprintf(stream, "   ALL:        log everything\n");
+}
+
+#define LOG_FLAG_RX_DT      0x00000001
+#define LOG_FLAG_RX_MSG     0x00000002
+#define LOG_FLAG_BUS_STATE  0x00000004
+#define LOG_FLAG_TX         0x00000008
+#define LOG_FLAG_TXR        0x00000010
+
 int main(int argc, char** argv)
 {
+    uint64_t rx_last_ts = 0;
+    uint32_t rx_ts_high = 0;
     int error = SC_DLL_ERROR_NONE;
     uint32_t count;
     sc_dev_t* dev = NULL;
     sc_dev_context_t dev_ctx;
+    bool fdf = false;
+    unsigned log_flags = 0;
     
     PUCHAR msg_rx_buffers = NULL;
     PUCHAR msg_tx_buffer = NULL;
@@ -203,6 +240,62 @@ int main(int argc, char** argv)
     memset(&dev_ctx, 0, sizeof(dev_ctx));
 
     sc_init();
+
+    for (int i = 1; i < argc; ) {
+        if (0 == strcmp("-h", argv[i]) ||
+            0 == strcmp("--help", argv[i]) ||
+            0 == strcmp("/?", argv[i])) {
+            usage(stdout);
+            goto Exit;
+        }
+        else if (0 == strcmp("--fd", argv[i])) {
+            if (i + 1 < argc) {
+                fdf = !is_false(argv[i + 1]);
+                i += 2;
+            }
+            else {
+                fprintf(stderr, "ERROR %s expects a boolean argument\n", argv[i]);
+                error = SC_DLL_ERROR_INVALID_PARAM;
+                goto Exit;
+            }
+        }
+        else if (0 == strcmp("--log", argv[i])) {
+            if (i + 1 < argc) {
+                const char* arg = argv[i + 1];
+                if (0 == _stricmp("RX_DT", arg)) {
+                    log_flags |= LOG_FLAG_RX_DT;
+                }
+                else if (0 == _stricmp("RX", arg)) {
+                    log_flags |= LOG_FLAG_RX_MSG;
+                }
+                else if (0 == _stricmp("BUS_STATE", arg)) {
+                    log_flags |= LOG_FLAG_BUS_STATE;
+                }
+                else if (0 == _stricmp("TX", arg)) {
+                    log_flags |= LOG_FLAG_TX;
+                }
+                else if (0 == _stricmp("TXR", arg)) {
+                    log_flags |= LOG_FLAG_TXR;
+                }
+                else if (0 == _stricmp("NONE", arg)) {
+                    log_flags = 0u;
+                }
+                else if (0 == _stricmp("ALL", arg)) {
+                    log_flags = ~0u;
+                }
+
+                i += 2;
+            }
+            else {
+                fprintf(stderr, "ERROR %s expects a boolean argument\n", argv[i]);
+                error = SC_DLL_ERROR_INVALID_PARAM;
+                goto Exit;
+            }
+        }
+        else {
+            ++i;
+        }
+    }
 
     for (size_t i = 0; i < _countof(msg_read_events); ++i) {
         HANDLE h = CreateEventW(NULL, FALSE, FALSE, NULL);
@@ -363,7 +456,8 @@ int main(int argc, char** argv)
         feat->len = sizeof(*feat);
         feat->op = SC_FEAT_OP_OR;
         // try to enable CAN-FD and TXR
-        feat->arg = (dev_info.feat_perm | dev_info.feat_conf) & (SC_FEATURE_FLAG_FDF | SC_FEATURE_FLAG_TXR);
+        feat->arg = (dev_info.feat_perm | dev_info.feat_conf) & 
+            ((fdf ? SC_FEATURE_FLAG_FDF : 0) | SC_FEATURE_FLAG_TXR);
         cmd_tx_ptr += feat->len;
         ++cmd_count;
 
@@ -475,25 +569,27 @@ int main(int argc, char** argv)
                     uint16_t rx_lost = dev->dev_to_host16(status->rx_lost);
                     uint16_t tx_dropped = dev->dev_to_host16(status->tx_dropped);
 
-                    fprintf(stdout, "rxl=%u txd=%u rxe=%u txe=%u bus=", rx_lost, tx_dropped, status->rx_errors, status->tx_errors);
-                    switch (status->bus_status) {
-                    case SC_CAN_STATUS_ERROR_ACTIVE:
-                        fprintf(stdout, "error_active");
-                        break;
-                    case SC_CAN_STATUS_ERROR_WARNING:
-                        fprintf(stdout, "error_warning");
-                        break;
-                    case SC_CAN_STATUS_ERROR_PASSIVE:
-                        fprintf(stdout, "error_passive");
-                        break;
-                    case SC_CAN_STATUS_BUS_OFF:
-                        fprintf(stdout, "off");
-                        break;
-                    default:
-                        fprintf(stdout, "unknown");
-                        break;
+                    if (log_flags & LOG_FLAG_BUS_STATE) {
+                        fprintf(stdout, "rx lost=%u tx dropped=%u rx errors=%u tx errors=%u bus=", rx_lost, tx_dropped, status->rx_errors, status->tx_errors);
+                        switch (status->bus_status) {
+                        case SC_CAN_STATUS_ERROR_ACTIVE:
+                            fprintf(stdout, "error_active");
+                            break;
+                        case SC_CAN_STATUS_ERROR_WARNING:
+                            fprintf(stdout, "error_warning");
+                            break;
+                        case SC_CAN_STATUS_ERROR_PASSIVE:
+                            fprintf(stdout, "error_passive");
+                            break;
+                        case SC_CAN_STATUS_BUS_OFF:
+                            fprintf(stdout, "off");
+                            break;
+                        default:
+                            fprintf(stdout, "unknown");
+                            break;
+                        }
+                        fprintf(stdout, "\n");
                     }
-                    fprintf(stdout, "\n");
                 } break;
                 case SC_MSG_CAN_ERROR: {
                     struct sc_msg_can_error const* error_msg = (struct sc_msg_can_error const*)msg;
@@ -549,25 +645,53 @@ int main(int argc, char** argv)
                         break;
                     }
 
-                    fprintf(stdout, "%x [%u] ", can_id, len);
-                    if (rx->flags & SC_CAN_FRAME_FLAG_RTR) {
-                        fprintf(stdout, "RTR");
-                    } else {
-                        for (uint8_t i = 0; i < len; ++i) {
-                            fprintf(stdout, "%02x ", rx->data[i]);
+                    if (log_flags & LOG_FLAG_RX_DT) {
+                        uint64_t ts_us;
+                        if (0 == rx_last_ts) {
+                            rx_last_ts = timestamp_us;
+                            rx_ts_high = 0;
+
                         }
+                        else {
+                            uint32_t diff = timestamp_us - rx_ts_high;
+                            if (diff >= UINT32_MAX / 2) {
+                                ++rx_ts_high;
+                            }
+                        }
+
+                        ts_us = rx_ts_high;
+                        ts_us <<= 32;
+                        ts_us |= timestamp_us;
+
+                        uint64_t dt_us = ts_us - rx_last_ts;
+                        rx_last_ts = ts_us;
+                        fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
                     }
-                    fputc('\n', stdout);
+
+                    if (log_flags & LOG_FLAG_RX_MSG) {
+                        fprintf(stdout, "%x [%u] ", can_id, len);
+                        if (rx->flags & SC_CAN_FRAME_FLAG_RTR) {
+                            fprintf(stdout, "RTR");
+                        }
+                        else {
+                            for (uint8_t i = 0; i < len; ++i) {
+                                fprintf(stdout, "%02x ", rx->data[i]);
+                            }
+                        }
+                        fputc('\n', stdout);
+                    }
                 } break;
                 case SC_MSG_CAN_TXR: {
                     struct sc_msg_can_txr const* txr = (struct sc_msg_can_txr const*)msg;
                     uint32_t timestamp_us = dev->dev_to_host32(txr->timestamp_us);
                     
-                    if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
-                        fprintf(stdout, "tracked message %#02x was dropped @ %08x\n", txr->track_id, timestamp_us);
-                    } 
-                    else {
-                        fprintf(stdout, "tracked message %#02x was sent @ %08x\n", txr->track_id, timestamp_us);
+                    if (log_flags & LOG_FLAG_TXR) {
+                        if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
+                            fprintf(stdout, "tracked message %#02x was dropped @ %08x\n", txr->track_id, timestamp_us);
+                        }
+                        else {
+                            fprintf(stdout, "tracked message %#02x was sent @ %08x\n", txr->track_id, timestamp_us);
+                        }
                     }
                 } break;
                 default:
