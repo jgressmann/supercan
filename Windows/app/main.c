@@ -27,7 +27,7 @@
 #include <Windows.h>
 #include "supercan_winapi.h"
 #include "supercan_dll.h"
-
+#include "sc_app.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -38,7 +38,6 @@
 #ifndef _countof
 #   define _countof(x) (sizeof(x)/sizeof((x)[0]))
 #endif
-
 
 #define MAX_PENDING_READS 16
 #define SC_DLL_ERROR_BUFFER_TOO_SMALL 1000
@@ -181,6 +180,7 @@ static int sc_dev_ctx_send_receive_cmd(
     return error;
 }
 
+
 static bool is_false(char const* str)
 {
     return  
@@ -215,8 +215,8 @@ static void usage(FILE* stream)
 
 int main(int argc, char** argv)
 {
+    struct sc_time_tracker tt;
     uint64_t rx_last_ts = 0;
-    uint32_t rx_ts_high = 0;
     int error = SC_DLL_ERROR_NONE;
     uint32_t count;
     sc_dev_t* dev = NULL;
@@ -238,6 +238,7 @@ int main(int argc, char** argv)
     uint8_t track_id = 0;
 
     memset(&dev_ctx, 0, sizeof(dev_ctx));
+    sc_tt_init(&tt);
 
     sc_init();
 
@@ -569,6 +570,8 @@ int main(int argc, char** argv)
                     uint16_t rx_lost = dev->dev_to_host16(status->rx_lost);
                     uint16_t tx_dropped = dev->dev_to_host16(status->tx_dropped);
 
+                    sc_track_ts(&tt, timestamp_us);
+
                     if (log_flags & LOG_FLAG_BUS_STATE) {
                         fprintf(stdout, "rx lost=%u tx dropped=%u rx errors=%u tx errors=%u bus=", rx_lost, tx_dropped, status->rx_errors, status->tx_errors);
                         switch (status->bus_status) {
@@ -599,6 +602,9 @@ int main(int argc, char** argv)
                     }
 
                     uint32_t timestamp_us = dev->dev_to_host32(error_msg->timestamp_us);
+
+                    sc_track_ts(&tt, timestamp_us);
+
                     if (SC_CAN_ERROR_NONE != error_msg->error) {
                         fprintf(
                             stdout, "%s %s ", 
@@ -636,6 +642,9 @@ int main(int argc, char** argv)
                     uint32_t timestamp_us = dev->dev_to_host32(rx->timestamp_us);
                     uint8_t len = dlc_to_len(rx->dlc);
                     uint8_t bytes = sizeof(*rx);
+
+                    uint64_t ts_us = sc_track_ts(&tt, timestamp_us);
+
                     if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR)) {
                         bytes += len;
                     }
@@ -646,25 +655,17 @@ int main(int argc, char** argv)
                     }
 
                     if (log_flags & LOG_FLAG_RX_DT) {
-                        uint64_t ts_us;
-                        if (0 == rx_last_ts) {
-                            rx_last_ts = timestamp_us;
-                            rx_ts_high = 0;
-
-                        }
-                        else {
-                            uint32_t diff = timestamp_us - rx_ts_high;
-                            if (diff >= UINT32_MAX / 2) {
-                                ++rx_ts_high;
+                        int64_t dt_us = 0;
+                        if (rx_last_ts) {
+                            dt_us = ts_us - rx_last_ts;
+                            if (dt_us < 0) {
+                                fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
                             }
                         }
+                        else {
+                            rx_last_ts = ts_us;
+                        }
 
-                        ts_us = rx_ts_high;
-                        ts_us <<= 32;
-                        ts_us |= timestamp_us;
-
-                        uint64_t dt_us = ts_us - rx_last_ts;
-                        rx_last_ts = ts_us;
                         fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
                     }
 
@@ -684,6 +685,8 @@ int main(int argc, char** argv)
                 case SC_MSG_CAN_TXR: {
                     struct sc_msg_can_txr const* txr = (struct sc_msg_can_txr const*)msg;
                     uint32_t timestamp_us = dev->dev_to_host32(txr->timestamp_us);
+
+                    sc_track_ts(&tt, timestamp_us);
                     
                     if (log_flags & LOG_FLAG_TXR) {
                         if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
