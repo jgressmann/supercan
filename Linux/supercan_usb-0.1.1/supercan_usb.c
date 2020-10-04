@@ -57,6 +57,12 @@ struct sc_urb_data {
 	u8 len;
 };
 
+/* usb interface struct */
+struct sc_dev_time_tracker {
+	uint32_t ts_us_lo;
+	uint32_t ts_us_hi;
+	uint32_t ts_initialized;
+};
 
 /* usb interface struct */
 struct sc_usb_priv {
@@ -72,10 +78,9 @@ struct sc_usb_priv {
 	u8 *msg_reassembly_ptr;
 	struct can_bittiming_const nominal;
 	struct can_bittiming_const data;
-	ktime_t device_time_now;
+	struct sc_dev_time_tracker device_time_tracker;
 	spinlock_t tx_lock;
 	unsigned int msg_reassembly_count;
-	u32 device_time_base;
 	u32 can_clock_hz;
 	u32 ctrlmode_static;
 	u32 ctrlmode_supported;
@@ -91,7 +96,6 @@ struct sc_usb_priv {
 	u8 rx_urb_count;
 	u8 tx_urb_count;
 	u8 tx_urb_available_count;
-	u8 device_time_received;
 	u8 ready;
 	u8 prev_rx_fifo_size;
 	u8 prev_tx_fifo_size;
@@ -162,39 +166,34 @@ static inline bool sc_usb_tx_urb_done(struct sc_urb_data const *urb_data)
 static inline void sc_usb_ktime_from_us(
 	struct sc_usb_priv *usb_priv, u32 timestamp_us, ktime_t *duration)
 {
-	ktime_t result = 0;
-	const u32 HALF_TIME = __UINT32_MAX__ / 2;
-	u32 diff_us = 0;
+	struct sc_dev_time_tracker *t = &usb_priv->device_time_tracker;
+	u64 ts_us = 0;
 
-	// netdev_dbg(usb_priv->netdev, "recv=%u\n", usb_priv->device_time_received);
+	if (likely(t->ts_initialized)) {
+		uint32_t delta = timestamp_us - t->ts_us_lo;
+		if (delta < 0x7FFFFFFF) { // forward and plausible
+			if (timestamp_us < t->ts_us_lo) {
+				++t->ts_us_hi;
+				netdev_dbg(usb_priv->netdev, "inc ts high=%lu\n", (unsigned long)t->ts_us_hi);
+			}
 
-	if (likely(usb_priv->device_time_received)) {
-		// netdev_dbg(usb_priv->netdev, "ts=%lu\n", (unsigned long)timestamp_us);
-
-		diff_us = timestamp_us - usb_priv->device_time_base;
-
-		if (diff_us >= HALF_TIME) {
-			/* delayed */
-			diff_us = usb_priv->device_time_base - timestamp_us;
-			// netdev_dbg(usb_priv->netdev, "delayed ts=%u base=%u diff=%u\n", timestamp_us, usb_priv->device_time_base, diff_us);
-			result = ktime_sub_us(usb_priv->device_time_now, diff_us);
-		} else {
-			/* wrap around / track */
-			//netdev_dbg(usb_priv->netdev, "%s ts=%u base=%u diff=%u\n",
-			//	(timestamp_us < usb_priv->device_time_base ? "wrap" : "track"), timestamp_us, usb_priv->device_time_base, diff_us);
-			usb_priv->device_time_base = timestamp_us;
-			usb_priv->device_time_now = ktime_add_us(usb_priv->device_time_now, diff_us);
-			result = usb_priv->device_time_now;
+			t->ts_us_lo = timestamp_us;
+			ts_us = ((u64)t->ts_us_hi << 32) | timestamp_us;
 		}
-	} else {
+		else {
+			// netdev_dbg(usb_priv->netdev, "late ts=%lu lo=%lu\n", (unsigned long)timestamp_us, (unsigned long)t->ts_us_lo);
+			ts_us = ((u64)t->ts_us_hi << 32) | t->ts_us_lo;
+			ts_us -= t->ts_us_lo - timestamp_us;
+		}
+	}
+	else {
 		netdev_dbg(usb_priv->netdev, "init ts=%lu\n", (unsigned long)timestamp_us);
-		usb_priv->device_time_received = 1;
-		usb_priv->device_time_base = timestamp_us;
-		usb_priv->device_time_now = ktime_set(0, 0);
-		result = usb_priv->device_time_now;
+		t->t->ts_initialized = 1;
+		t->ts_us_lo = timestamp_us;
+		ts_us = timestamp_us;
 	}
 
-	*duration = result;
+	*duration = ns_to_ktime(ts_us * 1000);
 }
 
 static inline void sc_usb_update_ktime_from_us(struct sc_usb_priv *usb_priv, u32 timestamp_us)
@@ -302,8 +301,7 @@ static int sc_usb_netdev_close(struct net_device *netdev)
 
 
 	// reset time
-	usb_priv->device_time_base = 0;
-	usb_priv->device_time_received = 0;
+	memset(&usb_priv->device_time_tracker, 0, sizeof(usb_priv->device_time_tracker));
 
 
 	WRITE_ONCE(usb_priv->ready, 0);
