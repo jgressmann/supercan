@@ -188,7 +188,7 @@ static inline void sc_usb_ktime_from_us(
 	}
 	else {
 		netdev_dbg(usb_priv->netdev, "init ts=%lu\n", (unsigned long)timestamp_us);
-		t->t->ts_initialized = 1;
+		t->ts_initialized = 1;
 		t->ts_us_lo = timestamp_us;
 		ts_us = timestamp_us;
 	}
