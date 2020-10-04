@@ -8,7 +8,7 @@ import sys
 
 last_ts = None
 
-line_regex = re.compile("^\((\d+\.\d*)\)\s+")
+line_regex = re.compile("^\(([+-]?\d+\.\d*)\)\s+")
 lineno = 0
 for line in fileinput.input():
 	lineno += 1
