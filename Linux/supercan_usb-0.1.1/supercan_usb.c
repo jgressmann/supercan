@@ -927,7 +927,8 @@ static int sc_apply_configuration(struct sc_usb_priv *usb_priv)
 
 static int sc_usb_netdev_open(struct net_device *netdev)
 {
-	struct sc_net_priv *priv = netdev_priv(netdev);
+	struct sc_net_priv *net_priv = netdev_priv(netdev);
+	struct sc_usb_priv *usb_priv = net_priv->usb;
 	int rc = 0;
 
 	rc = open_candev(netdev);
@@ -936,24 +937,24 @@ static int sc_usb_netdev_open(struct net_device *netdev)
 		goto fail;
 	}
 
-	rc = sc_apply_configuration(priv->usb);
+	rc = sc_apply_configuration(usb_priv);
 	if (rc) {
 		netdev_dbg(netdev, "apply config failed: %d\n", rc);
 		goto fail;
 	}
 
-	rc = sc_usb_submit_rx_urbs(priv->usb);
+	rc = sc_usb_submit_rx_urbs(usb_priv);
 	if (rc) {
 		netdev_dbg(netdev, "submit rx urbs failed: %d\n", rc);
 		goto fail;
 	}
 
-	priv->can.state = CAN_STATE_ERROR_ACTIVE;
+	net_priv->can.state = CAN_STATE_ERROR_ACTIVE;
 
 	netdev_dbg(netdev, "start queue\n");
 	netif_start_queue(netdev);
 
-	WRITE_ONCE(priv->usb->ready, 1);
+	WRITE_ONCE(usb_priv->ready, 1);
 out:
 	return rc;
 
