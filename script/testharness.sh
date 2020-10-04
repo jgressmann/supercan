@@ -10,10 +10,12 @@ usage()
 	echo $(basename $0) GOODCAN TESTCAN
 	echo
 	echo "   -s, --seconds SECONDS    limit test runs to SECONDS"
+	echo "   --no-init                don't initialize can devices"
 	echo
 }
 
 seconds=300
+init=1
 
 #https://stackoverflow.com/questions/192249/how-do-i-parse-command-line-arguments-in-bash
 POSITIONAL=()
@@ -30,11 +32,10 @@ while [ $# -gt 0 ]; do
 			usage
 			exit 0
 			;;
-# 		-l|--lib)
-# 		LIBPATH="$2"
-# 		shift # past argument
-# 		shift # past value
-# 		;;
+		--no-init)
+			init=0
+			shift # past argument
+			;;
 # 		--default)
 # 		DEFAULT=YES
 # 		shift # past argument
@@ -108,13 +109,16 @@ mkdir -p "$log_dir"
 
 echo INFO: Run tests for $seconds seconds | tee -a "$meta_log_path"
 
-cans="$can_good $can_test"
 
-for can in $cans; do
-	ip link set down $can || true
-	ip link set $can type can bitrate 1000000 dbitrate 5000000 fd on
-	ip link set up $can
-done
+cans="$can_good $can_test"
+if [ $init -ne 0 ];then
+	echo INFO: Initialize devices to nominal 1MBit/s data 5MBit/s | tee -a "$meta_log_path"
+	for can in $cans; do
+		ip link set down $can || true
+		ip link set $can type can bitrate 1000000 dbitrate 5000000 fd on
+		ip link set up $can
+	done
+fi
 
 # # clear out any old messages
 # sleep 1
@@ -244,7 +248,7 @@ set -e
 tar_file=testresult-${date_str}.tar.xz
 
 echo INFO: creating archive $tar_file
-tar -C "$tmp_dir" -c . | pixz >"$tmp_dir/$tar_file"
+tar -C "$tmp_dir" -c . | pixz -9 >"$tmp_dir/$tar_file"
 
 if [ -n "$SUDO_UID" ]; then
 	chown -R $SUDO_UID:$SUDO_GID $tmp_dir

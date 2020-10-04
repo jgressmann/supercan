@@ -21,6 +21,9 @@ for line in fileinput.input():
 
 	ts = float(m.group(1))
 
+	if ts < 0:
+		sys.stderr.write(f"line {lineno}: {ts}'")
+		sys.exit(1)
 
 	if None is last_ts:
 		last_ts = ts
