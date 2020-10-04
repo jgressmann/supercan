@@ -215,7 +215,7 @@ static void usage(FILE* stream)
 
 int main(int argc, char** argv)
 {
-    struct sc_time_tracker tt;
+    struct sc_dev_time_tracker tt;
     uint64_t rx_last_ts = 0;
     int error = SC_DLL_ERROR_NONE;
     uint32_t count;
@@ -570,7 +570,7 @@ int main(int argc, char** argv)
                     uint16_t rx_lost = dev->dev_to_host16(status->rx_lost);
                     uint16_t tx_dropped = dev->dev_to_host16(status->tx_dropped);
 
-                    sc_track_ts(&tt, timestamp_us);
+                    sc_tt_track(&tt, timestamp_us);
 
                     if (log_flags & LOG_FLAG_BUS_STATE) {
                         fprintf(stdout, "rx lost=%u tx dropped=%u rx errors=%u tx errors=%u bus=", rx_lost, tx_dropped, status->rx_errors, status->tx_errors);
@@ -603,7 +603,7 @@ int main(int argc, char** argv)
 
                     uint32_t timestamp_us = dev->dev_to_host32(error_msg->timestamp_us);
 
-                    sc_track_ts(&tt, timestamp_us);
+                    sc_tt_track(&tt, timestamp_us);
 
                     if (SC_CAN_ERROR_NONE != error_msg->error) {
                         fprintf(
@@ -643,7 +643,7 @@ int main(int argc, char** argv)
                     uint8_t len = dlc_to_len(rx->dlc);
                     uint8_t bytes = sizeof(*rx);
 
-                    uint64_t ts_us = sc_track_ts(&tt, timestamp_us);
+                    uint64_t ts_us = sc_tt_track(&tt, timestamp_us);
 
                     if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR)) {
                         bytes += len;
@@ -686,7 +686,7 @@ int main(int argc, char** argv)
                     struct sc_msg_can_txr const* txr = (struct sc_msg_can_txr const*)msg;
                     uint32_t timestamp_us = dev->dev_to_host32(txr->timestamp_us);
 
-                    sc_track_ts(&tt, timestamp_us);
+                    sc_tt_track(&tt, timestamp_us);
                     
                     if (log_flags & LOG_FLAG_TXR) {
                         if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {

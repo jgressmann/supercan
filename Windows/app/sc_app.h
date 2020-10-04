@@ -31,39 +31,41 @@
 
 
 
-struct sc_time_tracker {
-    uint32_t ts_us_low_last;
-    uint32_t ts_us_high;
-    uint32_t initialized;
+struct sc_dev_time_tracker {
+    uint32_t ts_us_lo;
+    uint32_t ts_us_hi;
+    uint32_t ts_initialized;
 };
 
-static inline void sc_tt_init(struct sc_time_tracker* tracker)
+static inline void sc_tt_init(struct sc_dev_time_tracker* tracker)
 {
     memset(tracker, 0, sizeof(*tracker));
 }
 
-static inline uint64_t sc_track_ts(struct sc_time_tracker* tracker, uint32_t ts_us_current)
-{    
-    if (tracker->initialized) {
-        uint32_t delta = ts_us_current - tracker->ts_us_low_last;
-        if (delta < UINT32_MAX / 2) { // forward and playsible
-            if (ts_us_current >= tracker->ts_us_low_last) {
-                tracker->ts_us_low_last = ts_us_current;
-                return ((uint64_t)tracker->ts_us_high) << 32 | ts_us_current;
+static inline uint64_t sc_tt_track(struct sc_dev_time_tracker* tracker, uint32_t ts_us_current)
+{
+    uint64_t ts_us = 0;
+
+    if (tracker->ts_initialized) {
+        uint32_t delta = ts_us_current - tracker->ts_us_lo;
+        if (delta < UINT32_MAX / 2) { // forward and plausible
+            if (ts_us_current < tracker->ts_us_lo) {
+                ++tracker->ts_us_hi;
             }
-            else {
-                ++tracker->ts_us_high;
-                tracker->ts_us_low_last = ts_us_current;
-                return ((uint64_t)tracker->ts_us_high) << 32 | ts_us_current;
-            }
+
+            tracker->ts_us_lo = ts_us_current;
+            ts_us = ((uint64_t)tracker->ts_us_hi << 32) | ts_us_current;
         }
         else {
-            return ((uint64_t)tracker->ts_us_high - 1) << 32 | ts_us_current;
+            ts_us = ((uint64_t)tracker->ts_us_hi << 32) | tracker->ts_us_lo;
+            ts_us -= tracker->ts_us_lo - ts_us_current;
         }
     }
     else {
-        tracker->initialized = 1;
-        tracker->ts_us_low_last = ts_us_current;
-        return ts_us_current;
+        tracker->ts_initialized = 1;
+        tracker->ts_us_lo = ts_us_current;
+        ts_us = ts_us_current;
     }
+
+    return ts_us;
 }
