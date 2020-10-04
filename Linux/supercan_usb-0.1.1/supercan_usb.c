@@ -677,7 +677,7 @@ static void sc_usb_process_rx_buffer(struct sc_usb_priv *usb_priv, u8 *ptr, unsi
 			netdev_warn(usb_priv->netdev, "rx msg size %u not multiple of %u\n", size, (unsigned int)SC_MSG_HEADER_LEN);
 	}
 
-	while (ptr + SC_MSG_HEADER_LEN <= eptr) {
+	for (ptr = sptr; ptr + SC_MSG_HEADER_LEN <= eptr; ) {
 		struct sc_msg_header *hdr = (struct sc_msg_header *)ptr;
 
 		if (unlikely(hdr->id == SC_MSG_EOF || !hdr->len)) {
