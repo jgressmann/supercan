@@ -136,10 +136,10 @@ same_messages()
 	local test_path=$2
 	local column=$3
 
-	cat "$good_path" | awk "{print \$$column;}" >"$good_path.3"
-	cat "$test_path" | awk "{print \$$column;}" >"$test_path.3"
+	cat "$good_path" | awk "{print \$$column;}" >"$good_path.msgs"
+	cat "$test_path" | awk "{print \$$column;}" >"$test_path.msgs"
 
-	diff "$good_path.3" "$test_path.3" 1>/dev/null
+	diff "$good_path.msgs" "$test_path.msgs" 1>/dev/null
 	# if [ $? -ne 0 ]; then
 	# 	rc=1
 	# fi
