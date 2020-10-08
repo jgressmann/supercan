@@ -87,9 +87,10 @@ cleanup()
 
 error_cleanup()
 {
+	local last=$_
 	local rc=$?
 	if [ 0 -ne $rc ]; then
-		echo ERROR: command failed with $rc
+		echo ERROR: command $last failed with $rc
 	fi
 
 	cleanup
@@ -120,44 +121,41 @@ if [ $init -ne 0 ];then
 	done
 fi
 
-# # clear out any old messages
-# sleep 1
-
-# for can in $cans; do
-# 	ip link set down $can
-# 	ip link set up $can
-# done
-
 
 max_frames=$((seconds*1000))
 errors=0
 
 #-I 42 -L 8 -D i -g 1 -b -n $max_frames
-can_gen_flags="-e -I r -L r -D r -g 1 -b -n $max_frames"
+single_sender_can_gen_flags="-e -I r -L r -D r -g 1 -b -n $max_frames"
 
 same_messages()
 {
-	local rc=0
+	#local rc=0
 
-	good_path=$1
-	test_path=$2
+	local good_path=$1
+	local test_path=$2
+	local column=$3
 
-	cat "$good_path" | awk '{print $3}' >"$good_path.3"
-	cat "$test_path" | awk '{print $3}' >"$test_path.3"
+	cat "$good_path" | awk "{print \$$column;}" >"$good_path.3"
+	cat "$test_path" | awk "{print \$$column;}" >"$test_path.3"
 
 	diff "$good_path.3" "$test_path.3" 1>/dev/null
-	if [ $? -ne 0 ]; then
-		rc=1
-	fi
+	# if [ $? -ne 0 ]; then
+	# 	rc=1
+	# fi
 
-	return $rc
+	# return $rc
+	return $?
 }
 
 
 # run tests
+
 #######################
 # good -> test
 #######################
+echo
+echo INFO: Single sender good -\> test | tee -a "$meta_log_path"
 echo INFO: Sending from good device $can_good | tee -a "$meta_log_path"
 
 good_to_test_file_test_name=good_to_test_file_test.log
@@ -173,14 +171,31 @@ good_to_test_good_pid=$!
 # wait a bit, else we may not get first frame
 sleep 2
 
-cangen $can_gen_flags $can_good
+cangen $single_sender_can_gen_flags $can_good
 
 
-sleep 1
+sleep 3
 kill $good_to_test_test_pid $good_to_test_good_pid 2>/dev/null || true
 
 set +e
-same_messages "$good_to_test_file_good_path" "$good_to_test_file_test_path"
+
+lines=$(cat "$good_to_test_file_good_path" | wc -l)
+if [ $max_frames -ne $lines ]; then
+	echo ERROR: good -\> test GOOD log file missing messages $lines/$max_frames! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: good -\> test GOOD log file $lines/$max_frames messages OK! | tee -a "$meta_log_path"
+fi
+
+lines=$(cat "$good_to_test_file_test_path" | wc -l)
+if [ $max_frames -ne $lines ]; then
+	echo ERROR: good -\> test TEST log file missing messages $lines/$max_frames! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: good -\> test TEST log file $lines/$max_frames messages OK! | tee -a "$meta_log_path"
+fi
+
+same_messages "$good_to_test_file_good_path" "$good_to_test_file_test_path" 3
 if [ $? -ne 0 ]; then
 	echo ERROR: good -\> test messages DIFFER! | tee -a "$meta_log_path"
 	errors=$((errors+1))
@@ -188,7 +203,7 @@ else
 	echo INFO: good -\> test messages OK! | tee -a "$meta_log_path"
 fi
 
-mono_out=$("$script_dir/ensure-strict-mono.py" "$good_to_test_file_test_path" 2>&1)
+mono_out=$("$script_dir/mono-check.py" "$good_to_test_file_test_path" 2>&1)
 if [ $? -ne 0 ]; then
 	echo ERROR: good -\> test timestamps NOT mono! | tee -a "$meta_log_path"
 	echo ERROR: $mono_out | tee -a "$meta_log_path"
@@ -201,6 +216,8 @@ set -e
 #######################
 # test -> good
 #######################
+echo
+echo INFO: Single sender test -\> good | tee -a "$meta_log_path"
 echo INFO: Sending from test device $can_test | tee -a "$meta_log_path"
 
 test_to_good_file_test_name=test_to_good_file_test.log
@@ -216,15 +233,32 @@ test_to_good_good_pid=$!
 # wait a bit, else we may not get first frame
 sleep 2
 
-cangen $can_gen_flags $can_test
+cangen $single_sender_can_gen_flags $can_test
 
 
-sleep 1
+sleep 3
 kill $test_to_good_test_pid $test_to_good_good_pid 2>/dev/null || true
 
 
 set +e
-same_messages "$test_to_good_file_good_path" "$test_to_good_file_test_path"
+
+lines=$(cat "$test_to_good_file_good_path" | wc -l)
+if [ $max_frames -ne $lines ]; then
+	echo ERROR: test -\> good GOOD log file missing messages $lines/$max_frames! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: test -\> good GOOD log file $lines/$max_frames messages OK! | tee -a "$meta_log_path"
+fi
+
+lines=$(cat "$test_to_good_file_test_path" | wc -l)
+if [ $max_frames -ne $lines ]; then
+	echo ERROR: test -\> good TEST log file missing messages $lines/$max_frames! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: test -\> good TEST log file $lines/$max_frames messages OK! | tee -a "$meta_log_path"
+fi
+
+same_messages "$test_to_good_file_good_path" "$test_to_good_file_test_path" 3
 if [ $? -ne 0 ]; then
 	echo ERROR: test -\> good messages DIFFER! | tee -a "$meta_log_path"
 	errors=$((errors+1))
@@ -232,13 +266,123 @@ else
 	echo INFO: test -\> good messages OK! | tee -a "$meta_log_path"
 fi
 
-mono_out=$("$script_dir/ensure-strict-mono.py" "$test_to_good_file_test_path" 2>&1)
+mono_out=$("$script_dir/mono-check.py" "$test_to_good_file_test_path" 2>&1)
 if [ $? -ne 0 ]; then
 	echo ERROR: test -\> good timestamps NOT mono! | tee -a "$meta_log_path"
 	echo ERROR: $mono_out | tee -a "$meta_log_path"
 	errors=$((errors+1))
 else
 	echo INFO: test -\> good timestamps mono OK! | tee -a "$meta_log_path"
+fi
+set -e
+
+
+
+#######################
+# both test <-> good
+#######################
+both_sender_can_gen_flags="-e -L r -D r -g 1 -b -n $max_frames"
+echo
+echo INFO: Sending from both devices | tee -a "$meta_log_path"
+
+both_file_test_name=both_file_test.log
+both_file_test_path=$log_dir/$both_file_test_name
+candump -n $(($max_frames*2)) -H -t z -L $can_test >$both_file_test_path &
+both_test_candump_pid=$!
+
+both_file_good_name=both_file_good.log
+both_file_good_path=$log_dir/$both_file_good_name
+candump -n $(($max_frames*2)) -H -t z -L $can_good >$both_file_good_path &
+both_good_candump_pid=$!
+
+# wait a bit, else we may not get first frame
+sleep 2
+
+cangen $both_sender_can_gen_flags -I 1 $can_good &
+both_good_cangen_pid=$!
+
+cangen $both_sender_can_gen_flags -I 2 $can_test &
+both_test_cangen_pid=$!
+
+
+echo INFO: Waiting for sends to finish
+
+#wait $both_good_cangen_pid $both_test_cangen_pid
+wait $both_good_cangen_pid
+wait $both_test_cangen_pid
+
+
+sleep 3
+kill $both_test_candump_pid $both_good_candump_pid 2>/dev/null || true
+
+cat "$both_file_test_path" | awk '{ print $3; }' | grep "1##" | sed -E 's/0*(1|2)##//g' >"$log_dir/both_test_send_by_good_content.log"
+cat "$both_file_test_path" | awk '{ print $3; }' | grep "2##" | sed -E 's/0*(1|2)##//g' >"$log_dir/both_test_send_by_test_content.log"
+
+cat "$both_file_good_path" | awk '{ print $3; }' | grep "1##" | sed -E 's/0*(1|2)##//g' >"$log_dir/both_good_send_by_good_content.log"
+cat "$both_file_good_path" | awk '{ print $3; }' | grep "2##" | sed -E 's/0*(1|2)##//g' >"$log_dir/both_good_send_by_test_content.log"
+
+
+cat "$both_file_test_path" | grep "1##" | >"$log_dir/both_test_send_by_good_timestamps.log"
+
+
+
+set +e
+
+lines=$(cat "$log_dir/both_test_send_by_good_content.log" | wc -l)
+if [ $max_frames -ne $lines ]; then
+	echo ERROR: good -\> test TEST log file missing messages $lines/$max_frames! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: good -\> test TEST log file $lines/$max_frames messages OK! | tee -a "$meta_log_path"
+fi
+
+lines=$(cat "$log_dir/both_test_send_by_test_content.log" | wc -l)
+if [ $max_frames -ne $lines ]; then
+	echo ERROR: test -\> test TEST log file missing messages $lines/$max_frames! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: test -\> test TEST log file $lines/$max_frames messages OK! | tee -a "$meta_log_path"
+fi
+
+lines=$(cat "$log_dir/both_good_send_by_good_content.log" | wc -l)
+if [ $max_frames -ne $lines ]; then
+	echo ERROR: good -\> test GOOD log file missing messages $lines/$max_frames! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: good -\> test GOOD log file $lines/$max_frames messages OK! | tee -a "$meta_log_path"
+fi
+
+lines=$(cat "$log_dir/both_good_send_by_test_content.log" | wc -l)
+if [ $max_frames -ne $lines ]; then
+	echo ERROR: test -\> good GOOD log file missing messages $lines/$max_frames! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: test -\> good GOOD log file $lines/$max_frames messages OK! | tee -a "$meta_log_path"
+fi
+
+same_messages "$log_dir/both_good_send_by_good_content.log" "$log_dir/both_test_send_by_good_content.log" 1
+if [ $? -ne 0 ]; then
+	echo ERROR: good -\> test messages DIFFER! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: good -\> test messages OK! | tee -a "$meta_log_path"
+fi
+
+same_messages "$log_dir/both_test_send_by_test_content.log" "$log_dir/both_good_send_by_test_content.log" 1
+if [ $? -ne 0 ]; then
+	echo ERROR: test -\> good messages DIFFER! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: test -\> good messages OK! | tee -a "$meta_log_path"
+fi
+
+mono_out=$("$script_dir/mono-check.py" "$log_dir/both_test_send_by_good_timestamps.log" 2>&1)
+if [ $? -ne 0 ]; then
+	echo ERROR: good -\> test timestamps NOT mono! | tee -a "$meta_log_path"
+	echo ERROR: $mono_out | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: good -\> test timestamps mono OK! | tee -a "$meta_log_path"
 fi
 set -e
 
