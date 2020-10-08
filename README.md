@@ -134,7 +134,7 @@ The solution contains code for a demo application that sends and dumps CAN traff
 
 ## 3. Linux socketcan driver
 
-To build the Linux kernel module follow [these instructions](Linux/supercan_usb-0.1.0/README.md).
+To build the Linux kernel module follow [these instructions](Linux/README.md).
 
 
 
