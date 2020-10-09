@@ -582,11 +582,14 @@ static inline void sc_usb_tx_return_urb_unsafe(struct sc_urb_data *urb_data, boo
 static int sc_usb_process_can_txr(struct sc_usb_priv *usb_priv, struct sc_msg_can_txr *txr)
 {
 	struct net_device *netdev = usb_priv->netdev;
+	struct sc_net_priv *net_priv = NULL;
 	struct sc_urb_data *urb_data = NULL;
 	unsigned long flags = 0;
 	unsigned int index = 0;
+	u32 timestamp_us = 0;
 	u8 len = 0;
 	bool wake = false;
+	ktime_t hwts;
 
 	if (unlikely(txr->len < sizeof(*txr))) {
 		netdev_warn(netdev, "short sc_msg_can_txr (%u)\n", txr->len);
@@ -602,8 +605,9 @@ static int sc_usb_process_can_txr(struct sc_usb_priv *usb_priv, struct sc_msg_ca
 
 	// netdev_dbg(netdev, "txr id %u %s\n", index, (txr->flags & SC_CAN_FRAME_FLAG_DRP) ? "dropped" : "transmitted");
 
-	sc_usb_update_ktime_from_us(usb_priv, usb_priv->host_to_dev32(txr->timestamp_us));
 
+	timestamp_us = usb_priv->host_to_dev32(txr->timestamp_us);
+	sc_usb_ktime_from_us(usb_priv, timestamp_us, &hwts);
 
 	spin_lock_irqsave(&usb_priv->tx_lock, flags);
 	BUG_ON(index >= usb_priv->tx_urb_count);
@@ -618,12 +622,14 @@ static int sc_usb_process_can_txr(struct sc_usb_priv *usb_priv, struct sc_msg_ca
 	}
 
 	// place / remove echo buffer
+	net_priv = netdev_priv(netdev);
 	if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
 		++netdev->stats.tx_dropped;
 		can_free_echo_skb(netdev, index);
 	} else {
 		++netdev->stats.tx_packets;
 		netdev->stats.tx_bytes += len;
+		skb_hwtstamps(net_priv->can.echo_skb[index])->hwtstamp = hwts;
 		can_get_echo_skb(netdev, index);
 	}
 	spin_unlock_irqrestore(&usb_priv->tx_lock, flags);
