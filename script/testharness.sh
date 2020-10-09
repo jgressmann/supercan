@@ -205,11 +205,11 @@ fi
 
 mono_out=$("$script_dir/mono-check.py" "$good_to_test_file_test_path" 2>&1)
 if [ $? -ne 0 ]; then
-	echo ERROR: good -\> test timestamps NOT mono! | tee -a "$meta_log_path"
+	echo ERROR: good -\> test rx timestamps NOT mono! | tee -a "$meta_log_path"
 	echo ERROR: $mono_out | tee -a "$meta_log_path"
 	errors=$((errors+1))
 else
-	echo INFO: good -\> test timestamps mono OK! | tee -a "$meta_log_path"
+	echo INFO: good -\> test rx timestamps mono OK! | tee -a "$meta_log_path"
 fi
 set -e
 
@@ -268,11 +268,11 @@ fi
 
 mono_out=$("$script_dir/mono-check.py" "$test_to_good_file_test_path" 2>&1)
 if [ $? -ne 0 ]; then
-	echo ERROR: test -\> good timestamps NOT mono! | tee -a "$meta_log_path"
+	echo ERROR: test -\> good tx timestamps NOT mono! | tee -a "$meta_log_path"
 	echo ERROR: $mono_out | tee -a "$meta_log_path"
 	errors=$((errors+1))
 else
-	echo INFO: test -\> good timestamps mono OK! | tee -a "$meta_log_path"
+	echo INFO: test -\> good tx timestamps mono OK! | tee -a "$meta_log_path"
 fi
 set -e
 
@@ -323,6 +323,7 @@ cat "$both_file_good_path" | awk '{ print $3; }' | grep "2##" | sed -E 's/0*(1|2
 
 
 cat "$both_file_test_path" | grep "1##" | >"$log_dir/both_test_send_by_good_timestamps.log"
+cat "$both_file_test_path" | grep "2##" | >"$log_dir/both_test_send_by_test_timestamps.log"
 
 
 
@@ -378,11 +379,20 @@ fi
 
 mono_out=$("$script_dir/mono-check.py" "$log_dir/both_test_send_by_good_timestamps.log" 2>&1)
 if [ $? -ne 0 ]; then
-	echo ERROR: good -\> test timestamps NOT mono! | tee -a "$meta_log_path"
+	echo ERROR: good -\> test rx timestamps NOT mono! | tee -a "$meta_log_path"
 	echo ERROR: $mono_out | tee -a "$meta_log_path"
 	errors=$((errors+1))
 else
-	echo INFO: good -\> test timestamps mono OK! | tee -a "$meta_log_path"
+	echo INFO: good -\> test rx timestamps mono OK! | tee -a "$meta_log_path"
+fi
+
+mono_out=$("$script_dir/mono-check.py" "$log_dir/both_test_send_by_test_timestamps.log" 2>&1)
+if [ $? -ne 0 ]; then
+	echo ERROR: test -\> good tx timestamps NOT mono! | tee -a "$meta_log_path"
+	echo ERROR: $mono_out | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: test -\> good tx timestamps mono OK! | tee -a "$meta_log_path"
 fi
 set -e
 
