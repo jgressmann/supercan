@@ -281,7 +281,7 @@ set -e
 #######################
 # both test <-> good
 #######################
-both_sender_can_gen_flags="-e -L r -D r -g 1 -b -n $max_frames"
+both_sender_can_gen_flags="-e -L r -D r -b -g 0 -p 1 -n $max_frames"
 echo
 echo INFO: Sending from both devices | tee -a "$meta_log_path"
 
