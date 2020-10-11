@@ -128,13 +128,13 @@ $ sudo dfu-util -R -D _build/build-d5035-01/d5035-01-firmware.dfu
 
 ## 2. Windows API & demo app
 
-Simply build the Visual Studio solution in the Windows folder. I use Visual Studio Community 2019 which is available free of charge for non-commercial products (as of this writing).
+Build the Visual Studio solution in the Windows folder. I use Visual Studio Community 2019 which is available free of charge for non-commercial products (as of this writing).
 
 The solution contains code for a demo application that sends and dumps CAN traffic.
 
 ## 3. Linux socketcan driver
 
-To build the Linux kernel module follow [these instructions](Linux/README.md).
+To build the Linux kernel module, please follow [these instructions](Linux/README.md).
 
 
 
