@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import fileinput
 import re
 import sys
 
@@ -23,11 +22,11 @@ try:
 	if args.threshold_ms <= 0:
 		raise ValueError('argument to --threshold-ms must be positive')
 
-	if args.threshold_ms >= args.interval_ms:
-		raise ValueError('tolerance must not exceed interval')
+	# if args.threshold_ms >= args.interval_ms:
+	# 	raise ValueError('tolerance must not exceed interval')
 
 
-	last_ts = None
+	last_ts_ms = None
 
 	line_regex = re.compile("^\s*\(([+-]?\d+\.\d*)\)\s+")
 	lineno = 0
@@ -40,18 +39,20 @@ try:
 			sys.exit(-1)
 
 
-		ts = float(m.group(1)) * 1000
+		ts_ms = float(m.group(1)) * 1000
 
-		if None is last_ts:
-			last_ts = ts
+		if None is last_ts_ms:
+			last_ts_ms = ts_ms
 		else:
-			target = args.interval_ms + last_ts
-			delta = target - ts
-			last_ts = ts
+			target = args.interval_ms + last_ts_ms
+			delta = abs(target - ts_ms)
+			last_ts_ms = ts_ms
 
-			if (delta < 0 and -delta > args.threshold_ms) or (delta >= 0 and delta > args.threshold_ms):
-				sys.stderr.write(f"line {lineno-1}-{lineno}: {abs(delta)} > {args.threshold_ms} [ms]\n")
+			if delta > args.threshold_ms:
+				sys.stderr.write(f"line {lineno-1}-{lineno}: {round(delta, 3):.3f} > {args.threshold_ms} [ms]\n")
 				if not args.continue_on_error:
 					sys.exit(1)
+
+
 except KeyboardInterrupt:
 	pass

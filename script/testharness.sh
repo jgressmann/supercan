@@ -396,11 +396,175 @@ else
 fi
 set -e
 
+##############################################
+# good > test timestamp quality 1 [s]
+##############################################
+ts_slow_max_frames=$(($seconds))
+ts_slow_can_gen_flags="-e -I 123456 -L 64 -D r -g 1000 -b -n $ts_slow_max_frames"
+ts_slow_jitter_threshold_ms=5
+
+echo
+echo INFO: Sending from good -\> test with at fixed interval of 1 \[s\]
+ts_slow_good_to_test_path=$log_dir/ts_slow_good_to_test.log
+candump -n $(($ts_slow_max_frames)) -H -t z -L $can_test >"$ts_slow_good_to_test_path" &
+ts_slow_good_to_test_test_pid=$!
+
+cangen $ts_slow_can_gen_flags $can_good
+
+sleep 3
+kill $ts_slow_good_to_test_test_pid 2>/dev/null || true
+
+set +e
+
+mono_out=$("$script_dir/mono-check.py" "$ts_slow_good_to_test_path" 2>&1)
+if [ $? -ne 0 ]; then
+	echo ERROR: good -\> test RX timestamps NOT mono! | tee -a "$meta_log_path"
+	echo ERROR: $mono_out | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: good -\> test RX timestamps mono OK! | tee -a "$meta_log_path"
+fi
+
+
+mono_out=$("$script_dir/delta-check.py" --interval-ms 1000 --threshold-ms $ts_slow_jitter_threshold_ms "$ts_slow_good_to_test_path" 2>&1)
+if [ $? -ne 0 ]; then
+	echo ERROR: good -\> test RX timestamps not within $ts_slow_jitter_threshold_ms \[ms\]! | tee -a "$meta_log_path"
+	echo ERROR: $mono_out | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: good -\> test RX timestamps jitter within $ts_slow_jitter_threshold_ms \[ms\] OK! | tee -a "$meta_log_path"
+fi
+
+set -e
+
+
+
+##############################################
+# test > good timestamp quality
+##############################################
+echo
+echo INFO: Sending from test -\> good with at fixed interval of 1 \[s\]
+ts_slow_test_to_good_path=$log_dir/ts_slow_test_to_good.log
+candump -n $(($ts_slow_max_frames)) -H -t z -L $can_test >"$ts_slow_test_to_good_path" &
+ts_slow_test_to_good_test_pid=$!
+
+cangen $ts_slow_can_gen_flags $can_test
+
+sleep 3
+kill $ts_slow_test_to_good_test_pid 2>/dev/null || true
+
+set +e
+
+mono_out=$("$script_dir/mono-check.py" "$ts_slow_test_to_good_path" 2>&1)
+if [ $? -ne 0 ]; then
+	echo ERROR: test -\> good TX timestamps NOT mono! | tee -a "$meta_log_path"
+	echo ERROR: $mono_out | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: test -\> good TX timestamps mono OK! | tee -a "$meta_log_path"
+fi
+
+
+mono_out=$("$script_dir/delta-check.py" --interval-ms 1000 --threshold-ms $ts_slow_jitter_threshold_ms "$ts_slow_test_to_good_path" 2>&1)
+if [ $? -ne 0 ]; then
+	echo ERROR: test -\> good TX timestamps not within $ts_slow_jitter_threshold_ms \[ms\]! | tee -a "$meta_log_path"
+	echo ERROR: $mono_out | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: test -\> good TX timestamps jitter within $ts_slow_jitter_threshold_ms \[ms\] OK! | tee -a "$meta_log_path"
+fi
+
+set -e
+
+
+##############################################
+# good > test timestamp quality 1 [ms]
+##############################################
+ts_fast_max_frames=$(($seconds*1000))
+ts_fast_can_gen_flags="-I 1 -L 0 -g 1 -n $ts_fast_max_frames"
+ts_fast_jitter_threshold_ms=5
+
+echo
+echo INFO: Sending from good -\> test with at fixed interval of 1 \[ms\]
+ts_fast_good_to_test_path=$log_dir/ts_fast_good_to_test.log
+candump -n $(($ts_fast_max_frames)) -H -t z -L $can_test >"$ts_fast_good_to_test_path" &
+ts_fast_good_to_test_test_pid=$!
+
+cangen $ts_fast_can_gen_flags $can_good
+
+sleep 3
+kill $ts_fast_good_to_test_test_pid 2>/dev/null || true
+
+set +e
+
+mono_out=$("$script_dir/mono-check.py" "$ts_fast_good_to_test_path" 2>&1)
+if [ $? -ne 0 ]; then
+	echo ERROR: good -\> test RX timestamps NOT mono! | tee -a "$meta_log_path"
+	echo ERROR: $mono_out | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: good -\> test RX timestamps mono OK! | tee -a "$meta_log_path"
+fi
+
+
+mono_out=$("$script_dir/delta-check.py" --interval-ms 1 --threshold-ms $ts_fast_jitter_threshold_ms "$ts_fast_good_to_test_path" 2>&1)
+if [ $? -ne 0 ]; then
+	echo ERROR: good -\> test RX timestamps not within $ts_fast_jitter_threshold_ms \[ms\]! | tee -a "$meta_log_path"
+	echo ERROR: $mono_out | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: good -\> test RX timestamps jitter within $ts_fast_jitter_threshold_ms \[ms\] OK! | tee -a "$meta_log_path"
+fi
+
+set -e
+
+
+##############################################
+# test > good timestamp quality 1 [ms]
+##############################################
+
+
+echo
+echo INFO: Sending from test -\> good with at fixed interval of 1 \[ms\]
+ts_fast_test_to_good_path=$log_dir/ts_fast_test_to_good.log
+candump -n $(($ts_fast_max_frames)) -H -t z -L $can_test >"$ts_fast_test_to_good_path" &
+ts_fast_test_go_good_test_pid=$!
+
+cangen $ts_fast_can_gen_flags $can_test
+
+sleep 3
+kill $ts_fast_test_go_good_test_pid 2>/dev/null || true
+
+set +e
+
+mono_out=$("$script_dir/mono-check.py" "$ts_fast_test_to_good_path" 2>&1)
+if [ $? -ne 0 ]; then
+	echo ERROR: test -\> good TX timestamps NOT mono! | tee -a "$meta_log_path"
+	echo ERROR: $mono_out | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: test -\> good TX timestamps mono OK! | tee -a "$meta_log_path"
+fi
+
+
+mono_out=$("$script_dir/delta-check.py" --interval-ms 1 --threshold-ms $ts_fast_jitter_threshold_ms "$ts_fast_test_to_good_path" 2>&1)
+if [ $? -ne 0 ]; then
+	echo ERROR: test -\> good TX timestamps not within $ts_fast_jitter_threshold_ms \[ms\]! | tee -a "$meta_log_path"
+	echo ERROR: $mono_out | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: test -\> good TX timestamps jitter within $ts_fast_jitter_threshold_ms \[ms\] OK! | tee -a "$meta_log_path"
+fi
+
+set -e
+
+
 #######################
 # archive results
 #######################
 tar_file=testresult-${date_str}.tar.xz
 
+echo
 echo INFO: creating archive $tar_file
 tar -C "$tmp_dir" -c . | pixz -9 >"$tmp_dir/$tar_file"
 
@@ -414,12 +578,6 @@ cleanup
 
 echo INFO: Finished with $errors errors.
 exit $errors
-
-
-
-
-
-
 
 
 
