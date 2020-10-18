@@ -171,6 +171,7 @@ static inline void sc_usb_ktime_from_us(
 
 	if (likely(t->ts_initialized)) {
 		uint32_t delta = timestamp_us - t->ts_us_lo;
+
 		if (delta < 0x7FFFFFFF) { // forward and plausible
 			if (timestamp_us < t->ts_us_lo) {
 				++t->ts_us_hi;
@@ -179,14 +180,12 @@ static inline void sc_usb_ktime_from_us(
 
 			t->ts_us_lo = timestamp_us;
 			ts_us = ((u64)t->ts_us_hi << 32) | timestamp_us;
-		}
-		else {
+		} else {
 			// netdev_dbg(usb_priv->netdev, "late ts=%lu lo=%lu\n", (unsigned long)timestamp_us, (unsigned long)t->ts_us_lo);
 			ts_us = ((u64)t->ts_us_hi << 32) | t->ts_us_lo;
 			ts_us -= t->ts_us_lo - timestamp_us;
 		}
-	}
-	else {
+	} else {
 		netdev_dbg(usb_priv->netdev, "init ts=%lu\n", (unsigned long)timestamp_us);
 		t->ts_initialized = 1;
 		t->ts_us_lo = timestamp_us;
@@ -256,11 +255,29 @@ static inline int sc_cmd_send_receive(struct sc_usb_priv *usb_priv, unsigned int
 	return sc_usb_cmd_send_receive(usb_priv, usb_priv->cmd_epp, usb_priv->tx_cmd_buffer, cmd_len, usb_priv->rx_cmd_buffer);
 }
 
+
+static int sc_bus(struct sc_usb_priv *usb_priv, int on)
+{
+	struct sc_msg_config *bus = (struct sc_msg_config *)usb_priv->tx_cmd_buffer;
+	int rc = 0;
+
+	memset(bus, 0, sizeof(*bus));
+	bus->id = SC_MSG_BUS;
+	bus->len = sizeof(*bus);
+	bus->arg = usb_priv->host_to_dev16(on);
+
+	netdev_dbg(usb_priv->netdev, "bus %s\n", on ? "on" : "off");
+	rc = sc_cmd_send_receive(usb_priv, sizeof(*bus));
+	if (rc)
+		return rc;
+
+	return 0;
+}
+
 static int sc_usb_netdev_close(struct net_device *netdev)
 {
 	struct sc_net_priv *priv = netdev_priv(netdev);
 	struct sc_usb_priv *usb_priv = priv->usb;
-	struct sc_msg_config *bus_off = (struct sc_msg_config *)usb_priv->tx_cmd_buffer;
 	int rc = 0;
 	unsigned int i = 0;
 
@@ -271,12 +288,9 @@ static int sc_usb_netdev_close(struct net_device *netdev)
 	netdev_dbg(netdev, "device closed\n");
 	priv->can.state = CAN_STATE_STOPPED;
 
-	memset(bus_off, 0, sizeof(*bus_off));
-	bus_off->id = SC_MSG_BUS;
-	bus_off->len = sizeof(*bus_off);
-	rc = sc_cmd_send_receive(usb_priv, bus_off->len);
+	rc = sc_bus(usb_priv, 0);
 	if (rc)
-		netdev_dbg(netdev, "failed to go off bus (%d)\n", rc);
+		netdev_dbg(netdev, "bus off failed (%d)\n", rc);
 
 	for (i = 0; i < usb_priv->rx_urb_count; ++i) {
 		struct sc_urb_data *urb_data = &usb_priv->rx_urb_ptr[i];
@@ -550,6 +564,10 @@ static int sc_usb_process_can_rx(struct sc_usb_priv *usb_priv, struct sc_msg_can
 
 	sc_usb_ktime_from_us(usb_priv, timestamp_us, &skb_hwtstamps(skb)->hwtstamp);
 
+
+	// netdev_dbg(netdev, "ts=%lu delta %ld (hex) %lx\n", (unsigned long)timestamp_us, (long)(timestamp_us - usb_priv->rx_last), (long)(timestamp_us - usb_priv->rx_last));
+	// usb_priv->rx_last = timestamp_us;
+
 	netif_rx(skb);
 
 	return 0;
@@ -820,8 +838,6 @@ static void sc_usb_rx_completed(struct urb *urb)
 	}
 }
 
-
-
 static int sc_usb_submit_rx_urbs(struct sc_usb_priv *usb_priv)
 {
 	int rc = 0;
@@ -846,13 +862,11 @@ static int sc_usb_submit_rx_urbs(struct sc_usb_priv *usb_priv)
 	return rc;
 }
 
-
 static int sc_apply_configuration(struct sc_usb_priv *usb_priv)
 {
 	struct sc_net_priv *net_priv = netdev_priv(usb_priv->netdev);
-	struct sc_msg_config *conf = (struct sc_msg_config *)usb_priv->tx_cmd_buffer;
 	struct sc_msg_features *feat = (struct sc_msg_features *)usb_priv->tx_cmd_buffer;
-	struct sc_msg_bittiming *bt = (struct sc_msg_bittiming *)usb_priv->tx_cmd_buffer;
+
 	int rc = 0;
 	int can_fd_mode = (net_priv->can.ctrlmode & CAN_CTRLMODE_FD) == CAN_CTRLMODE_FD;
 	int single_shot_mode = (net_priv->can.ctrlmode & CAN_CTRLMODE_ONE_SHOT) == CAN_CTRLMODE_ONE_SHOT;
@@ -879,53 +893,6 @@ static int sc_apply_configuration(struct sc_usb_priv *usb_priv)
 	if (rc)
 		return rc;
 
-	// bittiming
-	memset(bt, 0, sizeof(*bt));
-	bt->id = SC_MSG_NM_BITTIMING;
-	bt->len = sizeof(*bt);
-	bt->brp = usb_priv->host_to_dev16(net_priv->can.bittiming.brp);
-	bt->sjw = net_priv->can.bittiming.sjw;
-	bt->tseg1 = usb_priv->host_to_dev16(net_priv->can.bittiming.prop_seg + net_priv->can.bittiming.phase_seg1);
-	bt->tseg2 = net_priv->can.bittiming.phase_seg2;
-	netdev_dbg(usb_priv->netdev, "nominal brp=%lu sjw=%lu tseg1=%lu, tseg2=%lu bitrate=%lu\n",
-		(unsigned long)net_priv->can.bittiming.brp, (unsigned long)net_priv->can.bittiming.sjw,
-		(unsigned long)(net_priv->can.bittiming.prop_seg + net_priv->can.bittiming.phase_seg1),
-		(unsigned long)net_priv->can.bittiming.phase_seg2, (unsigned long)net_priv->can.bittiming.bitrate);
-
-	netdev_dbg(usb_priv->netdev, "set nomimal bittiming\n");
-	rc = sc_cmd_send_receive(usb_priv, sizeof(*bt));
-	if (rc)
-		return rc;
-
-	if (can_fd_mode) {
-		bt->id = SC_MSG_DT_BITTIMING;
-		bt->brp = usb_priv->host_to_dev16(net_priv->can.data_bittiming.brp);
-		bt->sjw = net_priv->can.data_bittiming.sjw;
-		bt->tseg1 = usb_priv->host_to_dev16(net_priv->can.data_bittiming.prop_seg + net_priv->can.data_bittiming.phase_seg1);
-		bt->tseg2 = net_priv->can.data_bittiming.phase_seg2;
-		netdev_dbg(usb_priv->netdev, "data brp=%lu sjw=%lu tseg1=%lu, tseg2=%lu bitrate=%lu\n",
-			(unsigned long)net_priv->can.data_bittiming.brp, (unsigned long)net_priv->can.data_bittiming.sjw,
-			(unsigned long)(net_priv->can.data_bittiming.prop_seg + net_priv->can.data_bittiming.phase_seg1),
-			(unsigned long)net_priv->can.data_bittiming.phase_seg2, (unsigned long)net_priv->can.data_bittiming.bitrate);
-
-		netdev_dbg(usb_priv->netdev, "set data bittiming\n");
-		rc = sc_cmd_send_receive(usb_priv, sizeof(*bt));
-		if (rc)
-			return rc;
-	}
-
-	// bus on
-	memset(conf, 0, sizeof(*conf));
-	conf->id = SC_MSG_BUS;
-	conf->len = sizeof(*conf);
-	conf->arg = usb_priv->host_to_dev16(1);
-
-	netdev_dbg(usb_priv->netdev, "bus on\n");
-	rc = sc_cmd_send_receive(usb_priv, sizeof(*conf));
-	if (rc)
-		return rc;
-
-
 	return 0;
 }
 
@@ -943,7 +910,13 @@ static int sc_usb_netdev_open(struct net_device *netdev)
 
 	rc = sc_apply_configuration(usb_priv);
 	if (rc) {
-		netdev_dbg(netdev, "apply config failed: %d\n", rc);
+		netdev_dbg(netdev, "apply configuration failed: %d\n", rc);
+		goto fail;
+	}
+
+	rc = sc_bus(usb_priv, 1);
+	if (rc) {
+		netdev_dbg(netdev, "bus on failed: %d\n", rc);
 		goto fail;
 	}
 
@@ -1065,20 +1038,46 @@ static netdev_tx_t sc_usb_netdev_start_xmit(struct sk_buff *skb, struct net_devi
 
 static int sc_usb_can_set_bittiming(struct net_device *netdev)
 {
-	netdev_dbg(netdev, "set nominal bittiming\n");
-	return 0;
+	struct sc_net_priv *net_priv = netdev_priv(netdev);
+	struct sc_usb_priv *usb_priv = net_priv->usb;
+	struct sc_msg_bittiming *bt = (struct sc_msg_bittiming *)usb_priv->tx_cmd_buffer;
+
+	memset(bt, 0, sizeof(*bt));
+	bt->id = SC_MSG_NM_BITTIMING;
+	bt->len = sizeof(*bt);
+	bt->brp = usb_priv->host_to_dev16(net_priv->can.bittiming.brp);
+	bt->sjw = net_priv->can.bittiming.sjw;
+	bt->tseg1 = usb_priv->host_to_dev16(net_priv->can.bittiming.prop_seg + net_priv->can.bittiming.phase_seg1);
+	bt->tseg2 = net_priv->can.bittiming.phase_seg2;
+	netdev_dbg(usb_priv->netdev, "nominal brp=%lu sjw=%lu tseg1=%lu, tseg2=%lu bitrate=%lu\n",
+		(unsigned long)net_priv->can.bittiming.brp, (unsigned long)net_priv->can.bittiming.sjw,
+		(unsigned long)(net_priv->can.bittiming.prop_seg + net_priv->can.bittiming.phase_seg1),
+		(unsigned long)net_priv->can.bittiming.phase_seg2, (unsigned long)net_priv->can.bittiming.bitrate);
+
+	netdev_dbg(usb_priv->netdev, "set nomimal bittiming\n");
+	return sc_cmd_send_receive(usb_priv, sizeof(*bt));
 }
 
 static int sc_usb_can_set_data_bittiming(struct net_device *netdev)
 {
-	netdev_dbg(netdev, "set data bittiming\n");
-	return 0;
-}
+	struct sc_net_priv *net_priv = netdev_priv(netdev);
+	struct sc_usb_priv *usb_priv = net_priv->usb;
+	struct sc_msg_bittiming *bt = (struct sc_msg_bittiming *)usb_priv->tx_cmd_buffer;
 
-static int sc_usb_can_set_mode(struct net_device *netdev, enum can_mode mode)
-{
-	netdev_dbg(netdev, "set mode %d\n", mode);
-	return 0;
+	memset(bt, 0, sizeof(*bt));
+	bt->id = SC_MSG_DT_BITTIMING;
+	bt->len = sizeof(*bt);
+	bt->brp = usb_priv->host_to_dev16(net_priv->can.data_bittiming.brp);
+	bt->sjw = net_priv->can.data_bittiming.sjw;
+	bt->tseg1 = usb_priv->host_to_dev16(net_priv->can.data_bittiming.prop_seg + net_priv->can.data_bittiming.phase_seg1);
+	bt->tseg2 = net_priv->can.data_bittiming.phase_seg2;
+	netdev_dbg(usb_priv->netdev, "data brp=%lu sjw=%lu tseg1=%lu, tseg2=%lu bitrate=%lu\n",
+		(unsigned long)net_priv->can.data_bittiming.brp, (unsigned long)net_priv->can.data_bittiming.sjw,
+		(unsigned long)(net_priv->can.data_bittiming.prop_seg + net_priv->can.data_bittiming.phase_seg1),
+		(unsigned long)net_priv->can.data_bittiming.phase_seg2, (unsigned long)net_priv->can.data_bittiming.bitrate);
+
+	netdev_dbg(usb_priv->netdev, "set data bittiming\n");
+	return sc_cmd_send_receive(usb_priv, sizeof(*bt));
 }
 
 static int sc_usb_can_get_berr_counter(const struct net_device *netdev, struct can_berr_counter *bec)
@@ -1318,7 +1317,7 @@ static int sc_usb_netdev_init(struct sc_usb_priv *usb_priv)
 	net_priv->can.state = CAN_STATE_STOPPED;
 	net_priv->can.clock.freq = usb_priv->can_clock_hz;
 
-	net_priv->can.do_set_mode = &sc_usb_can_set_mode;
+	// net_priv->can.do_set_mode = &sc_usb_can_set_mode;
 	net_priv->can.do_get_berr_counter = &sc_usb_can_get_berr_counter;
 	net_priv->can.bittiming_const = &usb_priv->nominal;
 	net_priv->can.do_set_bittiming = &sc_usb_can_set_bittiming;
