@@ -96,7 +96,6 @@ struct sc_usb_priv {
 	u8 rx_urb_count;
 	u8 tx_urb_count;
 	u8 tx_urb_available_count;
-	u8 ready;
 	u8 prev_rx_fifo_size;
 	u8 prev_tx_fifo_size;
 };
@@ -317,8 +316,6 @@ static int sc_usb_netdev_close(struct net_device *netdev)
 	// reset time
 	memset(&usb_priv->device_time_tracker, 0, sizeof(usb_priv->device_time_tracker));
 
-
-	WRITE_ONCE(usb_priv->ready, 0);
 
 	usb_priv->prev_rx_fifo_size = 0;
 	usb_priv->prev_tx_fifo_size = 0;
@@ -789,7 +786,6 @@ static void sc_usb_rx_completed(struct urb *urb)
 	struct sc_urb_data *urb_data = NULL;
 	struct sc_usb_priv *usb_priv = NULL;
 	int rc = 0;
-	unsigned int ready = 0;
 
 	BUG_ON(!urb);
 	BUG_ON(!urb->context);
@@ -798,11 +794,8 @@ static void sc_usb_rx_completed(struct urb *urb)
 	usb_priv = urb_data->usb_priv;
 
 	if (likely(urb->status == 0)) {
-		ready = READ_ONCE(usb_priv->ready);
-		if (likely(ready)) {
-			if (likely(urb->actual_length > 0))
+		if (likely(urb->actual_length > 0))
 				sc_usb_process_rx_buffer(usb_priv, (u8 *)urb->transfer_buffer, (unsigned int)urb->actual_length);
-		}
 
 		BUG_ON(urb->transfer_buffer_length != usb_priv->msg_buffer_size);
 		rc = usb_submit_urb(urb, GFP_ATOMIC);
@@ -931,7 +924,6 @@ static int sc_usb_netdev_open(struct net_device *netdev)
 	netdev_dbg(netdev, "start queue\n");
 	netif_start_queue(netdev);
 
-	WRITE_ONCE(usb_priv->ready, 1);
 out:
 	return rc;
 
