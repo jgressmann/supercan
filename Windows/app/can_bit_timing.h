@@ -35,7 +35,7 @@ struct can_bit_timing_settings {
 	uint32_t brp;
 	uint32_t tseg1;
 	uint32_t tseg2;
-	uint32_t sjw;;
+	uint32_t sjw;
 };
 
 struct can_bit_timing_hw_contraints {

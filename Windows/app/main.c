@@ -28,6 +28,7 @@
 #include "supercan_winapi.h"
 #include "supercan_dll.h"
 #include "sc_app.h"
+#include "can_bit_timing.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -196,13 +197,17 @@ static void usage(FILE* stream)
     fprintf(stream, "supercan_app [options]\n");
     fprintf(stream, "\n");
     fprintf(stream, "-h, --help, /?     print this help\n");
-    fprintf(stream, "--fd BOOL          enable or disable CAN-FD format\n");
+    fprintf(stream, "--nbitrate INT     nominal bitrate\n");
+    fprintf(stream, "--dbitrate INT     data bitrate (CAN-FD)\n");
+    fprintf(stream, "--nswj INT         nominal SJW (defaults to 1)\n");
+    fprintf(stream, "--dswj INT         data SJW (defaults to 1)\n");
+    fprintf(stream, "--fd BOOL          enable or disable CAN-FD format (defaults to off)\n");
     fprintf(stream, "--log ITEM         enables logging of ITEM which is one of\n");
     fprintf(stream, "   NONE:       no logging\n");
     fprintf(stream, "   RX_DT:      log rx message timestamp deltas\n");
     fprintf(stream, "   RX_MSG:     log rx message content\n");
     fprintf(stream, "   BUS_STATE:  log bus status information\n");
-    fprintf(stream, "   TX:         log tx message information\n");
+    fprintf(stream, "   TX_MSG:         log tx message information\n");
     fprintf(stream, "   TXR:        log tx message receipts\n");
     fprintf(stream, "   ALL:        log everything\n");
 }
@@ -210,7 +215,7 @@ static void usage(FILE* stream)
 #define LOG_FLAG_RX_DT      0x00000001
 #define LOG_FLAG_RX_MSG     0x00000002
 #define LOG_FLAG_BUS_STATE  0x00000004
-#define LOG_FLAG_TX         0x00000008
+#define LOG_FLAG_TX_MSG     0x00000008
 #define LOG_FLAG_TXR        0x00000010
 
 int main(int argc, char** argv)
@@ -218,11 +223,24 @@ int main(int argc, char** argv)
     struct sc_dev_time_tracker tt;
     uint64_t rx_last_ts = 0;
     int error = SC_DLL_ERROR_NONE;
-    uint32_t count;
+    uint32_t count = 0;
     sc_dev_t* dev = NULL;
     sc_dev_context_t dev_ctx;
     bool fdf = false;
+    bool rx_has_xtd_frame = false;
+    bool rx_has_fdf_frame = false;
     unsigned log_flags = 0;
+    struct can_bit_timing_settings nominal_settings, data_settings;
+    struct can_bit_timing_hw_contraints nominal_hw_constraints, data_hw_constraints;
+    struct can_bit_timing_constraints_real nominal_user_constraints, data_user_constraints;
+    nominal_user_constraints.bitrate = 500000;
+    nominal_user_constraints.min_tqs = 0;
+    nominal_user_constraints.sample_point = 0.8f;
+    nominal_user_constraints.sjw = 1;
+    data_user_constraints.bitrate = 500000;
+    data_user_constraints.min_tqs = 0;
+    data_user_constraints.sample_point = 0.7f;
+    data_user_constraints.sjw = 1;
     
     PUCHAR msg_rx_buffers = NULL;
     PUCHAR msg_tx_buffer = NULL;
@@ -266,14 +284,14 @@ int main(int argc, char** argv)
                 if (0 == _stricmp("RX_DT", arg)) {
                     log_flags |= LOG_FLAG_RX_DT;
                 }
-                else if (0 == _stricmp("RX", arg)) {
+                else if (0 == _stricmp("RX_MSG", arg)) {
                     log_flags |= LOG_FLAG_RX_MSG;
                 }
                 else if (0 == _stricmp("BUS_STATE", arg)) {
                     log_flags |= LOG_FLAG_BUS_STATE;
                 }
-                else if (0 == _stricmp("TX", arg)) {
-                    log_flags |= LOG_FLAG_TX;
+                else if (0 == _stricmp("TX_MSG", arg)) {
+                    log_flags |= LOG_FLAG_TX_MSG;
                 }
                 else if (0 == _stricmp("TXR", arg)) {
                     log_flags |= LOG_FLAG_TXR;
@@ -292,6 +310,102 @@ int main(int argc, char** argv)
                 error = SC_DLL_ERROR_INVALID_PARAM;
                 goto Exit;
             }
+        }
+        else if (0 == strcmp("--nbitrate", argv[i])) {
+            if (i + 1 < argc) {
+                char* end = NULL;
+                nominal_user_constraints.bitrate = (uint32_t)strtoul(argv[i + 1], &end, 10);
+                if (!end || end == argv[i + 1]) {
+                    fprintf(stderr, "ERROR failed to convert '%s' to integer\n", argv[i + 1]);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                if (nominal_user_constraints.bitrate == 0 || nominal_user_constraints.bitrate > UINT32_C(1000000)) {
+                    fprintf(stderr, "ERROR invalid bitrate %lu\n", (unsigned long)nominal_user_constraints.bitrate);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                i += 2;
+            }
+            else {
+                fprintf(stderr, "ERROR %s expects a positive integer argument\n", argv[i]);
+                error = SC_DLL_ERROR_INVALID_PARAM;
+                goto Exit;
+            }
+        }
+        else if (0 == strcmp("--dbitrate", argv[i])) {
+            if (i + 1 < argc) {
+                char* end = NULL;
+                data_user_constraints.bitrate = (uint32_t)strtoul(argv[i + 1], &end, 10);
+                if (!end || end == argv[i + 1]) {
+                    fprintf(stderr, "ERROR failed to convert '%s' to integer\n", argv[i + 1]);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                if (data_user_constraints.bitrate == 0 || data_user_constraints.bitrate > UINT32_C(8000000)) {
+                    fprintf(stderr, "ERROR invalid bitrate %lu\n", (unsigned long)data_user_constraints.bitrate);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                i += 2;
+            }
+            else {
+                fprintf(stderr, "ERROR %s expects a positive integer argument\n", argv[i]);
+                error = SC_DLL_ERROR_INVALID_PARAM;
+                goto Exit;
+            }
+        }
+        else if (0 == strcmp("--nsjw", argv[i])) {
+            if (i + 1 < argc) {
+                char* end = NULL;
+                nominal_user_constraints.sjw = (uint8_t)strtoul(argv[i + 1], &end, 10);
+                if (!end || end == argv[i + 1]) {
+                    fprintf(stderr, "ERROR failed to convert '%s' to integer\n", argv[i + 1]);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                if (nominal_user_constraints.sjw == 0) {
+                    fprintf(stderr, "ERROR invalid sjw %u\n", (unsigned)nominal_user_constraints.sjw);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                i += 2;
+            }
+            else {
+                fprintf(stderr, "ERROR %s expects a positive integer argument\n", argv[i]);
+                error = SC_DLL_ERROR_INVALID_PARAM;
+                goto Exit;
+            }
+        }
+        else if (0 == strcmp("--dsjw", argv[i])) {
+        if (i + 1 < argc) {
+            char* end = NULL;
+            data_user_constraints.sjw = (uint8_t)strtoul(argv[i + 1], &end, 10);
+            if (!end || end == argv[i + 1]) {
+                fprintf(stderr, "ERROR failed to convert '%s' to integer\n", argv[i + 1]);
+                error = SC_DLL_ERROR_INVALID_PARAM;
+                goto Exit;
+            }
+
+            if (data_user_constraints.sjw == 0) {
+                fprintf(stderr, "ERROR invalid sjw %u\n", (unsigned)data_user_constraints.sjw);
+                error = SC_DLL_ERROR_INVALID_PARAM;
+                goto Exit;
+            }
+
+            i += 2;
+        }
+        else {
+            fprintf(stderr, "ERROR %s expects a positive integer argument\n", argv[i]);
+            error = SC_DLL_ERROR_INVALID_PARAM;
+            goto Exit;
+        }
         }
         else {
             ++i;
@@ -411,6 +525,61 @@ int main(int argc, char** argv)
         can_info.msg_buffer_size = dev->dev_to_host16(can_info.msg_buffer_size);
         can_info.nmbt_brp_max = dev->dev_to_host16(can_info.nmbt_brp_max);
         can_info.nmbt_tseg1_max = dev->dev_to_host16(can_info.nmbt_tseg1_max);
+
+        
+    }
+
+    // compute hw settings
+    {
+        nominal_hw_constraints.brp_min = can_info.nmbt_brp_min;
+        nominal_hw_constraints.brp_max = can_info.nmbt_brp_max;
+        nominal_hw_constraints.brp_step = 1;
+        nominal_hw_constraints.clock_hz = can_info.can_clk_hz;
+        nominal_hw_constraints.sjw_max = can_info.nmbt_sjw_max;
+        nominal_hw_constraints.tseg1_min = can_info.nmbt_tseg1_min;
+        nominal_hw_constraints.tseg1_max = can_info.nmbt_tseg1_max;
+        nominal_hw_constraints.tseg2_min = can_info.nmbt_tseg2_min;
+        nominal_hw_constraints.tseg2_max = can_info.nmbt_tseg2_max;
+
+        data_hw_constraints.brp_min = can_info.dtbt_brp_min;
+        data_hw_constraints.brp_max = can_info.dtbt_brp_max;
+        data_hw_constraints.brp_step = 1;
+        data_hw_constraints.clock_hz = can_info.can_clk_hz;
+        data_hw_constraints.sjw_max = can_info.dtbt_sjw_max;
+        data_hw_constraints.tseg1_min = can_info.dtbt_tseg1_min;
+        data_hw_constraints.tseg1_max = can_info.dtbt_tseg1_max;
+        data_hw_constraints.tseg2_min = can_info.dtbt_tseg2_min;
+        data_hw_constraints.tseg2_max = can_info.dtbt_tseg2_max;
+
+        error = cbt_real(&nominal_hw_constraints, &nominal_user_constraints, &nominal_settings);
+        switch (error) {
+        case CAN_BTRE_NO_SOLUTION:
+            fprintf(stderr, "The chosen nominal bitrate/sjw cannot be configured on the device.\n");
+            error = -1;
+            goto Exit;
+        case CAN_BTRE_NONE:
+            break;
+        default:
+            fprintf(stderr, "Ooops.\n");
+            error = -1;
+            goto Exit;
+        }
+
+        if (fdf) {
+            error = cbt_real(&data_hw_constraints, &data_user_constraints, &data_settings);
+            switch (error) {
+            case CAN_BTRE_NO_SOLUTION:
+                fprintf(stderr, "The chosen data bitrate/sjw cannot be configured on the device.\n");
+                error = -1;
+                goto Exit;
+            case CAN_BTRE_NONE:
+                break;
+            default:
+                fprintf(stderr, "Ooops.\n");
+                error = -1;
+                goto Exit;
+            }
+        }
     }
 
     // allocate buffers
@@ -434,8 +603,6 @@ int main(int argc, char** argv)
             goto Exit;
         }
     }
-
-    
 
     // setup device
     {
@@ -468,28 +635,24 @@ int main(int argc, char** argv)
         memset(bt, 0, sizeof(*bt));
         bt->id = SC_MSG_NM_BITTIMING;
         bt->len = sizeof(*bt);
-        // 500KBit@80MHz CAN clock
-        // nominal brp=1 sjw=1 tseg1=139 tseg2=20 bitrate=500000 sp=874/1000
-        bt->brp = dev->dev_to_host16(1);
-        bt->sjw = 1;
-        bt->tseg1 = dev->dev_to_host16(139);
-        bt->tseg2 = 20;
+        bt->brp = dev->dev_to_host16(nominal_settings.brp);
+        bt->sjw = nominal_settings.sjw;
+        bt->tseg1 = dev->dev_to_host16(nominal_settings.tseg1);
+        bt->tseg2 = nominal_settings.tseg2;
         cmd_tx_ptr += bt->len;
         ++cmd_count;
 
-        if ((dev_info.feat_perm | dev_info.feat_conf) & SC_FEATURE_FLAG_FDF) {
-            // CAN-FD capable -> configure data bitrate
+        if (fdf && ((dev_info.feat_perm | dev_info.feat_conf) & SC_FEATURE_FLAG_FDF)) {
+            // CAN-FD capable & configured -> set data bitrate
 
             bt = (struct sc_msg_bittiming*)cmd_tx_ptr;
             memset(bt, 0, sizeof(*bt));
             bt->id = SC_MSG_DT_BITTIMING;
             bt->len = sizeof(*bt);
-            // 2MBit@80MHz CAN clock
-            // data brp = 1 sjw = 1 tseg1 = 29 tseg2 = 10 bitrate = 2000000 sp = 743 / 1000       
-            bt->brp = 1;
-            bt->sjw = 1;
-            bt->tseg1 = 29;
-            bt->tseg2 = 10;
+            bt->brp = dev->dev_to_host16(data_settings.brp);
+            bt->sjw = data_settings.sjw;
+            bt->tseg1 = dev->dev_to_host16(data_settings.tseg1);
+            bt->tseg2 = data_settings.tseg2;
             cmd_tx_ptr += bt->len;
             ++cmd_count;
         }        
@@ -670,13 +833,34 @@ int main(int argc, char** argv)
                     }
 
                     if (log_flags & LOG_FLAG_RX_MSG) {
-                        fprintf(stdout, "%x [%u] ", can_id, len);
+                        if (rx->flags & SC_CAN_FRAME_FLAG_EXT) {
+                            rx_has_xtd_frame = true;
+                        }
+
+                        if (rx->flags & SC_CAN_FRAME_FLAG_FDF) {
+                            rx_has_fdf_frame = true;
+                        }
+
+                        if (rx_has_xtd_frame) {
+                            fprintf(stdout, "%8X ", can_id); 
+                        }
+                        else {
+                            fprintf(stdout, "%3X ", can_id);
+                        }
+
+                        if (rx_has_fdf_frame) {
+                            fprintf(stdout, "[%02u] ", len);
+                        }
+                        else {
+                            fprintf(stdout, "[%u] ", len);
+                        }
+                        
                         if (rx->flags & SC_CAN_FRAME_FLAG_RTR) {
                             fprintf(stdout, "RTR");
                         }
                         else {
                             for (uint8_t i = 0; i < len; ++i) {
-                                fprintf(stdout, "%02x ", rx->data[i]);
+                                fprintf(stdout, "%02X ", rx->data[i]);
                             }
                         }
                         fputc('\n', stdout);
