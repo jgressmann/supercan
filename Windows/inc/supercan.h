@@ -92,6 +92,8 @@ extern "C" {
 #define SC_MSG_CAN_TX           0x22    ///< Host -> Device. Send CAN frame.
 #define SC_MSG_CAN_TXR          0x23    ///< Device -> Host. CAN frame transmission receipt.
 #define SC_MSG_CAN_ERROR        0x24    ///< Device -> Host. CAN frame error.
+#define SC_MSG_CAN_SEQ          0x25    ///< Device -> Host. CAN sequence number.
+
 
 #define SC_MSG_USER_OFFSET      0x80    ///< Custom device messages
 
@@ -319,6 +321,11 @@ struct sc_msg_can_txr {
     uint32_t timestamp_us;
 } SC_PACKED;
 
+struct sc_msg_can_seq {
+    uint8_t id;
+    uint8_t len;
+    uint16_t seq;
+} SC_PACKED;
 
 enum {
     sc_static_assert_sizeof_sc_msg_header_is_2 = sizeof(int[sizeof(struct sc_msg_header)  == 2 ? 1 : -1]),
@@ -333,6 +340,7 @@ enum {
     sc_static_assert_sc_msg_can_info_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_info) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_features_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_features) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_can_error_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_error) & 0x3) == 0 ? 1 : -1]),
+    sc_static_assert_sc_msg_can_seq_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_seq) & 0x3) == 0 ? 1 : -1]),
 };
 
 #ifdef __cplusplus
