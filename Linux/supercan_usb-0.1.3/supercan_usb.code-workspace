@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "../linux-source-4.19/drivers/net/can"
+		},
+		{
+			"path": "../linux-headers-4.19.0-10-common"
+		}
+	],
+	"settings": {}
+}
