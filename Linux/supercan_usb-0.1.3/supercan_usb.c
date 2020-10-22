@@ -698,6 +698,7 @@ static int sc_usb_process_can_seq(struct sc_usb_priv *usb_priv, struct sc_msg_ca
 {
 	struct net_device *netdev = usb_priv->netdev;
 	u16 dev_seq_no = 0;
+	u16 target_seq_no = 0;
 
 	SC_ASSERT(usb_priv);
 	SC_ASSERT(seq);
@@ -708,16 +709,12 @@ static int sc_usb_process_can_seq(struct sc_usb_priv *usb_priv, struct sc_msg_ca
 	}
 
 	dev_seq_no = usb_priv->host_to_dev16(seq->seq);
-
-	if (dev_seq_no != usb_priv->dev_seq_no) {
-		u16 target_seq_no = usb_priv->dev_seq_no + 1;
-
-		if (dev_seq_no != target_seq_no)
-			netdev_warn(netdev, "seq desync dev=%04x host=%04x\n", dev_seq_no, target_seq_no);
+	target_seq_no = usb_priv->dev_seq_no + 1;
+	if (dev_seq_no != target_seq_no)
+		netdev_warn(netdev, "seq desync dev=%04x host=%04x\n", dev_seq_no, target_seq_no);
 
 
-		usb_priv->dev_seq_no = dev_seq_no;
-	}
+	usb_priv->dev_seq_no = dev_seq_no;
 
 	// if (net_ratelimit())
 	// 	netdev_dbg(netdev, "seq no %04x\n", usb_priv->dev_seq_no);
