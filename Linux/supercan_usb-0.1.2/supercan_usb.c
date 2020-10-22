@@ -46,7 +46,7 @@
 #define SC_VERIFY(condition, recovery) \
 	do { \
 		if (unlikely(!(condition))) { \
-  			pr_crit("check failed: '" #condition "' @ %s:%d\n", __func__, __LINE__); \
+  			pr_crit(SC_NAME " check failed: '" #condition "' @ %s:%d\n", __func__, __LINE__); \
 			do { recovery; } while (0); \
 		} \
 	} while (0)
@@ -57,7 +57,7 @@
 	#define SC_ASSERT(x) \
 		do { \
 			if (unlikely(!(x))) \
-					pr_crit("assertion failed: '" #x "' @ %s:%d\n", __func__, __LINE__); \
+					pr_crit(SC_NAME " assertion failed: '" #x "' @ %s:%d\n", __func__, __LINE__); \
 		} while (0)
 #endif
 
@@ -645,7 +645,7 @@ static int sc_usb_process_can_txr(struct sc_usb_priv *usb_priv, struct sc_msg_ca
 		return -ERANGE;
 	}
 
-	netdev_dbg(netdev, "txr id %u %s\n", index, (txr->flags & SC_CAN_FRAME_FLAG_DRP) ? "dropped" : "transmitted");
+//	netdev_dbg(netdev, "txr id %u %s\n", index, (txr->flags & SC_CAN_FRAME_FLAG_DRP) ? "dropped" : "transmitted");
 
 
 	timestamp_us = usb_priv->host_to_dev32(txr->timestamp_us);
