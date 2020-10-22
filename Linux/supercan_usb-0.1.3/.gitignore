@@ -1,4 +1,5 @@
 *.cmd
+*.code-workspace
 *.ko
 *.mod.c
 *.o
@@ -6,6 +7,7 @@
 sc.h
 Module.symvers
 modules.order 
+
 
 
 
