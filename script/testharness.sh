@@ -173,7 +173,7 @@ sleep 2
 
 cangen $single_sender_can_gen_flags $can_good
 
-
+# brittle!
 sleep 3
 kill $good_to_test_test_pid $good_to_test_good_pid 2>/dev/null || true
 
@@ -235,7 +235,7 @@ sleep 2
 
 cangen $single_sender_can_gen_flags $can_test
 
-
+# brittle!
 sleep 3
 kill $test_to_good_test_pid $test_to_good_good_pid 2>/dev/null || true
 
@@ -311,7 +311,7 @@ echo INFO: Waiting for sends to finish
 wait $both_good_cangen_pid
 wait $both_test_cangen_pid
 
-
+# brittle!
 sleep 3
 kill $both_test_candump_pid $both_good_candump_pid 2>/dev/null || true
 
