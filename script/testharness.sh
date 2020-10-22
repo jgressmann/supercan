@@ -404,7 +404,7 @@ ts_slow_can_gen_flags="-e -I 123456 -L 64 -D r -g 1000 -b -n $ts_slow_max_frames
 ts_slow_jitter_threshold_ms=5
 
 echo
-echo INFO: Sending from good -\> test with at fixed interval of 1 \[s\]
+echo INFO: Sending from good -\> test with a fixed interval of 1 \[s\]
 ts_slow_good_to_test_path=$log_dir/ts_slow_good_to_test.log
 candump -n $(($ts_slow_max_frames)) -H -t z -L $can_test >"$ts_slow_good_to_test_path" &
 ts_slow_good_to_test_test_pid=$!
@@ -443,7 +443,7 @@ set -e
 # test > good timestamp quality
 ##############################################
 echo
-echo INFO: Sending from test -\> good with at fixed interval of 1 \[s\]
+echo INFO: Sending from test -\> good with a fixed interval of 1 \[s\]
 ts_slow_test_to_good_path=$log_dir/ts_slow_test_to_good.log
 candump -n $(($ts_slow_max_frames)) -H -t z -L $can_test >"$ts_slow_test_to_good_path" &
 ts_slow_test_to_good_test_pid=$!
@@ -485,7 +485,7 @@ ts_fast_can_gen_flags="-I 1 -L 0 -g 1 -n $ts_fast_max_frames"
 ts_fast_jitter_threshold_ms=5
 
 echo
-echo INFO: Sending from good -\> test with at fixed interval of 1 \[ms\]
+echo INFO: Sending from good -\> test with a fixed interval of 1 \[ms\]
 ts_fast_good_to_test_path=$log_dir/ts_fast_good_to_test.log
 candump -n $(($ts_fast_max_frames)) -H -t z -L $can_test >"$ts_fast_good_to_test_path" &
 ts_fast_good_to_test_test_pid=$!
@@ -525,7 +525,7 @@ set -e
 
 
 echo
-echo INFO: Sending from test -\> good with at fixed interval of 1 \[ms\]
+echo INFO: Sending from test -\> good with a fixed interval of 1 \[ms\]
 ts_fast_test_to_good_path=$log_dir/ts_fast_test_to_good.log
 candump -n $(($ts_fast_max_frames)) -H -t z -L $can_test >"$ts_fast_test_to_good_path" &
 ts_fast_test_go_good_test_pid=$!
