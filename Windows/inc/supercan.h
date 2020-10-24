@@ -85,6 +85,7 @@ extern "C" {
 #define SC_MSG_BUS              0x1e    ///< Host <-> Device. Go on / off bus. Device responds with SC_MSG_ERROR
 #define SC_MSG_ERROR            0x1f    ///< Device -> Host. Error code of last command.
 
+#define SC_MSG_CAN_LEN_MULTIPLE 4
 
 
 #define SC_MSG_CAN_STATUS       0x20    ///< Device -> Host. Status of the CAN bus.
@@ -93,6 +94,7 @@ extern "C" {
 #define SC_MSG_CAN_TXR          0x23    ///< Device -> Host. CAN frame transmission receipt.
 #define SC_MSG_CAN_ERROR        0x24    ///< Device -> Host. CAN frame error.
 #define SC_MSG_CAN_SEQ          0x25    ///< Device -> Host. CAN sequence number.
+#define SC_MSG_CAN_NOP          0x26    ///< Device -> Host. Used to fill URB to endpoint transfer size
 
 
 #define SC_MSG_USER_OFFSET      0x80    ///< Custom device messages
@@ -334,11 +336,11 @@ enum {
     sc_static_assert_sc_msg_hello_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_hello) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_dev_info_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_dev_info) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_bittiming_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_bittiming) & 0x3) == 0 ? 1 : -1]),
-    sc_static_assert_sc_msg_can_txr_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_txr) & 0x3) == 0 ? 1 : -1]),
-    sc_static_assert_sc_msg_can_status_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_status) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_config_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_config) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_can_info_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_info) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_features_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_features) & 0x3) == 0 ? 1 : -1]),
+    sc_static_assert_sc_msg_can_txr_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_txr) & 0x3) == 0 ? 1 : -1]),
+    sc_static_assert_sc_msg_can_status_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_status) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_can_error_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_error) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_can_seq_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_seq) & 0x3) == 0 ? 1 : -1]),
 };
