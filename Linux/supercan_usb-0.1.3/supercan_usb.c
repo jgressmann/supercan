@@ -734,6 +734,8 @@ static int sc_usb_process_msg(struct sc_usb_priv *usb_priv, struct sc_msg_header
 		return sc_usb_process_can_rx(usb_priv, (struct sc_msg_can_rx *)hdr);
 	case SC_MSG_CAN_TXR:
 		return sc_usb_process_can_txr(usb_priv, (struct sc_msg_can_txr *)hdr);
+	case SC_MSG_CAN_NOP:
+		return 0;
 	case SC_MSG_CAN_ERROR:
 		return sc_usb_process_can_error(usb_priv, (struct sc_msg_can_error *)hdr);
 	default:
