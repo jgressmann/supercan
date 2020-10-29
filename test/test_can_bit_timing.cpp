@@ -46,38 +46,38 @@ struct fixture
 
     fixture()
     {
-        set_m_can_nominal_at_80_mhz();
+	set_m_can_nominal_at_80_mhz();
 
-        user.sjw = 1;
-        user.bitrate = 500000;
-        user.sample_point = .8f;
-        user.min_tqs = 0;
+	user.sjw = 1;
+	user.bitrate = 500000;
+	user.sample_point = .8f;
+	user.min_tqs = 0;
     }
 
     void set_m_can_nominal_at_80_mhz()
     {
-        hw.brp_min = 1;
-        hw.brp_max = 0x0200;
-        hw.brp_step = 1;
-        hw.sjw_max = 0x0080;
-        hw.tseg1_min = 0x0002;
-        hw.tseg1_max = 0x0100;
-        hw.tseg2_min = 0x0002;
-        hw.tseg2_max = 0x0080;
-        hw.clock_hz = UINT32_C(80000000);
+	hw.brp_min = 1;
+	hw.brp_max = 0x0200;
+	hw.brp_step = 1;
+	hw.sjw_max = 0x0080;
+	hw.tseg1_min = 0x0002;
+	hw.tseg1_max = 0x0100;
+	hw.tseg2_min = 0x0002;
+	hw.tseg2_max = 0x0080;
+	hw.clock_hz = UINT32_C(80000000);
     }
 
     void set_m_can_data_at_80_mhz()
     {
-        hw.brp_min = 1;
-        hw.brp_max = 0x20;
-        hw.brp_step = 1;
-        hw.sjw_max = 0x10;
-        hw.tseg1_min = 0x01;
-        hw.tseg1_max = 0x20;
-        hw.tseg2_min = 0x01;
-        hw.tseg2_max = 0x10;
-        hw.clock_hz = UINT32_C(80000000);
+	hw.brp_min = 1;
+	hw.brp_max = 0x20;
+	hw.brp_step = 1;
+	hw.sjw_max = 0x10;
+	hw.tseg1_min = 0x01;
+	hw.tseg1_max = 0x20;
+	hw.tseg2_min = 0x01;
+	hw.tseg2_max = 0x10;
+	hw.clock_hz = UINT32_C(80000000);
     }
 };
 
