@@ -41,7 +41,8 @@
 #   define _countof(x) (sizeof(x)/sizeof((x)[0]))
 #endif
 
-#define MAX_PENDING_READS 16
+#define CMD_TIMEOUT_MS 1000
+
 #define SC_DLL_ERROR_BUFFER_TOO_SMALL 1000
 #define SC_DLL_ERROR_INSUFFICIENT_DATA 1001
 
@@ -55,134 +56,6 @@ static inline uint8_t dlc_to_len(uint8_t dlc)
     };
     return map[dlc & 0xf];
 }
-
-typedef struct sc_dev_context {
-    sc_dev_t* dev;
-    PUCHAR cmd_tx_buffer;
-    PUCHAR cmd_rx_buffer;
-    OVERLAPPED cmd_tx_ov, cmd_rx_ov;
-} sc_dev_context_t;
-
-static void sc_dev_ctx_uninit(sc_dev_context_t* ctx)
-{
-    if (ctx->cmd_tx_ov.hEvent) {
-        CloseHandle(ctx->cmd_tx_ov.hEvent);
-        ctx->cmd_tx_ov.hEvent = NULL;
-    }
-
-    if (ctx->cmd_rx_ov.hEvent) {
-        CloseHandle(ctx->cmd_rx_ov.hEvent);
-        ctx->cmd_rx_ov.hEvent = NULL;
-    }
-
-    if (ctx->cmd_tx_buffer) {
-        free(ctx->cmd_tx_buffer);
-        ctx->cmd_tx_buffer = NULL;
-    }
-
-    if (ctx->cmd_rx_buffer) {
-        free(ctx->cmd_rx_buffer);
-        ctx->cmd_rx_buffer = NULL;
-    }
-}
-
-static int sc_dev_ctx_init(sc_dev_context_t* ctx, sc_dev_t* dev)
-{
-    int error = SC_DLL_ERROR_NONE;
-
-    memset(ctx, 0, sizeof(*ctx));
-    ctx->dev = dev;
-
-    ctx->cmd_tx_ov.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
-    if (!ctx->cmd_tx_ov.hEvent) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Error;
-    }
-    
-    ctx->cmd_rx_ov.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
-    if (!ctx->cmd_rx_ov.hEvent) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Error;
-    }
-
-    ctx->cmd_tx_buffer = malloc(ctx->dev->cmd_buffer_size);
-    if (!ctx->cmd_tx_buffer) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Error;
-    }
-    ctx->cmd_rx_buffer = malloc(ctx->dev->cmd_buffer_size);
-    if (!ctx->cmd_rx_buffer) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Error;
-    }
-
-Exit:
-    return error;
-Error:
-    sc_dev_ctx_uninit(ctx);
-    goto Exit;
-}
-
-static int sc_dev_ctx_send_receive_cmd(
-    sc_dev_context_t* ctx, 
-    size_t cmd_len, 
-    size_t *response_len)
-{
-    int error = SC_DLL_ERROR_NONE;
-    DWORD transferred = 0;
-    sc_dev_t* dev = ctx->dev;
-
-
-    if (cmd_len > dev->cmd_buffer_size) {
-        return SC_DLL_ERROR_INVALID_PARAM;
-    }
-
-    // submit in token
-    while (1) {
-        error = sc_dev_read(dev, dev->cmd_epp | 0x80, ctx->cmd_rx_buffer, dev->cmd_buffer_size, &ctx->cmd_rx_ov);
-        if (SC_DLL_ERROR_NONE == error) {
-            continue; // clear pending data
-        }
-
-        if (SC_DLL_ERROR_IO_PENDING != error) {
-            return error;
-        }
-
-        break;
-    }
-
-    error = sc_dev_write(dev, dev->cmd_epp, ctx->cmd_tx_buffer, (ULONG)cmd_len, &ctx->cmd_tx_ov);
-    switch (error) {
-    case SC_DLL_ERROR_NONE:
-    case SC_DLL_ERROR_IO_PENDING:
-        break;
-    default:
-        return error;
-    }
-    
-
-    error = sc_dev_result(dev, &transferred, &ctx->cmd_tx_ov, -1);
-    if (error) {
-        fprintf(stderr, "sc_dev_result failed: %s (%d)\n", sc_strerror(error), error);
-        return error;
-    }
-
-    if (transferred != cmd_len) {
-        fprintf(stderr, "sc_dev_write incomplete\n");
-        return SC_DLL_ERROR_UNKNOWN;
-    }
-
-    error = sc_dev_result(dev, &transferred, &ctx->cmd_rx_ov, -1);
-    if (error) {
-        fprintf(stderr, "sc_dev_result failed: %s (%d)\n", sc_strerror(error), error);
-        return error;
-    }
-
-    *response_len = transferred;
-
-    return error;
-}
-
 
 static bool is_false(char const* str)
 {
@@ -458,7 +331,7 @@ int main(int argc, char** argv)
     int error = SC_DLL_ERROR_NONE;
     uint32_t count = 0;
     sc_dev_t* dev = NULL;
-    sc_dev_context_t dev_ctx;
+    sc_cmd_ctx_t cmd_ctx;
     sc_can_stream_t stream = NULL;
     bool fdf = false;
     unsigned log_flags = 0;
@@ -483,7 +356,7 @@ int main(int argc, char** argv)
     uint8_t track_id = 0;
     uint32_t tx_counter = 0;
 
-    memset(&dev_ctx, 0, sizeof(dev_ctx));
+    memset(&cmd_ctx, 0, sizeof(cmd_ctx));
     memset(&can_state, 0, sizeof(can_state));
     
     sc_tt_init(&can_state.tt);
@@ -674,19 +547,19 @@ int main(int argc, char** argv)
     can_state.dev = dev;
 
     fprintf(stdout, "cmd epp %#02x, can epp %#02x\n", dev->cmd_epp, dev->can_epp);
-    error = sc_dev_ctx_init(&dev_ctx, dev);
+    error = sc_cmd_ctx_init(&cmd_ctx, dev);
     if (error) {
         goto Exit;
     }
 
     // fetch device info
     {
-        struct sc_msg_req* req = (struct sc_msg_req*)dev_ctx.cmd_tx_buffer;
+        struct sc_msg_req* req = (struct sc_msg_req*)cmd_ctx.tx_buffer;
         memset(req, 0, sizeof(*req));
         req->id = SC_MSG_DEVICE_INFO;
         req->len = sizeof(*req);
-        size_t rep_len;
-        error = sc_dev_ctx_send_receive_cmd(&dev_ctx, req->len, &rep_len);
+        uint16_t rep_len;
+        error = sc_cmd_ctx_run(&cmd_ctx, req->len, &rep_len, CMD_TIMEOUT_MS);
         if (error) {
             goto Exit;
         }
@@ -697,7 +570,7 @@ int main(int argc, char** argv)
             goto Exit;
         }
 
-        memcpy(&dev_info, dev_ctx.cmd_rx_buffer, sizeof(dev_info));
+        memcpy(&dev_info, cmd_ctx.rx_buffer, sizeof(dev_info));
 
         dev_info.feat_perm = dev->dev_to_host16(dev_info.feat_perm);
         dev_info.feat_conf = dev->dev_to_host16(dev_info.feat_conf);
@@ -719,12 +592,12 @@ int main(int argc, char** argv)
 
     // fetch can info
     {
-        struct sc_msg_req* req = (struct sc_msg_req*)dev_ctx.cmd_tx_buffer;
+        struct sc_msg_req* req = (struct sc_msg_req*)cmd_ctx.tx_buffer;
         memset(req, 0, sizeof(*req));
         req->id = SC_MSG_CAN_INFO;
         req->len = sizeof(*req);
-        size_t rep_len;
-        error = sc_dev_ctx_send_receive_cmd(&dev_ctx, req->len, &rep_len);
+        uint16_t rep_len;
+        error = sc_cmd_ctx_run(&cmd_ctx, req->len, &rep_len, CMD_TIMEOUT_MS);
         if (error) {
             goto Exit;
         }
@@ -735,7 +608,7 @@ int main(int argc, char** argv)
             goto Exit;
         }
 
-        memcpy(&can_info, dev_ctx.cmd_rx_buffer, sizeof(can_info));
+        memcpy(&can_info, cmd_ctx.rx_buffer, sizeof(can_info));
 
         can_info.can_clk_hz = dev->dev_to_host32(can_info.can_clk_hz);
         can_info.msg_buffer_size = dev->dev_to_host16(can_info.msg_buffer_size);
@@ -807,7 +680,7 @@ int main(int argc, char** argv)
     // setup device
     {
         unsigned cmd_count = 0;
-        PUCHAR cmd_tx_ptr = dev_ctx.cmd_tx_buffer;
+        PUCHAR cmd_tx_ptr = cmd_ctx.tx_buffer;
 
         // clear features
         struct sc_msg_features* feat = (struct sc_msg_features*)cmd_tx_ptr;
@@ -865,8 +738,8 @@ int main(int argc, char** argv)
         cmd_tx_ptr += bus_on->len;
         ++cmd_count;
 
-        size_t rep_len;
-        error = sc_dev_ctx_send_receive_cmd(&dev_ctx, cmd_tx_ptr - dev_ctx.cmd_tx_buffer, &rep_len);
+        uint16_t rep_len;
+        error = sc_cmd_ctx_run(&cmd_ctx, cmd_tx_ptr - cmd_ctx.tx_buffer, &rep_len, CMD_TIMEOUT_MS);
         if (error) {
             goto Exit;
         }
@@ -878,7 +751,7 @@ int main(int argc, char** argv)
             goto Exit;
         }
 
-        struct sc_msg_error* error_msgs = (struct sc_msg_error*)dev_ctx.cmd_rx_buffer;
+        struct sc_msg_error* error_msgs = (struct sc_msg_error*)cmd_ctx.rx_buffer;
         for (unsigned i = 0; i < cmd_count; ++i) {            
             struct sc_msg_error* error_msg = &error_msgs[i];
             if (SC_ERROR_NONE != error_msg->error) {
@@ -897,7 +770,7 @@ int main(int argc, char** argv)
     const DWORD WAIT_TIMEOUT_MS = 500; // tx on timeout
     DWORD last_send = 0;
     while (1) {
-        error = sc_can_stream_run(stream, 100);
+        error = sc_can_stream_rx(stream, 100);
         if (error) {
             if (SC_DLL_ERROR_TIMEOUT != error) {                
                 fprintf(stderr, "sc_can_stream_run failed: %s (%d)\n", sc_strerror(error), error);
@@ -975,7 +848,7 @@ Exit:
     sc_can_stream_uninit(stream);
 
     if (dev) {
-        sc_dev_ctx_uninit(&dev_ctx);
+        sc_cmd_ctx_uninit(&cmd_ctx);
         sc_dev_close(dev);
     }
 

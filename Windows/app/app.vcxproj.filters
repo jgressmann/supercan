@@ -21,7 +21,7 @@
     <ClCompile Include="sc_app.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="can_bit_timing.c">
+    <ClCompile Include="..\..\src\can_bit_timing.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

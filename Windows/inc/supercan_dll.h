@@ -156,11 +156,51 @@ SC_DLL_API int sc_dev_cancel(sc_dev_t *dev, OVERLAPPED *ov);
 
 
 
+typedef struct sc_cmd_ctx {
+    sc_dev_t* dev;
+    PUCHAR tx_buffer;   // cmd_buffer_size
+    PUCHAR rx_buffer;   // cmd_buffer_size
+    OVERLAPPED tx_ov;
+    OVERLAPPED rx_ov;
+} sc_cmd_ctx_t;
+
+
+/** Uninitializes cmd state */
+SC_DLL_API void sc_cmd_ctx_uninit(sc_cmd_ctx_t* ctx);
+/** Initializes cmd state */
+SC_DLL_API int sc_cmd_ctx_init(sc_cmd_ctx_t* ctx, sc_dev_t* dev);
+
+/** Sends command to device and processes result */
+SC_DLL_API int sc_cmd_ctx_run(
+    sc_cmd_ctx_t* ctx, 
+    uint16_t cmd_bytes, 
+    uint16_t* reply_bytes, 
+    DWORD timeout_ms);
+
 
 typedef void* sc_can_stream_t;
 typedef int (*sc_can_stream_rx_callback)(void* ctx, void const* ptr, uint16_t bytes);
 
+/** Uninitializes the stream
+ * 
+ * \param stream object to uninitialize, can be NULL
+ *
+ */
 SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t stream);
+
+/** Initializes the stream
+ *
+ * \param dev   device
+ * \param buffer_size   size of the device buffer as retrieved
+ *      through sc_msg_can_info.
+ * \param ctx   context passed to rx callback
+ * \param callback  callback to invoke on message reception
+ * \param rreqs  number of read requests to submit to the USB stack
+ *      pass 0 to use default.
+ * \param [out] stream  
+ * 
+ * \returns error code
+ */
 SC_DLL_API int sc_can_stream_init(
     sc_dev_t* dev, 
     DWORD buffer_size, 
@@ -169,8 +209,9 @@ SC_DLL_API int sc_can_stream_init(
     int rreqs, 
     sc_can_stream_t* stream);
 
-SC_DLL_API int sc_can_stream_reset(
-    sc_can_stream_t stream);
+/** Initializes the stream */
+SC_DLL_API int sc_can_stream_reset(sc_can_stream_t stream);
+
 
 SC_DLL_API int sc_can_stream_tx(
     sc_can_stream_t stream,
@@ -179,10 +220,13 @@ SC_DLL_API int sc_can_stream_tx(
     DWORD timeout_ms,
     size_t* written);
 
-
-SC_DLL_API int sc_can_stream_run(
-    sc_can_stream_t stream,
-    DWORD timeout_ms);
+/** Receives messages
+ * 
+ * \param stream    stream
+ * \param timeout_ms    timeout in milliseconds, argument to WaitForMultipleObjects.
+ * \returns error code
+ */
+SC_DLL_API int sc_can_stream_rx(sc_can_stream_t stream, DWORD timeout_ms);
 
 
 #ifdef __cplusplus

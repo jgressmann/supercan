@@ -1151,9 +1151,7 @@ static int sc_process_chunks(
     return SC_DLL_ERROR_NONE;
 }
 
-SC_DLL_API int sc_can_stream_run(
-    sc_can_stream_t _stream,
-    DWORD timeout_ms)
+SC_DLL_API int sc_can_stream_rx(sc_can_stream_t _stream, DWORD timeout_ms)
 {
     struct sc_stream* stream = _stream;
     int error = SC_DLL_ERROR_NONE;
@@ -1418,3 +1416,199 @@ put:
 Exit:
     return error;
 }
+
+
+
+
+SC_DLL_API void sc_cmd_ctx_uninit(sc_cmd_ctx_t* ctx)
+{
+    if (ctx) {
+        if (ctx->rx_ov.hEvent) {
+            CloseHandle(ctx->rx_ov.hEvent);
+            ctx->rx_ov.hEvent = NULL;
+        }
+
+        if (ctx->tx_ov.hEvent) {
+            CloseHandle(ctx->tx_ov.hEvent);
+            ctx->tx_ov.hEvent = NULL;
+        }
+
+        if (ctx->tx_buffer) {
+            free(ctx->tx_buffer);
+            ctx->tx_buffer = NULL;
+        }
+
+        if (ctx->rx_buffer) {
+            free(ctx->rx_buffer);
+            ctx->rx_buffer = NULL;
+        }
+    }
+}
+
+SC_DLL_API int sc_cmd_ctx_init(sc_cmd_ctx_t* ctx, sc_dev_t* dev)
+{
+    int error = SC_DLL_ERROR_NONE;
+
+    if (!ctx || !dev) {
+        error = SC_DLL_ERROR_INVALID_PARAM;
+        goto error_exit;
+    }
+
+    memset(ctx, 0, sizeof(*ctx));
+
+    ctx->dev = dev;
+
+    ctx->tx_ov.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
+    if (!ctx->tx_ov.hEvent) {
+        error = SC_DLL_ERROR_OUT_OF_MEM;
+        goto error_exit;
+    }
+
+    ctx->rx_ov.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
+    if (!ctx->rx_ov.hEvent) {
+        error = SC_DLL_ERROR_OUT_OF_MEM;
+        goto error_exit;
+    }
+
+    ctx->tx_buffer = malloc(ctx->dev->cmd_buffer_size);
+    if (!ctx->tx_buffer) {
+        error = SC_DLL_ERROR_OUT_OF_MEM;
+        goto error_exit;
+    }
+    ctx->rx_buffer = malloc(ctx->dev->cmd_buffer_size);
+    if (!ctx->rx_buffer) {
+        error = SC_DLL_ERROR_OUT_OF_MEM;
+        goto error_exit;
+    }
+
+success_exit:
+    return error;
+
+error_exit:
+    sc_cmd_ctx_uninit(ctx);
+    goto success_exit;
+}
+
+SC_DLL_API int sc_cmd_ctx_run(
+    sc_cmd_ctx_t* ctx, 
+    uint16_t bytes, 
+    uint16_t* response_size, 
+    DWORD timeout_ms)
+{
+    struct sc_dev_ex* dev = NULL;
+    DWORD transferred = 0;
+    DWORD result = 0;
+    int error = SC_DLL_ERROR_NONE;
+    uint16_t dummy;
+    bool rx_submitted = false;
+
+    if (!ctx || !ctx->dev || !bytes || bytes > ctx->dev->cmd_buffer_size) {
+        error = SC_DLL_ERROR_INVALID_PARAM;
+        goto error_exit;
+    }
+
+    if (!response_size) {
+        response_size = &dummy;
+    }
+
+    *response_size = 0;
+
+    dev = (struct sc_dev_ex*)ctx->dev;
+
+    // submit in token
+    if (!WinUsb_ReadPipe(
+        dev->usb_handle,
+        dev->exposed.cmd_epp | 0x80,
+        ctx->rx_buffer,
+        dev->exposed.cmd_buffer_size,
+        NULL,
+        &ctx->rx_ov)) {
+        DWORD e = GetLastError();
+        if (ERROR_IO_PENDING != e) {
+            HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+            error = HrToError(hr);
+            goto error_exit;
+        }
+    }
+
+    rx_submitted = true;
+
+    if (!WinUsb_WritePipe(
+        dev->usb_handle,
+        dev->exposed.cmd_epp,
+        ctx->tx_buffer,
+        bytes,
+        NULL,
+        &ctx->tx_ov)) {
+        DWORD e = GetLastError();
+        if (ERROR_IO_PENDING != e) {
+            HRESULT hr = HRESULT_FROM_WIN32(e);
+            error = HrToError(hr);
+            goto error_exit;
+        }
+    }
+
+    result = WaitForSingleObject(ctx->tx_ov.hEvent, timeout_ms);
+    switch (result) {
+    case WAIT_OBJECT_0:
+        break;
+    case WAIT_TIMEOUT:
+        error = SC_DLL_ERROR_TIMEOUT;
+        CancelIoEx(dev->usb_handle, &ctx->tx_ov);
+        goto error_exit;
+    default: {
+        DWORD e = GetLastError();
+        HRESULT hr = HRESULT_FROM_WIN32(e);
+        error = HrToError(hr);
+        goto error_exit;
+    } break;
+    }
+
+    if (!WinUsb_GetOverlappedResult(dev->usb_handle, &ctx->tx_ov, &transferred, FALSE)) {
+        DWORD e = GetLastError();
+        HRESULT hr = HRESULT_FROM_WIN32(e);
+        error = HrToError(hr);
+        goto error_exit;
+    }
+
+    if (transferred < bytes) {
+        error = SC_DLL_ERROR_DEVICE_FAILURE;
+        goto error_exit;
+    }
+
+    result = WaitForSingleObject(ctx->rx_ov.hEvent, timeout_ms);
+    switch (result) {
+    case WAIT_OBJECT_0:
+        break;
+    case WAIT_TIMEOUT:
+        error = SC_DLL_ERROR_TIMEOUT;
+        goto error_exit;
+    default: {
+        DWORD e = GetLastError();
+        HRESULT hr = HRESULT_FROM_WIN32(e);
+        error = HrToError(hr);
+        goto error_exit;
+    } break;
+    }
+
+    rx_submitted = false;
+
+    if (!WinUsb_GetOverlappedResult(dev->usb_handle, &ctx->rx_ov, &transferred, FALSE)) {
+        DWORD e = GetLastError();
+        HRESULT hr = HRESULT_FROM_WIN32(e);
+        error = HrToError(hr);
+        goto error_exit;
+    }
+
+    *response_size = (uint16_t)transferred;
+
+success_exit:
+    return error;
+
+error_exit:
+    if (rx_submitted) {
+        CancelIoEx(dev->usb_handle, &ctx->rx_ov);
+    }
+    goto success_exit;
+}
+
