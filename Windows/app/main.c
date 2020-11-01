@@ -35,6 +35,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <assert.h>
 
 #ifndef _countof
 #   define _countof(x) (sizeof(x)/sizeof((x)[0]))
@@ -45,6 +46,8 @@
 #define SC_DLL_ERROR_INSUFFICIENT_DATA 1001
 
 
+
+
 static inline uint8_t dlc_to_len(uint8_t dlc)
 {
     static const uint8_t map[16] = {
@@ -52,7 +55,6 @@ static inline uint8_t dlc_to_len(uint8_t dlc)
     };
     return map[dlc & 0xf];
 }
-
 
 typedef struct sc_dev_context {
     sc_dev_t* dev;
@@ -218,45 +220,273 @@ static void usage(FILE* stream)
 #define LOG_FLAG_TX_MSG     0x00000008
 #define LOG_FLAG_TXR        0x00000010
 
+
+
+struct can_state {
+    sc_dev_t* dev;
+    struct sc_dev_time_tracker tt;
+    uint64_t rx_last_ts;
+    unsigned log_flags;
+    bool rx_has_xtd_frame;
+    bool rx_has_fdf_frame;
+};
+
+
+
+static bool process_buffer(
+    struct can_state* s,
+    uint8_t *ptr, uint16_t size, uint16_t *left)
+{
+    // process buffer
+    PUCHAR in_beg = ptr;
+    PUCHAR in_end = in_beg + size;
+    PUCHAR in_ptr = in_beg;
+
+    *left = 0;
+
+    while (in_ptr + SC_MSG_HEADER_LEN <= in_end) {
+        struct sc_msg_header const* msg = (struct sc_msg_header const*)in_ptr;
+        if (in_ptr + msg->len > in_end) {
+            *left = (uint16_t)(in_end - in_ptr);
+            break;
+        }
+
+        assert(msg->len);
+
+        if (msg->len < SC_MSG_HEADER_LEN) {
+            fprintf(stderr, "malformed msg, len < SC_MSG_HEADER_LEN\n");
+            return false;
+        }
+
+        in_ptr += msg->len;
+
+        switch (msg->id) {
+        case SC_MSG_EOF: {
+            in_ptr = in_end;
+        } break;
+        case SC_MSG_CAN_STATUS: {
+            struct sc_msg_can_status const* status = (struct sc_msg_can_status const*)msg;
+            if (msg->len < sizeof(*status)) {
+                fprintf(stderr, "malformed sc_msg_status\n");
+                return false;
+            }
+
+            uint32_t timestamp_us = s->dev->dev_to_host32(status->timestamp_us);
+            uint16_t rx_lost = s->dev->dev_to_host16(status->rx_lost);
+            uint16_t tx_dropped = s->dev->dev_to_host16(status->tx_dropped);
+
+            sc_tt_track(&s->tt, timestamp_us);
+
+            if (s->log_flags & LOG_FLAG_BUS_STATE) {
+                fprintf(stdout, "rx lost=%u tx dropped=%u rx errors=%u tx errors=%u bus=", rx_lost, tx_dropped, status->rx_errors, status->tx_errors);
+                switch (status->bus_status) {
+                case SC_CAN_STATUS_ERROR_ACTIVE:
+                    fprintf(stdout, "error_active");
+                    break;
+                case SC_CAN_STATUS_ERROR_WARNING:
+                    fprintf(stdout, "error_warning");
+                    break;
+                case SC_CAN_STATUS_ERROR_PASSIVE:
+                    fprintf(stdout, "error_passive");
+                    break;
+                case SC_CAN_STATUS_BUS_OFF:
+                    fprintf(stdout, "off");
+                    break;
+                default:
+                    fprintf(stdout, "unknown");
+                    break;
+                }
+                fprintf(stdout, "\n");
+            }
+        } break;
+        case SC_MSG_CAN_ERROR: {
+            struct sc_msg_can_error const* error_msg = (struct sc_msg_can_error const*)msg;
+            if (msg->len < sizeof(*error_msg)) {
+                fprintf(stderr, "malformed sc_msg_can_error\n");
+                return false;
+            }
+
+            uint32_t timestamp_us = s->dev->dev_to_host32(error_msg->timestamp_us);
+
+            sc_tt_track(&s->tt, timestamp_us);
+
+            if (SC_CAN_ERROR_NONE != error_msg->error) {
+                fprintf(
+                    stdout, "%s %s ",
+                    (error_msg->flags & SC_CAN_ERROR_FLAG_RXTX_TX) ? "tx" : "rx",
+                    (error_msg->flags & SC_CAN_ERROR_FLAG_NMDT_DT) ? "data" : "arbitration");
+                switch (error_msg->error) {
+                case SC_CAN_ERROR_STUFF:
+                    fprintf(stdout, "stuff ");
+                    break;
+                case SC_CAN_ERROR_FORM:
+                    fprintf(stdout, "form ");
+                    break;
+                case SC_CAN_ERROR_ACK:
+                    fprintf(stdout, "ack ");
+                    break;
+                case SC_CAN_ERROR_BIT1:
+                    fprintf(stdout, "bit1 ");
+                    break;
+                case SC_CAN_ERROR_BIT0:
+                    fprintf(stdout, "bit0 ");
+                    break;
+                case SC_CAN_ERROR_CRC:
+                    fprintf(stdout, "crc ");
+                    break;
+                default:
+                    fprintf(stdout, "<unknown> ");
+                    break;
+                }
+                fprintf(stdout, "error\n");
+            }
+        } break;
+        case SC_MSG_CAN_RX: {
+            struct sc_msg_can_rx const* rx = (struct sc_msg_can_rx const*)msg;
+            uint32_t can_id = s->dev->dev_to_host32(rx->can_id);
+            uint32_t timestamp_us = s->dev->dev_to_host32(rx->timestamp_us);
+            uint8_t len = dlc_to_len(rx->dlc);
+            uint8_t bytes = sizeof(*rx);
+
+            uint64_t ts_us = sc_tt_track(&s->tt, timestamp_us);
+
+            if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR)) {
+                bytes += len;
+            }
+
+            if (msg->len < len) {
+                fprintf(stderr, "malformed sc_msg_can_rx\n");
+                return false;
+            }
+
+            if (s->log_flags & LOG_FLAG_RX_DT) {
+                int64_t dt_us = 0;
+                if (s->rx_last_ts) {
+                    dt_us = ts_us - s->rx_last_ts;
+                    if (dt_us < 0) {
+                        fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
+                    }
+                }
+                else {
+                    s->rx_last_ts = ts_us;
+                }
+
+                fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
+            }
+
+            if (s->log_flags & LOG_FLAG_RX_MSG) {
+                if (rx->flags & SC_CAN_FRAME_FLAG_EXT) {
+                    s->rx_has_xtd_frame = true;
+                }
+
+                if (rx->flags & SC_CAN_FRAME_FLAG_FDF) {
+                    s->rx_has_fdf_frame = true;
+                }
+
+                if (s->rx_has_xtd_frame) {
+                    fprintf(stdout, "%8X ", can_id);
+                }
+                else {
+                    fprintf(stdout, "%3X ", can_id);
+                }
+
+                if (s->rx_has_fdf_frame) {
+                    fprintf(stdout, "[%02u] ", len);
+                }
+                else {
+                    fprintf(stdout, "[%u] ", len);
+                }
+
+                if (rx->flags & SC_CAN_FRAME_FLAG_RTR) {
+                    fprintf(stdout, "RTR");
+                }
+                else {
+                    for (uint8_t i = 0; i < len; ++i) {
+                        fprintf(stdout, "%02X ", rx->data[i]);
+                    }
+                }
+                fputc('\n', stdout);
+            }
+        } break;
+        case SC_MSG_CAN_TXR: {
+            struct sc_msg_can_txr const* txr = (struct sc_msg_can_txr const*)msg;
+            if (msg->len < sizeof(*txr)) {
+                fprintf(stderr, "malformed sc_msg_can_txr\n");
+                return false;
+            }
+
+            uint32_t timestamp_us = s->dev->dev_to_host32(txr->timestamp_us);
+
+            sc_tt_track(&s->tt, timestamp_us);
+
+            if (s->log_flags & LOG_FLAG_TXR) {
+                if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
+                    fprintf(stdout, "tracked message %#02x was dropped @ %08x\n", txr->track_id, timestamp_us);
+                }
+                else {
+                    fprintf(stdout, "tracked message %#02x was sent @ %08x\n", txr->track_id, timestamp_us);
+                }
+            }
+        } break;
+        default:
+            break;
+        }
+    }
+
+    return true;
+}
+
+static int process_can(
+    void* ctx,
+    const uint8_t* ptr, uint16_t size)
+{
+    uint16_t left = 0;
+    if (!process_buffer(ctx, (uint8_t * )ptr, size, &left)) {
+        return -1;
+    }
+
+    if (left) {
+        return -1;
+    }
+
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
-    struct sc_dev_time_tracker tt;
-    uint64_t rx_last_ts = 0;
+    struct can_state can_state;
     int error = SC_DLL_ERROR_NONE;
     uint32_t count = 0;
     sc_dev_t* dev = NULL;
     sc_dev_context_t dev_ctx;
+    sc_can_stream_t stream = NULL;
     bool fdf = false;
-    bool rx_has_xtd_frame = false;
-    bool rx_has_fdf_frame = false;
     unsigned log_flags = 0;
     struct can_bit_timing_settings nominal_settings, data_settings;
     struct can_bit_timing_hw_contraints nominal_hw_constraints, data_hw_constraints;
     struct can_bit_timing_constraints_real nominal_user_constraints, data_user_constraints;
     nominal_user_constraints.bitrate = 500000;
     nominal_user_constraints.min_tqs = 0;
-    nominal_user_constraints.sample_point = 0.8f;
+    nominal_user_constraints.sample_point = 0.75f;
     nominal_user_constraints.sjw = 1;
     data_user_constraints.bitrate = 500000;
     data_user_constraints.min_tqs = 0;
-    data_user_constraints.sample_point = 0.7f;
+    data_user_constraints.sample_point = 0.75f;
     data_user_constraints.sjw = 1;
     
-    PUCHAR msg_rx_buffers = NULL;
     PUCHAR msg_tx_buffer = NULL;
-    HANDLE msg_read_events[MAX_PENDING_READS] = { 0 };
-    OVERLAPPED msg_read_ovs[MAX_PENDING_READS] = { 0 };
-    HANDLE msg_tx_event = NULL;
-    OVERLAPPED msg_tx_ov;
     struct sc_msg_dev_info dev_info;
     struct sc_msg_can_info can_info;
     DWORD transferred = 0;
     char serial_str[1 + sizeof(dev_info.sn_bytes) * 2] = { 0 };
     char name_str[1 + sizeof(dev_info.name_bytes)] = { 0 };
     uint8_t track_id = 0;
+    uint32_t tx_counter = 0;
 
     memset(&dev_ctx, 0, sizeof(dev_ctx));
-    sc_tt_init(&tt);
+    memset(&can_state, 0, sizeof(can_state));
+    
+    sc_tt_init(&can_state.tt);
 
     sc_init();
 
@@ -412,24 +642,8 @@ int main(int argc, char** argv)
         }
     }
 
-    for (size_t i = 0; i < _countof(msg_read_events); ++i) {
-        HANDLE h = CreateEventW(NULL, FALSE, FALSE, NULL);
-        if (!h) {
-            error = -1;
-            goto Exit;
-        }
+    can_state.log_flags = log_flags;
 
-        msg_read_events[i] = h;
-        msg_read_ovs[i].hEvent = h;
-    }
-
-    msg_tx_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-    if (!msg_tx_event) {
-        error = -1;
-        goto Exit;
-    }
-
-    msg_tx_ov.hEvent = msg_tx_event;
 
     error = sc_dev_scan();
     if (error) {
@@ -456,6 +670,8 @@ int main(int argc, char** argv)
         fprintf(stderr, "sc_dev_open failed: %s (%d)\n", sc_strerror(error), error);
         goto Exit;
     }
+
+    can_state.dev = dev;
 
     fprintf(stdout, "cmd epp %#02x, can epp %#02x\n", dev->cmd_epp, dev->can_epp);
     error = sc_dev_ctx_init(&dev_ctx, dev);
@@ -581,27 +797,11 @@ int main(int argc, char** argv)
             }
         }
     }
-
-    // allocate buffers
-    msg_rx_buffers = malloc(can_info.msg_buffer_size * _countof(msg_read_events));
-    if (!msg_rx_buffers) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Exit;
-    }
     
-    msg_tx_buffer = malloc(can_info.msg_buffer_size);
+    msg_tx_buffer = malloc(256); // TX BUFFER WARNING
     if (!msg_tx_buffer) {
         error = SC_DLL_ERROR_OUT_OF_MEM;
         goto Exit;
-    }
-
-
-    // submit all reads tokens
-    for (size_t i = 0; i < _countof(msg_read_events); ++i) {
-        error = sc_dev_read(dev, dev->can_epp | 0x80, msg_rx_buffers + i * can_info.msg_buffer_size, can_info.msg_buffer_size, &msg_read_ovs[i]);
-        if (SC_DLL_ERROR_IO_PENDING != error) {
-            goto Exit;
-        }
     }
 
     // setup device
@@ -689,287 +889,95 @@ int main(int argc, char** argv)
         }
     }
 
-    const DWORD WAIT_TIMEOUT_MS = 500;
-    DWORD last_send = GetTickCount();
+    error = sc_can_stream_init(dev, can_info.msg_buffer_size, &can_state, process_can, -1, &stream);
+    if (error) {
+        goto Exit;
+    }
+
+    const DWORD WAIT_TIMEOUT_MS = 500; // tx on timeout
+    DWORD last_send = 0;
     while (1) {
-        DWORD result = WaitForMultipleObjects(_countof(msg_read_events), msg_read_events, FALSE, WAIT_TIMEOUT_MS);
-        if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + _countof(msg_read_events)) {
-            size_t index = result - WAIT_OBJECT_0;
-            error = sc_dev_result(dev, &transferred, &msg_read_ovs[index], 0);
-            if (error) {
-                fprintf(stderr, "sc_dev_result failed: %s (%d)\n", sc_strerror(error), error);
-                goto Exit;
-            }
-
-            // process buffer
-            PUCHAR in_beg = msg_rx_buffers + can_info.msg_buffer_size * index;
-            PUCHAR in_end = in_beg + transferred;
-            PUCHAR in_ptr = in_beg;
-            while (in_ptr + SC_MSG_HEADER_LEN <= in_end) {
-                struct sc_msg_header const* msg = (struct sc_msg_header const*)in_ptr;
-                if (in_ptr + msg->len > in_end) {
-                    fprintf(stderr, "malformed msg\n");
-                    break;
-                }
-
-                if (!msg->len) {
-                    break;
-                }
-
-                in_ptr += msg->len;
-
-                switch (msg->id) {
-                case SC_MSG_EOF: {
-                    in_ptr = in_end;
-                } break;
-                case SC_MSG_CAN_STATUS: {
-                    struct sc_msg_can_status const* status = (struct sc_msg_can_status const*)msg;
-                    if (msg->len < sizeof(*status)) {
-                        fprintf(stderr, "malformed sc_msg_status\n");
-                        break;
-                    }
-
-                    uint32_t timestamp_us = dev->dev_to_host32(status->timestamp_us);
-                    uint16_t rx_lost = dev->dev_to_host16(status->rx_lost);
-                    uint16_t tx_dropped = dev->dev_to_host16(status->tx_dropped);
-
-                    sc_tt_track(&tt, timestamp_us);
-
-                    if (log_flags & LOG_FLAG_BUS_STATE) {
-                        fprintf(stdout, "rx lost=%u tx dropped=%u rx errors=%u tx errors=%u bus=", rx_lost, tx_dropped, status->rx_errors, status->tx_errors);
-                        switch (status->bus_status) {
-                        case SC_CAN_STATUS_ERROR_ACTIVE:
-                            fprintf(stdout, "error_active");
-                            break;
-                        case SC_CAN_STATUS_ERROR_WARNING:
-                            fprintf(stdout, "error_warning");
-                            break;
-                        case SC_CAN_STATUS_ERROR_PASSIVE:
-                            fprintf(stdout, "error_passive");
-                            break;
-                        case SC_CAN_STATUS_BUS_OFF:
-                            fprintf(stdout, "off");
-                            break;
-                        default:
-                            fprintf(stdout, "unknown");
-                            break;
-                        }
-                        fprintf(stdout, "\n");
-                    }
-                } break;
-                case SC_MSG_CAN_ERROR: {
-                    struct sc_msg_can_error const* error_msg = (struct sc_msg_can_error const*)msg;
-                    if (msg->len < sizeof(*error_msg)) {
-                        fprintf(stderr, "malformed sc_msg_can_error\n");
-                        break;
-                    }
-
-                    uint32_t timestamp_us = dev->dev_to_host32(error_msg->timestamp_us);
-
-                    sc_tt_track(&tt, timestamp_us);
-
-                    if (SC_CAN_ERROR_NONE != error_msg->error) {
-                        fprintf(
-                            stdout, "%s %s ", 
-                            (error_msg->flags & SC_CAN_ERROR_FLAG_RXTX_TX) ? "tx" : "rx",
-                            (error_msg->flags& SC_CAN_ERROR_FLAG_NMDT_DT) ? "data" : "arbitration");
-                        switch (error_msg->error) {
-                        case SC_CAN_ERROR_STUFF:
-                            fprintf(stdout, "stuff ");
-                            break;
-                        case SC_CAN_ERROR_FORM:
-                            fprintf(stdout, "form ");
-                            break;
-                        case SC_CAN_ERROR_ACK:
-                            fprintf(stdout, "ack ");
-                            break;
-                        case SC_CAN_ERROR_BIT1:
-                            fprintf(stdout, "bit1 ");
-                            break;
-                        case SC_CAN_ERROR_BIT0:
-                            fprintf(stdout, "bit0 ");
-                            break;
-                        case SC_CAN_ERROR_CRC:
-                            fprintf(stdout, "crc ");
-                            break;
-                        default:
-                            fprintf(stdout, "<unknown> ");
-                            break;
-                        }
-                        fprintf(stdout, "error\n");
-                    }
-                } break;
-                case SC_MSG_CAN_RX: {
-                    struct sc_msg_can_rx const *rx = (struct sc_msg_can_rx const*)msg;
-                    uint32_t can_id = dev->dev_to_host32(rx->can_id);
-                    uint32_t timestamp_us = dev->dev_to_host32(rx->timestamp_us);
-                    uint8_t len = dlc_to_len(rx->dlc);
-                    uint8_t bytes = sizeof(*rx);
-
-                    uint64_t ts_us = sc_tt_track(&tt, timestamp_us);
-
-                    if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR)) {
-                        bytes += len;
-                    }
-
-                    if (msg->len < len) {
-                        fprintf(stderr, "malformed sc_msg_can_rx\n");
-                        break;
-                    }
-
-                    if (log_flags & LOG_FLAG_RX_DT) {
-                        int64_t dt_us = 0;
-                        if (rx_last_ts) {
-                            dt_us = ts_us - rx_last_ts;
-                            if (dt_us < 0) {
-                                fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
-                            }
-                        }
-                        else {
-                            rx_last_ts = ts_us;
-                        }
-
-                        fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
-                    }
-
-                    if (log_flags & LOG_FLAG_RX_MSG) {
-                        if (rx->flags & SC_CAN_FRAME_FLAG_EXT) {
-                            rx_has_xtd_frame = true;
-                        }
-
-                        if (rx->flags & SC_CAN_FRAME_FLAG_FDF) {
-                            rx_has_fdf_frame = true;
-                        }
-
-                        if (rx_has_xtd_frame) {
-                            fprintf(stdout, "%8X ", can_id); 
-                        }
-                        else {
-                            fprintf(stdout, "%3X ", can_id);
-                        }
-
-                        if (rx_has_fdf_frame) {
-                            fprintf(stdout, "[%02u] ", len);
-                        }
-                        else {
-                            fprintf(stdout, "[%u] ", len);
-                        }
-                        
-                        if (rx->flags & SC_CAN_FRAME_FLAG_RTR) {
-                            fprintf(stdout, "RTR");
-                        }
-                        else {
-                            for (uint8_t i = 0; i < len; ++i) {
-                                fprintf(stdout, "%02X ", rx->data[i]);
-                            }
-                        }
-                        fputc('\n', stdout);
-                    }
-                } break;
-                case SC_MSG_CAN_TXR: {
-                    struct sc_msg_can_txr const* txr = (struct sc_msg_can_txr const*)msg;
-                    uint32_t timestamp_us = dev->dev_to_host32(txr->timestamp_us);
-
-                    sc_tt_track(&tt, timestamp_us);
-                    
-                    if (log_flags & LOG_FLAG_TXR) {
-                        if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
-                            fprintf(stdout, "tracked message %#02x was dropped @ %08x\n", txr->track_id, timestamp_us);
-                        }
-                        else {
-                            fprintf(stdout, "tracked message %#02x was sent @ %08x\n", txr->track_id, timestamp_us);
-                        }
-                    }
-                } break;
-                default:
-                    break;
-                }
-            }
-
-            // re-queue in token
-            error = sc_dev_read(dev, dev->can_epp | 0x80, in_beg, can_info.msg_buffer_size, &msg_read_ovs[index]);
-            if (error) {
-                if (error != SC_DLL_ERROR_IO_PENDING) {
-                    fprintf(stderr, "sc_dev_read failed: %s (%d)\n", sc_strerror(error), error);
-                    goto Exit;
-                }
-
-                error = 0;
-            }
-
-            DWORD now = GetTickCount();
-            if (now - last_send >= WAIT_TIMEOUT_MS) {
-                goto send;
+        error = sc_can_stream_run(stream, 100);
+        if (error) {
+            if (SC_DLL_ERROR_TIMEOUT != error) {                
+                fprintf(stderr, "sc_can_stream_run failed: %s (%d)\n", sc_strerror(error), error);
+                break;
             }
         }
-        else if (WAIT_TIMEOUT == result) {
-            struct sc_msg_can_tx* tx;
-send:
-            tx = (struct sc_msg_can_tx*)msg_tx_buffer;
-            tx->id = SC_MSG_CAN_TX;
-            tx->len = sizeof(*tx) + 4;
-            if (tx->len & 3) {
-                tx->len += 4 - (tx->len & 3);
+
+        DWORD now = GetTickCount();
+        if (now - last_send >= WAIT_TIMEOUT_MS) {
+            uint16_t bytes = 0;
+            PUCHAR ptr = msg_tx_buffer;
+            struct sc_msg_can_tx* tx = (struct sc_msg_can_tx*)ptr;
+            memset(tx, 0, 128);
+
+            bytes = sizeof(*tx) + 64;
+            if (bytes & 3) {
+                bytes += 4 - (bytes & 3);
             }
+
+            ptr += bytes;
+
+            tx->id = SC_MSG_CAN_TX;
+            tx->len = (uint8_t)bytes;
             tx->can_id = 0x42;
-            tx->dlc = 4;
-            tx->flags = 0;
+            tx->dlc = 15;
+            tx->flags = SC_CAN_FRAME_FLAG_FDF | SC_CAN_FRAME_FLAG_BRS;
             tx->track_id = track_id++;
             tx->data[0] = 0xde;
             tx->data[1] = 0xad;
             tx->data[2] = 0xbe;
             tx->data[3] = 0xef;
+            tx->data[4] = (uint8_t)(tx_counter >> 24);
+            tx->data[5] = (uint8_t)(tx_counter >> 16);
+            tx->data[6] = (uint8_t)(tx_counter >> 8);
+            tx->data[7] = (uint8_t)(tx_counter >> 0);
+            
 
-            error = sc_dev_write(dev, dev->can_epp, (uint8_t*)tx, tx->len, &msg_tx_ov);
+            tx = (struct sc_msg_can_tx*)ptr;
+            bytes = sizeof(*tx);
+            if (bytes & 3) {
+                bytes += 4 - (bytes & 3);
+            }
+
+            ptr += bytes;
+
+            tx->id = SC_MSG_CAN_TX;
+            tx->len = (uint8_t)bytes;
+            tx->can_id = 0x12345;
+            tx->dlc = 0;
+            tx->flags = SC_CAN_FRAME_FLAG_EXT;
+            tx->track_id = track_id++;
+            
+            last_send = now;
+
+            size_t w;
+            error = sc_can_stream_tx(stream, msg_tx_buffer, ptr - msg_tx_buffer, -1, &w);
             if (error) {
-                if (error != SC_DLL_ERROR_IO_PENDING) {
-                    fprintf(stderr, "sc_dev_write failed: %s (%d)\n", sc_strerror(error), error);
+                if (SC_DLL_ERROR_AGAIN != error) {
+                    fprintf(stderr, "sc_can_stream_tx failed: %s (%d)\n", sc_strerror(error), error);
                     goto Exit;
                 }
             }
-
-            error = sc_dev_result(dev, &transferred, &msg_tx_ov, -1);
-            if (error) {
-                fprintf(stderr, "sc_dev_result failed: %s (%d)\n", sc_strerror(error), error);
-                goto Exit;
+            else {
+                if (w == bytes) {
+                    fprintf(stderr, "tx %lx\n", tx_counter);
+                    ++tx_counter;
+                }
             }
-
-            last_send = GetTickCount();
-        } else {
-            fprintf(stderr, "WaitForMultipleObjects failed: %s (%d)\n", sc_strerror(error), error);
-            break;
         }
     }
 
+
 Exit:
+    sc_can_stream_uninit(stream);
+
     if (dev) {
-        // cancel any pending I/O prior to event / buffer cleanup
-        for (size_t i = 0; i < _countof(msg_read_events); ++i) {
-            if (msg_read_ovs[i].hEvent) {
-                sc_dev_cancel(dev, &msg_read_ovs[i]);
-            }
-        }
-
-        if (msg_tx_ov.hEvent) {
-            sc_dev_cancel(dev, &msg_tx_ov);
-        }
-
         sc_dev_ctx_uninit(&dev_ctx);
-
         sc_dev_close(dev);
     }
 
-    for (size_t i = 0; i < _countof(msg_read_events); ++i) {
-        if (msg_read_events[i]) {
-            CloseHandle(msg_read_events[i]);
-        }
-    }
-
-    if (msg_tx_event) {
-        CloseHandle(msg_tx_event);
-    }
-
-    free(msg_rx_buffers);
     free(msg_tx_buffer);
     
     sc_uninit();

@@ -1,6 +1,7 @@
 .vs/*
 **/x64/*
 **/Win32/*
-
+Debug/*
+Release/*
 *.aps
 *.user

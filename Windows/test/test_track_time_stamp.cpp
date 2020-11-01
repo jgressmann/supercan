@@ -6,7 +6,7 @@ namespace
 {
 struct ts_fixture
 {
-    struct sc_time_tracker t;
+    struct sc_dev_time_tracker t;
 
     ts_fixture()
     {
@@ -17,57 +17,56 @@ struct ts_fixture
 
 TEST_F (ts_fixture, the_initial_timestamp_is_returned_as_is)
 {
-    auto r = sc_track_ts(&t, 43);
+    auto r = sc_tt_track(&t, 43);
     CHECK_EQUAL(43, r);
 }
 
 TEST_F(ts_fixture, forward_increments_move_time_forward)
 {
     
-    auto r0 = sc_track_ts(&t, 1);
+    auto r0 = sc_tt_track(&t, 1);
     CHECK_EQUAL(1, r0);
-    auto r1 = sc_track_ts(&t, 100000);
+    auto r1 = sc_tt_track(&t, 100000);
     CHECK_EQUAL(100000, r1);
-    auto r2 = sc_track_ts(&t, UINT32_MAX / 2);
+    auto r2 = sc_tt_track(&t, UINT32_MAX / 2);
     CHECK_EQUAL(UINT32_MAX / 2, r2);
 
-    auto r3 = sc_track_ts(&t, UINT32_MAX-2);
+    auto r3 = sc_tt_track(&t, UINT32_MAX-2);
     CHECK_EQUAL(UINT32_MAX-2, r3);
 }
 
 TEST_F(ts_fixture, forward_laps_increments_high)
 {
 
-    auto r0 = sc_track_ts(&t, UINT32_MAX);
+    auto r0 = sc_tt_track(&t, UINT32_MAX);
     CHECK_EQUAL(UINT32_MAX, r0);
 
-    auto r1 = sc_track_ts(&t, UINT32_MAX / 2 - 2);
+    auto r1 = sc_tt_track(&t, UINT32_MAX / 2 - 2);
     CHECK_EQUAL(UINT32_MAX / 2 - 2 + (UINT64_C(1) << 32), r1);
 
-    auto r2 = sc_track_ts(&t, UINT32_MAX / 2 - 1);
+    auto r2 = sc_tt_track(&t, UINT32_MAX / 2 - 1);
     CHECK_EQUAL(UINT32_MAX / 2 - 1 + (UINT64_C(1) << 32), r2);
 
-    auto r3 = sc_track_ts(&t, UINT32_MAX / 2);
+    auto r3 = sc_tt_track(&t, UINT32_MAX / 2);
     CHECK_EQUAL(UINT32_MAX / 2 + (UINT64_C(1) << 32), r3);
 }
 
 
 TEST_F(ts_fixture, negative_laps_decrement_high)
 {
-
-    auto r0 = sc_track_ts(&t, UINT32_MAX);
+    auto r0 = sc_tt_track(&t, UINT32_MAX);
     CHECK_EQUAL(UINT32_MAX, r0);
 
-    auto r1 = sc_track_ts(&t, 0);
+    auto r1 = sc_tt_track(&t, 0);
     CHECK_EQUAL((UINT64_C(1) << 32), r1);
 
-    auto r3 = sc_track_ts(&t, UINT32_MAX);
+    auto r3 = sc_tt_track(&t, UINT32_MAX);
     CHECK_EQUAL(UINT32_MAX, r3);
 
-    auto r4 = sc_track_ts(&t, UINT32_MAX - 199);
+    auto r4 = sc_tt_track(&t, UINT32_MAX - 199);
     CHECK_EQUAL(UINT32_MAX - 199, r4);
 
-    auto r5 = sc_track_ts(&t, 4949);
+    auto r5 = sc_tt_track(&t, 4949);
     CHECK_EQUAL((UINT64_C(1) << 32) + 4949, r5);
 
     
