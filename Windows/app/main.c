@@ -952,8 +952,9 @@ int main(int argc, char** argv)
             
             last_send = now;
 
+            bytes = ptr - msg_tx_buffer;
             size_t w;
-            error = sc_can_stream_tx(stream, msg_tx_buffer, ptr - msg_tx_buffer, -1, &w);
+            error = sc_can_stream_tx(stream, msg_tx_buffer, bytes, -1, &w);
             if (error) {
                 if (SC_DLL_ERROR_AGAIN != error) {
                     fprintf(stderr, "sc_can_stream_tx failed: %s (%d)\n", sc_strerror(error), error);
