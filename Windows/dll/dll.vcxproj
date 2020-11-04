@@ -114,6 +114,7 @@
       <PreprocessorDefinitions>UNICODE;WIN32;NDEBUG;SC_DLL_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>../inc;../../src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <Optimization>Disabled</Optimization>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -159,7 +160,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="..\inc\supercan.h" />
     <ClInclude Include="..\inc\supercan_dll.h" />
     <ClInclude Include="..\inc\supercan_winapi.h" />
     <ClInclude Include="resource.h" />
