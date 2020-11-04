@@ -1438,10 +1438,7 @@ SC_DLL_API void sc_cmd_ctx_uninit(sc_cmd_ctx_t* ctx)
             ctx->tx_buffer = NULL;
         }
 
-        if (ctx->rx_buffer) {
-            free(ctx->rx_buffer);
-            ctx->rx_buffer = NULL;
-        }
+        ctx->rx_buffer = NULL;
     }
 }
 
@@ -1470,16 +1467,13 @@ SC_DLL_API int sc_cmd_ctx_init(sc_cmd_ctx_t* ctx, sc_dev_t* dev)
         goto error_exit;
     }
 
-    ctx->tx_buffer = malloc(ctx->dev->cmd_buffer_size);
+    ctx->tx_buffer = malloc(2 * (size_t)ctx->dev->cmd_buffer_size);
     if (!ctx->tx_buffer) {
         error = SC_DLL_ERROR_OUT_OF_MEM;
         goto error_exit;
     }
-    ctx->rx_buffer = malloc(ctx->dev->cmd_buffer_size);
-    if (!ctx->rx_buffer) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto error_exit;
-    }
+
+    ctx->rx_buffer = ctx->tx_buffer + ctx->dev->cmd_buffer_size;
 
 success_exit:
     return error;
