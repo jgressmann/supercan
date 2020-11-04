@@ -75,6 +75,7 @@ typedef CHUNKY_CHUNK_SIZE_TYPE (*chunky_byteswap)(void* ctx, CHUNKY_CHUNK_SIZE_T
 #define chunky_no_swap CHUNKY_JOIN(CHUNKY_PREFIX, _no_swap)
 static inline CHUNKY_CHUNK_SIZE_TYPE chunky_no_swap(void* ctx, CHUNKY_CHUNK_SIZE_TYPE value)
 {
+    (void)ctx;
     return value;
 }
 

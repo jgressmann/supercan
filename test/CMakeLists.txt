@@ -2,11 +2,8 @@ cmake_minimum_required(VERSION 3.5)
 
 project(supercan LANGUAGES C CXX)
 set (CMAKE_C_STANDARD 11)
-set (CMAKE_CXX_STANDARD 17)
+set (CMAKE_CXX_STANDARD 14)
 
-set(SUPERCAN_FW_DIR ../Boards/examples/device/supercan)
-
-message(STATUS "SUPERCAN_FW_DIR: ${SUPERCAN_FW_DIR}")
 
 function(SetMaxWarningLevel compilerFlagsVar)
     #message(STATUS "var: ${compilerFlagsVar}")
@@ -25,16 +22,19 @@ endfunction()
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
-#SetMaxWarningLevel("CMAKE_C_FLAGS")
-#SetMaxWarningLevel("CMAKE_CXX_FLAGS")
+SetMaxWarningLevel("CMAKE_C_FLAGS")
+SetMaxWarningLevel("CMAKE_CXX_FLAGS")
+
+set(LIB_SRC_LIST
+    ../src/usnprintf.c
+    ../src/can_bit_timing.c
+)
 
 set(TEST_SRC_LIST
     main.cpp
     test_usnprintf.cpp
-    ../Windows/app/can_bit_timing.c
     test_can_bit_timing.cpp
-    ${SUPERCAN_FW_DIR}/src/usnprintf.c
-
+    test_chunky.cpp
 )
 
 # CppUnitLite2 static lib
@@ -47,8 +47,8 @@ endif()
 # Test
 include_directories(
     ../3rd-party/CppUnitLite2/src
-    ${SUPERCAN_FW_DIR}/inc
-    ../Windows/app)
+    ../src
+)
 
-add_executable(supercan-test ${TEST_SRC_LIST})
+add_executable(supercan-test ${TEST_SRC_LIST} ${LIB_SRC_LIST})
 target_link_libraries(supercan-test CppUnitLite2)

@@ -338,30 +338,6 @@ TEST (usnprintf_can_prefix_with_0x)
     CHECK_EQUAL(0, strcmp(ubuf, cbuf));
 }
 
-TEST (usnprintf_can_set_fill_and_width_for_X)
-{
-    char ubuf[64];
-    char cbuf[64];
-
-    int uchars = 0;
-    int cchars = 0;
-
-    cchars = snprintf(cbuf, sizeof(cbuf), "%08x", (unsigned)0x1);
-    uchars = usnprintf(ubuf, sizeof(ubuf), "%08x", (unsigned)0x1);
-    fprintf(stdout, "%s <-> %s\n", cbuf, ubuf);
-    CHECK_EQUAL(cchars, uchars);
-    CHECK_EQUAL(0, strcmp(ubuf, cbuf));
-
-    cchars = snprintf(cbuf, sizeof(cbuf), "%#08lx", (unsigned long)0x1);
-    uchars = usnprintf(ubuf, sizeof(ubuf), "%#08lx", (unsigned long)0x1);
-    CHECK_EQUAL(cchars, uchars);
-    CHECK_EQUAL(0, strcmp(ubuf, cbuf));
-
-    cchars = snprintf(cbuf, sizeof(cbuf), "%#016llx", (unsigned long long)0x1);
-    uchars = usnprintf(ubuf, sizeof(ubuf), "%#016llx", (unsigned long long)0x1);
-    CHECK_EQUAL(cchars, uchars);
-    CHECK_EQUAL(0, strcmp(ubuf, cbuf));
-}
 
 
 } // anon namespace
