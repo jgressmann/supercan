@@ -161,12 +161,9 @@
   <ItemGroup>
     <ClCompile Include="..\..\src\can_bit_timing.c" />
     <ClCompile Include="main.c" />
-    <ClCompile Include="sc_app.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="can_bit_timing.h" />
     <ClInclude Include="resource.h" />
-    <ClInclude Include="sc_app.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="app.rc" />

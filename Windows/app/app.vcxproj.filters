@@ -18,21 +18,12 @@
     <ClCompile Include="main.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="sc_app.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\src\can_bit_timing.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="sc_app.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="can_bit_timing.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

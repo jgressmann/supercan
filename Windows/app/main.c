@@ -27,7 +27,7 @@
 #include <Windows.h>
 #include "supercan_winapi.h"
 #include "supercan_dll.h"
-#include "sc_app.h"
+#include "supercan_misc.h"
 #include "can_bit_timing.h"
 
 #include <stdio.h>
@@ -826,7 +826,7 @@ int main(int argc, char** argv)
             last_send = now;
 
             bytes = ptr - msg_tx_buffer;
-            size_t w;
+            size_t w = 0;
             error = sc_can_stream_tx(stream, msg_tx_buffer, bytes, -1, &w);
             if (error) {
                 if (SC_DLL_ERROR_AGAIN != error) {

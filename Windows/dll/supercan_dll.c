@@ -1493,10 +1493,10 @@ SC_DLL_API int sc_cmd_ctx_run(
     DWORD transferred = 0;
     DWORD result = 0;
     int error = SC_DLL_ERROR_NONE;
-    uint16_t dummy;
+    uint16_t dummy = 0;
     bool rx_submitted = false;
 
-    if (!ctx || !ctx->dev || !bytes || bytes > ctx->dev->cmd_buffer_size) {
+    if (!ctx || !bytes) {
         error = SC_DLL_ERROR_INVALID_PARAM;
         goto error_exit;
     }
