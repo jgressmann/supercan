@@ -1,6 +1,6 @@
 #include <CppUnitLite2.h>
 
-#include "../app/sc_app.h"
+#include "supercan_misc.h"
 
 namespace
 {
@@ -17,13 +17,13 @@ struct ts_fixture
 
 TEST_F (ts_fixture, the_initial_timestamp_is_returned_as_is)
 {
-    auto r = sc_tt_track(&t, 43);
-    CHECK_EQUAL(43, r);
+    auto r = sc_tt_track(&t, 42);
+    CHECK_EQUAL(42, r);
 }
 
 TEST_F(ts_fixture, forward_increments_move_time_forward)
 {
-    
+
     auto r0 = sc_tt_track(&t, 1);
     CHECK_EQUAL(1, r0);
     auto r1 = sc_tt_track(&t, 100000);
@@ -69,7 +69,7 @@ TEST_F(ts_fixture, negative_laps_decrement_high)
     auto r5 = sc_tt_track(&t, 4949);
     CHECK_EQUAL((UINT64_C(1) << 32) + 4949, r5);
 
-    
+
 }
 
 
