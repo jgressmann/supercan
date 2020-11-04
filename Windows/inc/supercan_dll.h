@@ -158,8 +158,8 @@ SC_DLL_API int sc_dev_cancel(sc_dev_t *dev, OVERLAPPED *ov);
 
 typedef struct sc_cmd_ctx {
     sc_dev_t* dev;
-    PUCHAR tx_buffer;   // cmd_buffer_size
-    PUCHAR rx_buffer;   // cmd_buffer_size
+    PUCHAR tx_buffer;   // dev->cmd_buffer_size
+    PUCHAR rx_buffer;   // dev->cmd_buffer_size
     OVERLAPPED tx_ov;
     OVERLAPPED rx_ov;
 } sc_cmd_ctx_t;
@@ -208,9 +208,6 @@ SC_DLL_API int sc_can_stream_init(
     sc_can_stream_rx_callback callback,
     int rreqs, 
     sc_can_stream_t* stream);
-
-/** Initializes the stream */
-SC_DLL_API int sc_can_stream_reset(sc_can_stream_t stream);
 
 
 SC_DLL_API int sc_can_stream_tx(
