@@ -85,8 +85,9 @@ TEST (cbt_handles_null_pointer_properly)
 {
     can_bit_timing_hw_contraints hw;
     can_bit_timing_constraints_real user;
+    user.sample_point = .6f;
     can_bit_timing_settings settings;
-    CHECK_EQUAL(CAN_BTRE_PARAM, cbt_real(NULL, &user, &settings));
+    CHECK(0 > cbt_real(NULL, &user, &settings));
     CHECK_EQUAL(CAN_BTRE_PARAM, cbt_real(&hw, NULL, &settings));
     CHECK_EQUAL(CAN_BTRE_PARAM, cbt_real(&hw, &user, NULL));
 }

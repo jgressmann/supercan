@@ -64,6 +64,10 @@
 #   error chunky_writer_finalize still defined
 #endif
 
+#ifdef chunky_writer_chunks_required
+#   error chunky_writer_chunks_required still defined
+#endif
+
 
 
 
@@ -286,6 +290,14 @@ TEST_F (Fixture, writer_chunk_size_equal_to_buffer_size)
     CHECK_EQUAL(CHUNKY_CHUNK_SIZE, chunky_writer_finalize(&w));
     CHECK_EQUAL(1, writer_buffer[0]);
     CHECK_EQUAL(10, writer_buffer[1]);
+}
+
+TEST_F (Fixture, writer_chunks_required)
+{
+    CHECK_EQUAL(0, chunky_writer_chunks_required(&w, 0));
+    CHECK_EQUAL(1, chunky_writer_chunks_required(&w, 1));
+    CHECK_EQUAL(1, chunky_writer_chunks_required(&w, CHUNKY_CHUNK_SIZE - sizeof(chunky_chunk_hdr)));
+    CHECK_EQUAL(2, chunky_writer_chunks_required(&w, CHUNKY_CHUNK_SIZE - sizeof(chunky_chunk_hdr) + 1));
 }
 
 

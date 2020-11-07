@@ -9,6 +9,7 @@ usage()
 }
 
 script_dir=$(dirname $0)
+base_dir=$script_dir/..
 find_cmd="find $script_dir -type d -name 'supercan_usb-*'"
 
 if [ $# -gt 0 ]; then
@@ -42,7 +43,5 @@ fi
 
 
 
-
-rm -f "$supercan_dir/sc.h"
-dst=$(readlink -f "$supercan_dir/supercan.h")
-cp "$dst" "$supercan_dir/sc.h"
+cp "$base_dir/src/supercan.h" "$supercan_dir/"
+cp "$base_dir/src/chunky.h" "$supercan_dir/"

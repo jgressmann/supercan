@@ -252,6 +252,7 @@ chunky_writer_write(
         CHUNKY_CHUNK_SIZE_TYPE bytes)
 {
     uint8_t const *ptr = (uint8_t const *)_ptr;
+    CHUNKY_CHUNK_SIZE_TYPE left = 0;
 
     CHUNKY_ASSERT(t);
     CHUNKY_ASSERT(t->buf_ptr);
@@ -263,8 +264,9 @@ chunky_writer_write(
     }
 
     t->buf_available -= bytes;
+    left = bytes;
 
-    for (CHUNKY_CHUNK_SIZE_TYPE left = bytes; left; ) {
+    while (left) {
 
         CHUNKY_CHUNK_SIZE_TYPE chunk_available = t->chunk_size - sizeof(struct chunky_chunk_hdr) - t->len;
         CHUNKY_CHUNK_SIZE_TYPE bytes_to_copy = left;

@@ -4,7 +4,8 @@
 *.mod.c
 *.o
 .tmp_versions/
-sc.h
+supercan.h
+chunky.h
 Module.symvers
 modules.order 
 
