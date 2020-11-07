@@ -49,10 +49,11 @@
 		} \
 	} while (0)
 
-#if !defined(DEBUG) || !DEBUG
-	#define SC_ASSERT(x)
-	#define SC_DEBUG_VERIFY(x)
-#else
+#ifndef DEBUG
+#define DEBUG 0
+#endif
+
+#if DEBUG
 	#define SC_ASSERT(x) \
 		do { \
 			static const char expr[] = "" #x ""; \
@@ -63,6 +64,9 @@
 		} while (0)
 
 	#define SC_DEBUG_VERIFY SC_VERIFY
+#else
+	#define SC_ASSERT(x)
+	#define SC_DEBUG_VERIFY(x, y)
 #endif
 
 #include "sc.h"
@@ -636,7 +640,7 @@ static int sc_usb_process_can_txr(struct sc_usb_priv *usb_priv, struct sc_msg_ca
 	spin_lock_irqsave(&usb_priv->tx_lock, flags);
 
 	SC_DEBUG_VERIFY(usb_priv->tx_echo_skb_available_count < net_priv->can.echo_skb_max, goto unlock);
-#ifdef DEBUG
+#if DEBUG
 	{
 		unsigned int i;
 
@@ -669,7 +673,10 @@ static int sc_usb_process_can_txr(struct sc_usb_priv *usb_priv, struct sc_msg_ca
 	if (usb_priv->tx_echo_skb_available_count == 1
 		&& usb_priv->tx_urb_available_count)
 		netif_wake_queue(netdev);
+
+#if DEBUG
 unlock:
+#endif
 	spin_unlock_irqrestore(&usb_priv->tx_lock, flags);
 
 	return 0;
@@ -877,7 +884,10 @@ static void sc_usb_tx_completed(struct urb *urb)
 		netdev_info(usb_priv->netdev, "tx URB status %d\n", urb->status);
 		break;
 	}
+
+#if DEBUG
 unlock:
+#endif
 	spin_unlock_irqrestore(&usb_priv->tx_lock, flags);
 }
 
@@ -1161,7 +1171,9 @@ static netdev_tx_t sc_usb_netdev_start_xmit1(
 		rc = NETDEV_TX_BUSY;
 	}
 
+#if DEBUG
 unlock:
+#endif
 	spin_unlock_irqrestore(&usb_priv->tx_lock, flags);
 
 	return rc;
@@ -1265,7 +1277,9 @@ static netdev_tx_t sc_usb_netdev_start_xmit2(
 		rc = NETDEV_TX_BUSY;
 	}
 
+#if DEBUG
 unlock:
+#endif
 	spin_unlock_irqrestore(&usb_priv->tx_lock, flags);
 
 	return rc;
