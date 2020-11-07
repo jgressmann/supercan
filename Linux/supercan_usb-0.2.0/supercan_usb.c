@@ -1561,7 +1561,7 @@ static int sc_usb_netdev_init(struct sc_usb_priv *usb_priv)
 	}
 
 	usb_priv->tx_echo_skb_available_count = usb_priv->static_tx_fifo_size;
-	usb_priv->tx_echo_skb_available_ptr = kmalloc_array(usb_priv->tx_echo_skb_available_count, sizeof(*usb_priv->tx_echo_skb_ptr), GFP_KERNEL);
+	usb_priv->tx_echo_skb_available_ptr = kmalloc_array(usb_priv->tx_echo_skb_available_count, sizeof(*usb_priv->tx_echo_skb_available_ptr), GFP_KERNEL);
 	if (!usb_priv->tx_echo_skb_available_ptr) {
 		rc = -ENOMEM;
 		goto fail;
