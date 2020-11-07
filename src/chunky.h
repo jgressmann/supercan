@@ -22,11 +22,12 @@
  */
 
 
-
-#include <stddef.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdbool.h>
+#ifndef CHUNKY_NO_STD_INCLUDES
+#   include <stddef.h>
+#   include <stdlib.h>
+#   include <string.h>
+#   include <stdbool.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -186,7 +187,7 @@ static inline void chunky_writer_init(
         chunky_writer *t,
         CHUNKY_CHUNK_SIZE_TYPE chunk_size
 #ifdef CHUNKY_BYTESWAP
-        ,void* ctx, chunky_byteswap byteswap
+        , void* ctx, chunky_byteswap byteswap
 #endif
         )
 {
@@ -347,6 +348,26 @@ chunky_writer_finalize(chunky_writer *t)
     return t->hdr - t->buf_ptr;
 }
 
+#define chunky_writer_chunks_required CHUNKY_JOIN(CHUNKY_PREFIX, _writer_chunks_required)
+static
+inline
+CHUNKY_BUFFER_SIZE_TYPE
+chunky_writer_chunks_required(
+        chunky_writer *t,
+        CHUNKY_BUFFER_SIZE_TYPE bytes)
+{
+    CHUNKY_BUFFER_SIZE_TYPE bytes_per_chunk = 0;
+    CHUNKY_BUFFER_SIZE_TYPE r = 0;
+
+    CHUNKY_ASSERT(t);
+
+    bytes_per_chunk = t->chunk_size - sizeof(struct chunky_chunk_hdr);
+    r = bytes / bytes_per_chunk;
+    r += r * bytes_per_chunk != bytes;
+
+    return r;
+}
+
 #undef CHUNKY_BYTESWAP_CALL
 
 #undef chunky_byteswap
@@ -364,6 +385,7 @@ chunky_writer_finalize(chunky_writer *t)
 #undef chunky_writer_write
 #undef chunky_writer_chunk_reserve
 #undef chunky_writer_finalize
+#undef chunky_writer_chunks_required
 
 
 
