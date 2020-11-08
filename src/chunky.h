@@ -347,7 +347,7 @@ chunky_writer_finalize(chunky_writer *t)
         t->hdr += t->chunk_size;;
     }
 
-    return t->hdr - t->buf_ptr;
+    return (CHUNKY_BUFFER_SIZE_TYPE)(t->hdr - t->buf_ptr);
 }
 
 #define chunky_writer_chunks_required CHUNKY_JOIN(CHUNKY_PREFIX, _writer_chunks_required)
