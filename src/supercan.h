@@ -85,7 +85,8 @@ extern "C" {
 #define SC_MSG_BUS              0x1e    ///< Host <-> Device. Go on / off bus. Device responds with SC_MSG_ERROR
 #define SC_MSG_ERROR            0x1f    ///< Device -> Host. Error code of last command.
 
-#define SC_MSG_CAN_LEN_MULTIPLE 4
+
+#define SC_MSG_CAN_LEN_MULTIPLE 4       ///< Messages on CAN pipe must be a multiple of this size
 
 
 #define SC_MSG_CAN_STATUS       0x20    ///< Device -> Host. Status of the CAN bus.
