@@ -739,7 +739,7 @@ int main(int argc, char** argv)
         ++cmd_count;
 
         uint16_t rep_len;
-        error = sc_cmd_ctx_run(&cmd_ctx, cmd_tx_ptr - cmd_ctx.tx_buffer, &rep_len, CMD_TIMEOUT_MS);
+        error = sc_cmd_ctx_run(&cmd_ctx, (uint16_t)(cmd_tx_ptr - cmd_ctx.tx_buffer), &rep_len, CMD_TIMEOUT_MS);
         if (error) {
             goto Exit;
         }
@@ -825,7 +825,7 @@ int main(int argc, char** argv)
             
             last_send = now;
 
-            bytes = ptr - msg_tx_buffer;
+            bytes = (uint16_t)(ptr - msg_tx_buffer);
             size_t w = 0;
             error = sc_can_stream_tx(stream, msg_tx_buffer, bytes, -1, &w);
             if (error) {
