@@ -1,5 +1,6 @@
 ﻿#include <cstring>
 #include <cstdio>
+#include <supercan_misc.h>
 #include "supercanbackend.h"
 
 
@@ -25,6 +26,8 @@ Q_GLOBAL_STATIC(QLibrary, supercanLibrary)
 
 namespace
 {
+constexpr int SC_DEVICE_TIMEOUT_MS = 1000;
+
 inline uint8_t dlc_to_len(uint8_t dlc)
 {
     static const uint8_t map[16] = {
@@ -62,227 +65,8 @@ inline uint32_t dev_to_host32(sc_dev_t* dev, uint32_t value)
     return dev->dev_to_host32(value);
 }
 
-// computes regs while maximizing tqs and keeping sjw and tseg2 in sync
-void bitrate_to_can_regs(
-    uint32_t can_clock_hz,
-    uint32_t bitrate_bps,
-    uint8_t sample_point_01,
-    struct can_regs const *limits_min,
-    struct can_regs const *limits_max,
-    struct can_regs *result)
-{
-    const uint16_t max_tqs = limits_max->sjw + limits_max->tseg1 + limits_max->tseg2;
-
-    result->brp = qMax<uint16_t>(limits_min->brp, qMin<uint16_t>(can_clock_hz / (max_tqs * bitrate_bps), limits_max->brp));
-    uint16_t tqs = can_clock_hz / (result->brp * bitrate_bps);
-
-    result->tseg2 = (tqs * (255 - sample_point_01)) / 255;
-    result->sjw = result->tseg2;
-    result->tseg1 = tqs - result->tseg2;
-
-    while (result->brp < limits_max->brp &&
-            (result->sjw > limits_max->sjw ||
-             result->tseg1 > limits_max->tseg1 ||
-             result->tseg2 > limits_max->tseg2)) {
-        ++result->brp;
-
-        tqs = can_clock_hz / (result->brp * bitrate_bps);
-        result->tseg2 = (tqs * (255 - sample_point_01)) / 255;
-        result->sjw = result->tseg2;
-        result->tseg1 = tqs - result->tseg2;
-    }
-}
-
 } // anon
 
-
-ScDevice::~ScDevice()
-{
-    close();
-
-    if (cmd_tx_ov.hEvent) {
-        CloseHandle(cmd_tx_ov.hEvent);
-        cmd_tx_ov.hEvent = nullptr;
-    }
-
-    if (cmd_rx_ov.hEvent) {
-        CloseHandle(cmd_rx_ov.hEvent);
-        cmd_rx_ov.hEvent = nullptr;
-    }
-}
-
-ScDevice::ScDevice()
-{
-    index = 0;
-    device = nullptr;
-    cmd_tx_buffer = nullptr;
-    cmd_rx_buffer = nullptr;
-    memset(&info, 0, sizeof(info));
-
-    memset(&cmd_tx_ov, 0, sizeof(cmd_tx_ov));
-    memset(&cmd_rx_ov, 0, sizeof(cmd_rx_ov));
-
-    cmd_tx_ov.hEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    cmd_rx_ov.hEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-}
-
-ScDevice::ScDevice(ScDevice&& other)
-{
-    *this = std::move(other);
-}
-
-ScDevice& ScDevice::operator=(ScDevice&& other)
-{
-    device = other.device;
-    other.device = nullptr;
-
-    index = other.index;
-    info = other.info;
-
-    cmd_tx_buffer = other.cmd_tx_buffer;
-    other.cmd_tx_buffer = nullptr;
-    cmd_rx_buffer = other.cmd_rx_buffer;
-    other.cmd_rx_buffer = nullptr;
-
-    cmd_tx_ov = other.cmd_tx_ov;
-    other.cmd_tx_ov.hEvent = nullptr;
-
-    cmd_rx_ov = other.cmd_rx_ov;
-    other.cmd_rx_ov.hEvent = nullptr;
-
-    return *this;
-}
-
-void ScDevice::close()
-{
-    if (device) {
-        SC_CALL(dev_close)(device);
-        device = nullptr;
-    }
-
-    memset(&info, 0, sizeof(info));
-
-    if (cmd_tx_buffer) {
-        delete [] cmd_tx_buffer;
-        cmd_tx_buffer = nullptr;
-    }
-
-    if (cmd_rx_buffer) {
-        delete [] cmd_rx_buffer;
-        cmd_rx_buffer = nullptr;
-    }
-}
-
-int ScDevice::open(uint32_t _index, int timeout_ms)
-{
-    close();
-
-    if (Q_UNLIKELY(!cmd_tx_ov.hEvent || !cmd_rx_ov.hEvent)) {
-        return SC_DLL_ERROR_OUT_OF_MEM;
-    }
-
-    index = _index;
-    ULONG bytes;
-    struct sc_msg_header* info_req = nullptr;
-    uint8_t *cmd_tx_ptr;
-    DWORD transferred;
-
-    int error = SC_CALL(dev_open)(index, &device);
-    if (error) {
-        qCWarning(
-                    QT_CANBUS_PLUGINS_SUPERCAN,
-                    "Failed to open device %u: %s (%d).",
-                    index,
-                    SC_CALL(strerror)(error), error);
-        goto Error;
-    }
-
-    cmd_tx_buffer = new uint8_t[device->cmd_buffer_size];
-    cmd_rx_buffer = new uint8_t[device->cmd_buffer_size];
-
-    // submit in token
-    //
-    error = SC_CALL(dev_read)(device, device->cmd_pipe | 0x80, cmd_rx_buffer, device->cmd_buffer_size, &cmd_rx_ov);
-    if (SC_DLL_ERROR_IO_PENDING != error) {
-        qCWarning(
-                    QT_CANBUS_PLUGINS_SUPERCAN,
-                    "Failed to submit read token on device %u pipe %02x: %s (%d).",
-                    index, device->cmd_pipe | 0x80,
-                    SC_CALL(strerror)(error), error);
-        goto Error;
-    }
-
-    // clear tx buffer
-    std::memset(cmd_tx_buffer, 0, device->cmd_buffer_size);
-
-    cmd_tx_ptr = cmd_tx_buffer;
-    // get device info
-    info_req = reinterpret_cast<struct sc_msg_header*>(cmd_tx_ptr);
-    info_req->id = SC_MSG_DEVICE_INFO;
-    info_req->len = SC_HEADER_LEN;
-    cmd_tx_ptr += info_req->len;
-
-    bytes = static_cast<ULONG>(cmd_tx_ptr - cmd_tx_buffer);
-
-    error = SC_CALL(dev_write)(device, device->cmd_pipe, cmd_tx_buffer, bytes, &cmd_tx_ov);
-    if (SC_DLL_ERROR_IO_PENDING != error) {
-        qCWarning(
-                    QT_CANBUS_PLUGINS_SUPERCAN,
-                    "Failed to send cmd to device %u pipe %02x: %s (%d).",
-                    index, device->cmd_pipe,
-                    SC_CALL(strerror)(error), error);
-        goto Error;
-    }
-
-    error = SC_CALL(dev_result)(device, &transferred, &cmd_tx_ov, timeout_ms);
-    if (error) {
-        qCWarning(
-                    QT_CANBUS_PLUGINS_SUPERCAN,
-                    "Failed to send cmd to device %u pipe %02x: %s (%d).",
-                    index, device->cmd_pipe,
-                    SC_CALL(strerror)(error), error);
-        goto Error;
-    }
-
-    error = SC_CALL(dev_result)(device, &transferred, &cmd_rx_ov, timeout_ms);
-    if (error) {
-        qCWarning(
-                    QT_CANBUS_PLUGINS_SUPERCAN,
-                    "Failed to recveive response from device %u pipe %02x: %s (%d).",
-                    index, device->cmd_pipe,
-                    SC_CALL(strerror)(error), error);
-        goto Error;
-    }
-
-    if (transferred < sizeof(info)) {
-        qCWarning(
-                    QT_CANBUS_PLUGINS_SUPERCAN,
-                    "Device %u pipe %02x short response.",
-                    index, device->cmd_pipe);
-        goto Error;
-    }
-
-    memcpy(&info, cmd_rx_buffer, sizeof(info));
-    info.can_clk_hz = dev_to_host32(device, info.can_clk_hz);
-    info.nmbt_brp_max = dev_to_host16(device, info.nmbt_brp_max);
-    info.nmbt_tq_max = dev_to_host16(device, info.nmbt_tq_max);
-    info.nmbt_tseg1_max = dev_to_host16(device, info.nmbt_tseg1_max);
-    for (int i = 0; i < 4; ++i) {
-        info.serial_number[i] = dev_to_host32(device, info.serial_number[i]);
-    }
-
-    qCDebug(
-                QT_CANBUS_PLUGINS_SUPERCAN,
-                "Device %u has %u channels.",
-                index, info.channels);
-
-Exit:
-    return error;
-
-Error:
-    close();
-    goto Exit;
-}
 
 
 
@@ -324,8 +108,11 @@ bool SuperCanBackend::canCreate(QString *errorReason)
 QList<QCanBusDeviceInfo> SuperCanBackend::interfaces()
 {
     QList<QCanBusDeviceInfo> result;
-    ScDevice device;
-    char string_buffer[33];
+    QString serialString, nameString;
+    sc_dev_t* device = nullptr;
+    sc_cmd_ctx_t cmd_ctx;
+    char name_buffer[sizeof(sc_msg_dev_info::name_bytes)+1];
+    char serial_buffer[sizeof(sc_msg_dev_info::sn_bytes)*2+1];
     uint32_t count;
     int error = SC_DLL_ERROR_NONE;
 
@@ -333,61 +120,114 @@ QList<QCanBusDeviceInfo> SuperCanBackend::interfaces()
     SC_CALL(dev_scan)();
     error = SC_CALL(dev_count)(&count);
     if (error) {
-        goto Error;
+        goto error_exit;
     }
 
     for (uint32_t i = 0; i < count; ++i) {
-        error = device.open(i, 1000);
+        sc_msg_req *req_dev_info = nullptr;
+        sc_msg_dev_info *dev_info = nullptr;
+        uint16_t reply_bytes = 0;
+        unsigned len = 0;
+
+        error = sc_dev_open(i, &device);
         if (error) {
             continue;
         }
 
-        snprintf(
-                    string_buffer,
-                    sizeof(string_buffer),
-                    "%08x%08x%08x%08x",
-                    device.info.serial_number[0],
-                    device.info.serial_number[1],
-                    device.info.serial_number[2],
-                    device.info.serial_number[3]);
+        error = sc_cmd_ctx_init(&cmd_ctx, device);
+        if (error) {
+            goto cleanup;
+        }
 
-        QString serialString = QLatin1String(string_buffer);
-        for (unsigned j = 0; j < device.info.channels; ++j) {
-            snprintf(
-                        string_buffer,
-                        sizeof(string_buffer),
-                        "Dev %u Ch %u",
-                        i,
-                        j);
-            QString desc = QLatin1String(string_buffer);
-            snprintf(
-                        string_buffer,
-                        sizeof(string_buffer),
-                        "%u-%u",
-                        i,
-                        j);
+        req_dev_info = (sc_msg_req *)cmd_ctx.tx_buffer;
+        memset(req_dev_info, 0, sizeof(*req_dev_info));
+        req_dev_info->id = SC_MSG_DEVICE_INFO;
+        req_dev_info->len = sizeof(*req_dev_info);
+
+        error = sc_cmd_ctx_run(&cmd_ctx, req_dev_info->len, &reply_bytes, SC_DEVICE_TIMEOUT_MS);
+        if (error) {
+            qCWarning(
+                        QT_CANBUS_PLUGINS_SUPERCAN,
+                        "Failed to get device info from device index %u: %s (%d).",
+                        (unsigned)i, SC_CALL(strerror)(error), error);
+            goto cleanup;
+        }
+
+        if (reply_bytes < sizeof(*dev_info)) {
+            qCWarning(
+                        QT_CANBUS_PLUGINS_SUPERCAN,
+                        "Failed device index %u send invalid reply to SC_MSG_DEVICE_INFO.",
+                        (unsigned)i);
+
+            goto cleanup;
+        }
+
+        dev_info = (sc_msg_dev_info *)cmd_ctx.rx_buffer;
+        dev_info->feat_conf = device->dev_to_host16(dev_info->feat_conf);
+        dev_info->feat_perm = device->dev_to_host16(dev_info->feat_perm);
+
+        len = dev_info->sn_len;
+        if (len >= sizeof(dev_info->sn_bytes)) {
+            qCWarning(
+                        QT_CANBUS_PLUGINS_SUPERCAN,
+                        "Device index %u send out of bounds serial number length.",
+                        (unsigned)i);
+
+            len = sizeof(dev_info->sn_bytes);
+        }
+
+        for (size_t i = 0; i < len; ++i) {
+            snprintf(&serial_buffer[i * 2], 3, "%02x", dev_info->sn_bytes[i]);
+        }
+
+        serial_buffer[len * 2] = 0;
+
+        len = dev_info->name_len;
+
+        if (len >= sizeof(dev_info->name_len)) {
+            qCWarning(
+                        QT_CANBUS_PLUGINS_SUPERCAN,
+                        "Device index %u send out of bounds name length.",
+                        (unsigned)i);
+
+            len = sizeof(dev_info->name_len);
+        }
+
+        memcpy(name_buffer, dev_info->name_bytes, len);
+        name_buffer[len] = 0;
+
+
+        serialString = QString::fromUtf8(serial_buffer);
+        nameString = QString::fromUtf8(name_buffer);
+
+        {
             auto devInfo = createDeviceInfo(
-                        QLatin1String(string_buffer),
+                        nameString,
                         serialString,
-                        desc,
-                        static_cast<int>(j),
+                        QString(),
+                        0,
                         false,
-                        SC_FEATURE_FLAG_CAN_FD == (device.info.features & SC_FEATURE_FLAG_CAN_FD));
+                        SC_FEATURE_FLAG_FDF == (dev_info->feat_conf | dev_info->feat_perm));
 
             result.append(std::move(devInfo));
         }
+
+cleanup:
+        sc_cmd_ctx_uninit(&cmd_ctx);
+        sc_dev_close(device);
+        device = nullptr;
     }
 
-Exit:
+default_exit:
     return result;
 
-Error:
+error_exit:
     qCWarning(
                 QT_CANBUS_PLUGINS_SUPERCAN,
                 "Failed to get list of devices: %s (%d).",
                 SC_CALL(strerror)(error), error);
 
-    goto Exit;
+    goto default_exit;
 }
 
 SuperCanBackend::~SuperCanBackend()
@@ -401,45 +241,84 @@ SuperCanBackend::SuperCanBackend(const QString &name, QObject *parent)
 {
     qCDebug(QT_CANBUS_PLUGINS_SUPERCAN, "SuperCanBackend %p ctor", this);
 
-    m_Timer.setInterval(1);
+    m_Timer.setInterval(16);
     m_Timer.setSingleShot(false);
 
-    m_ChannelIndex = 0;
     m_Fd = false;
     m_IsOnBus = false;
     m_Urbs = -1;
-    memset(&m_Nominal, 0, sizeof(m_Nominal));
-    memset(&m_Data, 0, sizeof(m_Data));
-    m_TsLoUs = 0;
-    m_TsHiUs = 0;
+//    memset(&m_Nominal, 0, sizeof(m_Nominal));
+//    memset(&m_Data, 0, sizeof(m_Data));
 
-    tx_events_available.reserve(MAXIMUM_WAIT_OBJECTS);
-    tx_events_busy.reserve(MAXIMUM_WAIT_OBJECTS);
+    m_ScDevice = nullptr;
+    m_ScCanStream = nullptr;
+    m_ScDevIndex = 0;
+    m_FeatPerm = 0;
+    m_FeatConf = 0;
+    m_Initialized = false;
+    m_HasFd = false;
+    m_HasTxr = false;
+    memset(&m_ScCmdCtx, 0, sizeof(m_ScCmdCtx));
+    memset(&m_ScCanInfo, 0, sizeof(m_ScCanInfo));
+    memset(&m_TimeTracker, 0, sizeof(m_TimeTracker));
 
 
+    auto device_index = name.toUInt();
+    m_ScDevIndex = device_index;
 
-    auto parts = name.splitRef(QChar('-'));
-    if (parts.length() >= 2) {
-        auto device_index = parts[0].toUInt();
-        auto channel_index = parts[1].toUInt();
-        auto error = m_Device.open(device_index, 1000);
+    auto error = sc_dev_open(device_index, &m_ScDevice);
+    if (error) {
+        setError(SuperCanBackend::tr("Failed to open device %1: %2 (%3)").arg(device_index).arg(SC_CALL(strerror)(error)).arg(error), OperationError);
+    } else {
+        error = sc_cmd_ctx_init(&m_ScCmdCtx, m_ScDevice);
         if (error) {
-            setError(SuperCanBackend::tr("Failed to open can device %1: %2 (%3)").arg(device_index).arg(SC_CALL(strerror)(error)).arg(error), ConfigurationError);
-            m_Device.close();
+            sc_dev_close(m_ScDevice);
+            m_ScDevice = nullptr;
+            setError(SuperCanBackend::tr("Failed to init command context for device %1: %2 (%3)").arg(device_index).arg(SC_CALL(strerror)(error)).arg(error), OperationError);
         } else {
-            if (channel_index >= m_Device.info.channels) {
-                setError(SuperCanBackend::tr("Channel %1 out of range [0-%2]").arg(channel_index).arg(m_Device.info.channels), ConfigurationError);
-                m_Device.close();
-            } else {
-                Q_ASSERT(m_Device.cmd_tx_buffer);
-                Q_ASSERT(m_Device.cmd_rx_buffer);
-                m_ChannelIndex = channel_index;
+            //
+            sc_msg_req *req = (sc_msg_req *)m_ScCmdCtx.tx_buffer;
+            memset(req, 0, sizeof(*req));
+            req->id = SC_MSG_DEVICE_INFO;
+            req->len = sizeof(*req);
 
+            uint16_t reply_bytes = 0;
+            error = sc_cmd_ctx_run(&m_ScCmdCtx, req->len, &reply_bytes, SC_DEVICE_TIMEOUT_MS);
+            if (error) {
+                setError(SuperCanBackend::tr("Command SC_MSG_DEV_INFO failed for device %1: %2 (%3)").arg(device_index).arg(SC_CALL(strerror)(error)).arg(error), OperationError);
+            } else {
+                if (reply_bytes < sizeof(m_ScDevInfo)) {
+                    setError(SuperCanBackend::tr("Device index %1 send invalid reply to SC_MSG_DEV_INFO.").arg(device_index), OperationError);
+
+                    sc_cmd_ctx_uninit(&m_ScCmdCtx);
+                    sc_dev_close(m_ScDevice);
+                    m_ScDevice = nullptr;
+                } else {
+                    sc_msg_dev_info *dev_info = (sc_msg_dev_info *)m_ScCmdCtx.rx_buffer;
+                    m_FeatPerm = m_ScDevice->dev_to_host16(dev_info->feat_perm);
+                    m_FeatConf = m_ScDevice->dev_to_host16(dev_info->feat_conf);
+                    m_HasFd = ((m_FeatPerm | m_FeatConf) & SC_FEATURE_FLAG_FDF) == SC_FEATURE_FLAG_FDF;
+                    m_HasTxr = ((m_FeatPerm | m_FeatConf) & SC_FEATURE_FLAG_TXR) == SC_FEATURE_FLAG_TXR;
+
+                    // CAN info
+                    req->id = SC_MSG_CAN_INFO;
+                    error = sc_cmd_ctx_run(&m_ScCmdCtx, req->len, &reply_bytes, SC_DEVICE_TIMEOUT_MS);
+                    if (error) {
+                        setError(SuperCanBackend::tr("Command SC_MSG_CAN_INFO failed for device %1: %2 (%3)").arg(device_index).arg(SC_CALL(strerror)(error)).arg(error), OperationError);
+                    } else {
+                        memcpy(&m_ScCanInfo, m_ScCmdCtx.rx_buffer, sizeof(m_ScCmdCtx));
+                        m_ScCanInfo.can_clk_hz = m_ScDevice->dev_to_host32(m_ScCanInfo.can_clk_hz);
+                        m_ScCanInfo.nmbt_brp_max = m_ScDevice->dev_to_host16(m_ScCanInfo.nmbt_brp_max);
+                        m_ScCanInfo.nmbt_tseg1_max = m_ScDevice->dev_to_host16(m_ScCanInfo.nmbt_tseg1_max);
+                        m_ScCanInfo.msg_buffer_size = m_ScDevice->dev_to_host16(m_ScCanInfo.msg_buffer_size);
+
+                        m_Initialized = true;
+                    }
+                }
             }
         }
-    } else {
-        setError(SuperCanBackend::tr("Invalid device name '%1'").arg(name), ConfigurationError);
     }
+
 
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
     m_BusStatus = QCanBusDevice::CanBusStatus::Unknown;
@@ -456,6 +335,19 @@ bool SuperCanBackend::open()
         return false;
     }
 
+    if (m_HasTxr) {
+        m_TxSlotsAvailable.resize(m_ScCanInfo.tx_fifo_size);
+        for (unsigned i = 0; i < m_ScCanInfo.tx_fifo_size; ++i) {
+            m_TxSlotsAvailable[i] = i;
+        }
+    }
+
+    auto error = sc_can_stream_init(m_ScDevice, m_ScCanInfo.msg_buffer_size, this, &SuperCanBackend::on_rx, 0, &m_ScCanStream);
+    if (error) {
+        setError(SuperCanBackend::tr("Failed to init CAN stream for device %1: %2 (%3)").arg(m_ScDevIndex).arg(SC_CALL(strerror)(error)).arg(error), OperationError);
+        return false;
+    }
+
 //    qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "Private @ %p", d);
 
     //apply all stored configurations
@@ -464,13 +356,17 @@ bool SuperCanBackend::open()
         applyConfigurationParameter(key,  configurationParameter(key));
     }
 
-    auto error = setBus(true);
+    error = setBus(true);
     if (error) {
+        sc_can_stream_uninit(&m_ScCanStream);
+        m_ScCanStream = nullptr;
         setError(SuperCanBackend::tr("Failed to go on bus: %1 (%2).").arg(SC_CALL(strerror)(error)).arg(error), ConnectionError);
         return false;
     }
 
     setState(QCanBusDevice::ConnectedState);
+
+
 
     return true;
 }
@@ -487,6 +383,9 @@ void SuperCanBackend::close()
     } else {
         setState(QCanBusDevice::UnconnectedState);
     }
+
+    sc_can_stream_uninit(&m_ScCanStream);
+    m_ScCanStream = nullptr;
 }
 
 //void SuperCanBackend::setConfigurationParameter(int key, const QVariant &value)
@@ -593,10 +492,18 @@ void SuperCanBackend::applyConfigurationParameter(int key, const QVariant &value
     } break;
     case QCanBusDevice::CanFdKey: {
         auto on = value.toBool();
-        if (m_Device.info.features & SC_FEATURE_FLAG_CAN_FD) {
-            m_Fd = on;
+        if (on) {
+            if (((m_FeatConf | m_FeatPerm) & SC_FEATURE_FLAG_FDF) == SC_FEATURE_FLAG_FDF) {
+                m_Fd = on;
+            } else {
+                setError(SuperCanBackend::tr("Device doesn't support flexible data rate."), ConfigurationError);
+            }
         } else {
-            setError(SuperCanBackend::tr("Device doesn't support flexible data rate."), ConfigurationError);
+            if (((m_FeatPerm) & SC_FEATURE_FLAG_FDF) == SC_FEATURE_FLAG_FDF) {
+                setError(SuperCanBackend::tr("Flexible data rate cannot be turned off."), ConfigurationError);
+            } else {
+                m_Fd = on;
+            }
         }
     } break;
     case QCanBusDevice::DataBitRateKey: {
@@ -638,12 +545,12 @@ bool SuperCanBackend::writeFrame(const QCanBusFrame &newData)
     }
 
     if (newData.hasFlexibleDataRateFormat()) {
-        if (Q_UNLIKELY(!(m_Device.info.features & SC_FEATURE_FLAG_CAN_FD))) {
+        if (Q_UNLIKELY(!((m_FeatPerm | m_FeatConf) & SC_FEATURE_FLAG_FDF))) {
             setError(tr("CAN-FD mode not supported."), QCanBusDevice::WriteError);
             return false;
         }
 
-        if (newData.hasFlexibleDataRateFormat() && !m_Fd) {
+        if (!m_Fd) {
             setError(tr("CAN-FD mode not enabled."), QCanBusDevice::WriteError);
             return false;
         }
@@ -663,7 +570,7 @@ QString SuperCanBackend::interpretErrorFrame(const QCanBusFrame &errorFrame)
 
     return QString();
 }
-
+#if 0
 
 void SuperCanBackend::expired()
 {
@@ -1069,70 +976,74 @@ void SuperCanBackend::busOff()
     busCleanup();
 }
 
+#endif
+
 bool SuperCanBackend::trySendFrame(const QCanBusFrame& frame, bool emit_signal)
 {
-    if (tx_events_available.size()) {
-        uint8_t *mem = reinterpret_cast<uint8_t *>(tx_buffer.data());
-        uint8_t index = tx_events_available.back();
-        tx_events_available.pop_back();
+    uint8_t slot = 0;
 
-        uint8_t *ptr = mem + index * m_Device.device->msg_buffer_size;
-        struct sc_msg_can_tx *tx = reinterpret_cast<struct sc_msg_can_tx *>(ptr);
-        tx->id = SC_MSG_CAN_TX;
-        tx->len = sizeof(*tx);
+    if (!m_HasTxr || tryToAcquireTxSlot(&slot)) {
         auto payload = frame.payload();
+        uint8_t *ptr = reinterpret_cast<uint8_t *>(tx_buffer.data());
+        struct sc_msg_can_tx *tx = reinterpret_cast<struct sc_msg_can_tx *>(ptr);
+        uint8_t bytes = sizeof(*tx);
+
+        if (frame.frameType() == QCanBusFrame::DataFrame) {
+            memcpy(tx->data, payload.data(), payload.size());
+            bytes += payload.size();
+        }
+
+        // align to SC_MSG_CAN_LEN_MULTIPLE bytes
+        if (tx->len & (SC_MSG_CAN_LEN_MULTIPLE-1)) {
+            tx->len += SC_MSG_CAN_LEN_MULTIPLE - (tx->len & (SC_MSG_CAN_LEN_MULTIPLE-1));
+        }
+
+        tx->id = SC_MSG_CAN_TX;
+        tx->len = bytes;
         tx->dlc = len_to_dlc(payload.size());
-        uint8_t bytes = dlc_to_len(tx->dlc);
-        tx->len += bytes;
-        tx->can_id = dev_to_host32(m_Device.device, frame.frameId());
-        tx->track_id = 0;
+        tx->can_id = m_ScDevice->dev_to_host32(frame.frameId());
+        tx->track_id = slot;
         tx->flags = 0;
+
+        if (frame.frameType() == QCanBusFrame::RemoteRequestFrame) {
+            tx->flags |= SC_CAN_FRAME_FLAG_RTR;
+        }
+
         if (frame.hasExtendedFrameFormat()) {
-            tx->flags |= SC_CAN_FLAG_EXT;
+            tx->flags |= SC_CAN_FRAME_FLAG_EXT;
         }
 
         if (frame.hasFlexibleDataRateFormat()) {
-            tx->flags |= SC_CAN_FLAG_FDF;
+            tx->flags |= SC_CAN_FRAME_FLAG_FDF;
             if (frame.hasBitrateSwitch()) {
-                tx->flags |= SC_CAN_FLAG_BRS;
+                tx->flags |= SC_CAN_FRAME_FLAG_BRS;
             }
             if (frame.hasErrorStateIndicator()) {
-                tx->flags |= SC_CAN_FLAG_ESI;
+                tx->flags |= SC_CAN_FRAME_FLAG_ESI;
             }
         }
 
-        if (frame.frameType() == QCanBusFrame::DataFrame) {
-            if (tx->len & 3) {
-                // align to 4 bytes
-                tx->len += 4 - (tx->len & 3);
+        auto error = sc_can_stream_tx(m_ScCanStream, tx, tx->len, SC_DEVICE_TIMEOUT_MS, nullptr);
+        if (error) {
+            if (m_HasTxr) {
+                m_TxSlotsAvailable.push_back(slot);
             }
-            memcpy(tx->data, payload.data(), bytes);
-        }
 
-        auto error = SC_CALL(dev_write)(
-                    m_Device.device,
-                    m_Device.device->msg_pipe_ptr[m_ChannelIndex],
-                    ptr,
-                    tx->len,
-                    &tx_ov[index]);
-        if (error && SC_DLL_ERROR_IO_PENDING != error) {
-            tx_events_available.push_back(index);
             emit errorOccurred(QCanBusDevice::CanBusError::WriteError);
             return false;
         }
 
-        tx_events.push_back(tx_ov[index].hEvent);
-        tx_events_busy.push_back(index);
         if (emit_signal) {
             emit framesWritten(1);
         }
+
         return true;
     }
 
     return false;
 }
 
-
+#if 0
 
 int SuperCanBackend::setNominalBitrate(unsigned bitrate)
 {
@@ -1249,7 +1160,33 @@ void SuperCanBackend::resetConfiguration()
     QCanBusDevice::setConfigurationParameter(QCanBusDevice::ProtocolKey, QVariant());
 #endif
 }
+#endif
 
+int SuperCanBackend::on_rx(void* ctx, void const* ptr, uint16_t bytes)
+{
+    static_cast<SuperCanBackend*>(ctx)->rx(static_cast<uint8_t const*>(ptr), bytes);
+    return 0;
+}
 
+void SuperCanBackend::rx(uint8_t const* ptr, uint16_t bytes)
+{
+
+}
+
+bool SuperCanBackend::tryToAcquireTxSlot(uint8_t* slot)
+{
+//    if (!m_HasTxr) {
+//        *slot = 0;
+//        return true;
+//    }
+
+    if (m_TxSlotsAvailable.empty()) {
+        return false;
+    }
+
+    *slot = m_TxSlotsAvailable.back();
+    m_TxSlotsAvailable.pop_back();
+    return true;
+}
 
 QT_END_NAMESPACE

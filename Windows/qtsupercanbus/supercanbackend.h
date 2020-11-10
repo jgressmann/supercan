@@ -41,38 +41,9 @@
 #endif
 #include <supercan_winapi.h>
 #include <supercan_dll.h>
+#include <supercan_misc.h>
 
 QT_BEGIN_NAMESPACE
-
-
-struct can_regs {
-    uint16_t brp;
-    uint16_t tseg1;
-    uint8_t tseg2;
-    uint8_t sjw;
-};
-
-class ScDevice
-{
-public:
-    ~ScDevice();
-    ScDevice();
-    ScDevice(const ScDevice&) = delete;
-    ScDevice& operator=(const ScDevice&) = delete;
-    ScDevice(ScDevice&& other);
-    ScDevice& operator=(ScDevice&& other);
-
-    void close();
-    int open(uint32_t index, int timeout_ms);
-
-public:
-    sc_dev_t* device;
-    uint8_t* cmd_tx_buffer;
-    uint8_t* cmd_rx_buffer;
-    uint32_t index;
-    struct sc_msg_dev_info info;
-    OVERLAPPED cmd_tx_ov, cmd_rx_ov;
-};
 
 
 class SuperCanBackend : public QCanBusDevice
@@ -112,31 +83,36 @@ private:
     void busOff();
     void busCleanup();
     bool trySendFrame(const QCanBusFrame& frame, bool emit_signal);
-    inline bool deviceValid() const { return !!m_Device.device; }
+    inline bool deviceValid() const { return m_Initialized; }
     int setBus(bool on);
     int setNominalBitrate(unsigned value);
     int setDataBitrate(unsigned value);
     void resetConfiguration();
     void applyConfigurationParameter(int key, const QVariant &value);
+    static int on_rx(void* ctx, void const* ptr, uint16_t bytes);
+    void rx(uint8_t const* ptr, uint16_t bytes);
+    bool tryToAcquireTxSlot(uint8_t* slot);
 
 private:
     QTimer m_Timer;
-    ScDevice m_Device;
+    sc_dev_t* m_ScDevice;
+    sc_cmd_ctx_t m_ScCmdCtx;
+    sc_can_stream_t m_ScCanStream;
+    sc_msg_dev_info m_ScDevInfo;
+    sc_msg_can_info m_ScCanInfo;
+    sc_dev_time_tracker_t m_TimeTracker;
+    uint32_t m_ScDevIndex;
     QByteArray rx_buffer;
     QByteArray tx_buffer;
-    QVector<HANDLE> rx_events;
-    QVector<HANDLE> tx_events;
-    QVector<uint8_t> tx_events_available;
-    QVector<uint8_t> tx_events_busy;
-    QVector<OVERLAPPED> rx_ov;
-    QVector<OVERLAPPED> tx_ov;
-    can_regs m_Nominal, m_Data;
-    uint32_t m_TsHiUs;
-    uint32_t m_TsLoUs;
+    QVector<uint8_t> m_TxSlotsAvailable;
     int m_Urbs;
-    uint8_t m_ChannelIndex;
+    uint16_t m_FeatPerm;
+    uint16_t m_FeatConf;
     bool m_IsOnBus;
     bool m_Fd;
+    bool m_HasFd;
+    bool m_HasTxr;
+    bool m_Initialized;
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
     QCanBusDevice::CanBusStatus m_BusStatus;
 #endif

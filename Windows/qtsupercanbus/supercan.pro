@@ -11,15 +11,16 @@ SOURCES += \
     main.cpp \
     supercanbackend.cpp
 
-INCLUDEPATH += ../inc
+INCLUDEPATH += ../inc ../../src
 
-sc_static:{
+#sc_static:{
     SOURCES += ../dll/supercan_dll.c
+    SOURCES += ../../src/can_bit_timing.c
     DEFINES += SC_STATIC=1
     LIBS += -lCfgmgr32 -lwinusb
-} else {
-    HEADERS += supercan_symbols_p.h
-}
+#} else {
+#    HEADERS += supercan_symbols_p.h
+#}
 
 
 
