@@ -36,7 +36,7 @@
 #          ifdef SC_DLL_EXPORTS
 #              define SC_DLL_API __declspec(dllexport)
 #          else
-#              define SC_DLL_API _declspec(dllimport)
+#              define SC_DLL_API __declspec(dllimport)
 #          endif
 #      else
 #          error Define SC_DLL_API
