@@ -30,7 +30,7 @@
 
 #ifndef SC_DLL_API
 #   ifdef SC_STATIC
-#      define SC_DLL_API SC_EXTERN_C
+#      define SC_DLL_API
 #   else
 #      ifdef _MSC_VER
 #          ifdef SC_DLL_EXPORTS

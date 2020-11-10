@@ -652,10 +652,11 @@ Error:
 
 
 
-SC_DLL_API int sc_dev_read(sc_dev_t* _dev, uint8_t pipe, uint8_t* buffer, ULONG bytes, OVERLAPPED* ov)
+SC_DLL_API int sc_dev_read(sc_dev_t* _dev, uint8_t pipe, void* _buffer, ULONG bytes, OVERLAPPED* ov)
 {
-    int error = SC_DLL_ERROR_NONE;
     struct sc_dev_ex* dev = (struct sc_dev_ex*)_dev;
+    uint8_t *buffer = _buffer;
+    int error = SC_DLL_ERROR_NONE;
 
     if (!_dev || !ov || !ov->hEvent) {
         error = SC_DLL_ERROR_INVALID_PARAM;
@@ -687,10 +688,12 @@ Exit:
     return error;
 }
 
-SC_DLL_API int sc_dev_write(sc_dev_t* _dev, uint8_t pipe, uint8_t const* buffer, ULONG bytes, OVERLAPPED* ov)
+SC_DLL_API int sc_dev_write(sc_dev_t* _dev, uint8_t pipe, void const* _buffer, ULONG bytes, OVERLAPPED* ov)
 {
-    int error = SC_DLL_ERROR_NONE;
     struct sc_dev_ex* dev = (struct sc_dev_ex*)_dev;
+    uint8_t const *buffer = _buffer;
+    int error = SC_DLL_ERROR_NONE;
+
 
     if (!_dev || !ov || !ov->hEvent) {
         error = SC_DLL_ERROR_INVALID_PARAM;
