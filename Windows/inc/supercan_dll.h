@@ -210,6 +210,16 @@ SC_DLL_API int sc_can_stream_init(
     sc_can_stream_t* stream);
 
 
+/** Transmit a frame
+ *
+ * \param stream    CAN stream
+ * \param ptr       Pointer to sc_msg_can_tx aligned to SC_MSG_CAN_LEN_MULTIPLE
+ * \param bytes     Bytes in buffer
+ * \param timeout_ms    timeout for transmission to device
+ * \param [out] written Bytes written to device
+ *
+ * \returns error code
+ */
 SC_DLL_API int sc_can_stream_tx(
     sc_can_stream_t stream,
     void const* ptr, 
@@ -219,7 +229,9 @@ SC_DLL_API int sc_can_stream_tx(
 
 /** Receives messages
  * 
- * \param stream    stream
+ * Calls this function repeatedly to implement the message loop.
+ * 
+ * \param stream    CAN stream
  * \param timeout_ms    timeout in milliseconds, argument to WaitForMultipleObjects.
  * \returns error code
  */
