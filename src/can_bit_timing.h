@@ -75,7 +75,7 @@ struct can_bit_timing_constraints_real {
 
 struct can_bit_timing_constraints_fixed {
 	uint32_t sample_point; // [0-1024]
-	uint32_t bitrate;   // [bps]
+	uint32_t bitrate;      // [bps]
 	int sjw;
 	int min_tqs;
 };
