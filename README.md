@@ -8,11 +8,14 @@ This is project SuperCAN. An open source USB to CAN-FD protocol.
 SuperCAN works with the open source [D5035-01](https://github.com/RudolphRiedel/USB_CAN-FD)
 hardware to form an USB 2.0 to CAN-FD interface.
 
+# Usage
+
+To use a SuperCAN device, simply plug it in. On Linux, ensure the driver module is loaded (see below).
+
 # Status
 
 SuperCAN supports Windows 10 and Linux. The protocol should be considered in alpha stadium as the driver code for both platforms is maturing. With the release of version 1.0.0 the protocol will be frozen.
 
-To use a SuperCAN device, simply plug it in.
 
 ## Build
 
