@@ -6,7 +6,7 @@ What is this?
 
 This is project SuperCAN. An open source USB to CAN-FD protocol.
 SuperCAN works with the open source [D5035-01](https://github.com/RudolphRiedel/USB_CAN-FD)
-hardware to form a working USB 2.0 to CAN-FD interface.
+hardware to form an USB 2.0 to CAN-FD interface.
 
 # Status
 
