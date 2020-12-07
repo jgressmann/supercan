@@ -344,7 +344,7 @@ chunky_writer_finalize(chunky_writer *t)
         hdr->seq_no = CHUNKY_BYTESWAP_CALL(t->seq_no);
         t->len = 0;
         ++t->seq_no;
-        t->hdr += t->chunk_size;;
+        t->hdr += t->chunk_size;
     }
 
     return (CHUNKY_BUFFER_SIZE_TYPE)(t->hdr - t->buf_ptr);
