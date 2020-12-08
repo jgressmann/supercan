@@ -48,6 +48,10 @@
 extern "C" {
 #endif
 
+#define SC_DLL_VERSION_MAJOR 0
+#define SC_DLL_VERSION_MINOR 2
+#define SC_DLL_VERSION_PATCH 0
+
 
 
 #define SC_DLL_ERROR_UNKNOWN                -1
@@ -67,6 +71,7 @@ extern "C" {
 #define SC_DLL_ERROR_REASSEMBLY_SPACE       14  ///< insufficient message reassembly buffer space
 #define SC_DLL_ERROR_TIMEOUT                15  ///< timeout
 #define SC_DLL_ERROR_AGAIN                  16  ///< try again
+#define SC_DLL_ERROR_BUFER_TOO_SMALL        17  ///< buffer too small
 
 typedef uint16_t(*sc_dev_to_host16)(uint16_t value);
 typedef uint32_t(*sc_dev_to_host32)(uint32_t value);
@@ -103,6 +108,17 @@ SC_DLL_API int sc_dev_scan(void);
 
 /** Gets the number of devices found. */
 SC_DLL_API int sc_dev_count(uint32_t* count);
+
+/** Gets the device identifier. 
+ * 
+ * \param index device index
+ * \param buf buffer to receive device identifier
+ * \param (inout) buffer capacity on call, length of the string on return, 
+ *        not including the terminating \0 character.
+ *
+ * \returns error code
+ */
+SC_DLL_API int sc_dev_id_unicode(uint32_t index, wchar_t* buf, size_t* len);
 
 /** Open device by index. */
 SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t** dev);
@@ -215,17 +231,13 @@ SC_DLL_API int sc_can_stream_init(
  * \param stream    CAN stream
  * \param ptr       Pointer to sc_msg_can_tx aligned to SC_MSG_CAN_LEN_MULTIPLE
  * \param bytes     Bytes in buffer
- * \param timeout_ms    timeout for transmission to device
- * \param [out] written Bytes written to device
  *
  * \returns error code
  */
 SC_DLL_API int sc_can_stream_tx(
     sc_can_stream_t stream,
     void const* ptr, 
-    size_t bytes, 
-    DWORD timeout_ms,
-    size_t* written);
+    size_t bytes);
 
 /** Receives messages
  * 

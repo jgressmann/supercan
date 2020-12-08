@@ -104,6 +104,10 @@
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>winusb.lib;Cfgmgr32.lib</AdditionalDependencies>
     </Link>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>../inc</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;$(ResourcesExtraDefines)%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -124,6 +128,10 @@
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>winusb.lib;Cfgmgr32.lib</AdditionalDependencies>
     </Link>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>../inc</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;$(ResourcesExtraDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -139,6 +147,10 @@
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>winusb.lib;Cfgmgr32.lib</AdditionalDependencies>
     </Link>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>../inc</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;$(ResourcesExtraDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -158,6 +170,10 @@
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>winusb.lib;Cfgmgr32.lib</AdditionalDependencies>
     </Link>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>../inc</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;$(ResourcesExtraDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\inc\supercan_dll.h" />
