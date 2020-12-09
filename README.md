@@ -135,7 +135,7 @@ Build the Visual Studio solution in the Windows folder. I use Visual Studio Comm
 
 The solution contains code for a demo application that sends and dumps CAN traffic.
 
-## 3. Linux socketcan driver
+## 3. Linux SocketCAN driver
 
 To build the Linux kernel module, please follow [these instructions](Linux/README.md).
 
