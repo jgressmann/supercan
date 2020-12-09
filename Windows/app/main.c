@@ -43,8 +43,15 @@
 
 #define CMD_TIMEOUT_MS 1000
 
-#define SC_DLL_ERROR_BUFFER_TOO_SMALL 1000
-#define SC_DLL_ERROR_INSUFFICIENT_DATA 1001
+
+struct tx_job {
+    uint64_t last_tx_ts_ms;
+    uint32_t can_id;
+    int interval_ms;
+    uint8_t flags;
+    uint8_t dlc;
+    uint8_t data[64];
+};
 
 
 
@@ -57,9 +64,43 @@ static inline uint8_t dlc_to_len(uint8_t dlc)
     return map[dlc & 0xf];
 }
 
+static uint8_t len_to_dlc(uint8_t len)
+{
+    if (len <= 8) {
+        return len;
+    }
+
+    if (len <= 12) {
+        return 9;
+    }
+
+    if (len <= 16) {
+        return 10;
+    }
+
+    if (len <= 20) {
+        return 11;
+    }
+
+    if (len <= 24) {
+        return 12;
+    }
+
+    if (len <= 32) {
+        return 13;
+    }
+
+    if (len <= 48) {
+        return 14;
+    }
+
+    return 15;
+}
+
+
 static bool is_false(char const* str)
 {
-    return  
+    return
         0 == _stricmp(str, "0") ||
         0 == _stricmp(str, "false") ||
         0 == _stricmp(str, "no") ||
@@ -85,6 +126,16 @@ static void usage(FILE* stream)
     fprintf(stream, "   TX_MSG:         log tx message information\n");
     fprintf(stream, "   TXR:        log tx message receipts\n");
     fprintf(stream, "   ALL:        log everything\n");
+    fprintf(stream, "--tx K1=V1,K2...   transmit message\n");
+    fprintf(stream, "   keys are:\n");
+    fprintf(stream, "       id      CAN ID (hex)\n");
+    fprintf(stream, "       len     frame length (bytes)\n");
+    fprintf(stream, "       dlc     frame length (dlc)\n");
+    fprintf(stream, "       data    payload (hex)\n");
+    fprintf(stream, "       int     interval (millis)\n");
+    fprintf(stream, "       fd      FD frame format (bool)\n");
+    fprintf(stream, "       brs     FD bit rate switching (bool)\n");
+    fprintf(stream, "       esi     FD error state indicator (bool)\n");
 }
 
 #define LOG_FLAG_RX_DT      0x00000001
@@ -325,6 +376,115 @@ static int process_can(
     return 0;
 }
 
+static inline uint8_t hex_to_nibble(char c)
+{
+    if ('0' <= c && '9' >= c) {
+        return c - '0';
+    }
+
+    if ('a' <= c && 'f' >= c) {
+        return c - 'a' + 10;
+    }
+
+    if ('A' <= c && 'F' >= c) {
+        return c - 'A' + 10;
+    }
+
+    return 0;
+}
+
+static inline uint8_t hex_to_byte(char hi, char lo)
+{
+    return (hex_to_nibble(hi) << 4) | hex_to_nibble(lo);
+}
+
+static void parse_tx_job(struct tx_job* job, char* str)
+{
+    memset(job, 0, sizeof(*job));
+    job->interval_ms = -1;
+
+    char* kvs_ctx = NULL;
+    for (char* kvs = strtok_s(str, ",", &kvs_ctx); kvs;
+        kvs = strtok_s(NULL, ",", &kvs_ctx)) {
+
+        char* eq = strchr(kvs, '=');
+        if (!eq) {
+            fprintf(stderr, "ERROR ignoring invalid key/value pair '%s'\n", kvs);
+            continue;
+        }
+
+        char* key = kvs;
+        char* value = eq + 1;
+        *eq = 0;
+
+
+
+        if (0 == _stricmp(key, "id")) {
+            job->can_id = strtoul(value, NULL, 16) & 0x1fffffff;
+            if (job->can_id & ~0x7ff) {
+                job->flags |= SC_CAN_FRAME_FLAG_EXT;
+            }
+        }
+        else if (0 == _stricmp(key, "ext")) {
+            bool flag = !is_false(value);
+            if (flag) {
+                job->flags |= SC_CAN_FRAME_FLAG_EXT;
+            }
+            else {
+                job->flags &= ~SC_CAN_FRAME_FLAG_EXT;
+            }
+        }
+        else if (0 == _stricmp(key, "fd")) {
+            bool flag = !is_false(value);
+            if (flag) {
+                job->flags |= SC_CAN_FRAME_FLAG_FDF;
+            }
+            else {
+                job->flags &= ~(SC_CAN_FRAME_FLAG_FDF | SC_CAN_FRAME_FLAG_BRS | SC_CAN_FRAME_FLAG_ESI);
+            }
+        }
+        else if (0 == _stricmp(key, "len")) {
+            unsigned len = strtoul(value, NULL, 10);
+            job->dlc = len_to_dlc(len);
+        }
+        else if (0 == _stricmp(key, "dlc")) {
+            unsigned dlc = strtoul(value, NULL, 10);
+            job->dlc = dlc & 0xf;
+        }
+        else if (0 == _stricmp(key, "data")) {
+            size_t len = strlen(value);
+            if (len > 2 * _countof(job->data)) {
+                len = 2 * _countof(job->data);
+            }
+
+            for (size_t i = 0, j = 0; i < len; i += 2, ++j) {
+                job->data[j] = hex_to_byte(value[i], value[i + 1]);
+            }
+        }
+        else if (0 == strcmp(key, "int")) {
+            job->interval_ms = strtol(value, NULL, 10);
+        }
+        else if (0 == _stricmp(key, "brs")) {
+            bool flag = !is_false(value);
+            if (flag) {
+                job->flags |= SC_CAN_FRAME_FLAG_BRS;
+            }
+            else {
+                job->flags &= ~SC_CAN_FRAME_FLAG_BRS;
+            }
+        }
+        else if (0 == _stricmp(key, "esi")) {
+            bool flag = !is_false(value);
+            if (flag) {
+                job->flags |= SC_CAN_FRAME_FLAG_ESI;
+            }
+            else {
+                job->flags &= ~SC_CAN_FRAME_FLAG_ESI;
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv)
 {
     struct can_state can_state;
@@ -346,7 +506,7 @@ int main(int argc, char** argv)
     data_user_constraints.min_tqs = 0;
     data_user_constraints.sample_point = 0.75f;
     data_user_constraints.sjw = 1;
-    
+
     PUCHAR msg_tx_buffer = NULL;
     struct sc_msg_dev_info dev_info;
     struct sc_msg_can_info can_info;
@@ -354,11 +514,12 @@ int main(int argc, char** argv)
     char serial_str[1 + sizeof(dev_info.sn_bytes) * 2] = { 0 };
     char name_str[1 + sizeof(dev_info.name_bytes)] = { 0 };
     uint8_t track_id = 0;
-    uint32_t tx_counter = 0;
+    struct tx_job tx_jobs[8];
+    unsigned tx_job_count = 0;
 
     memset(&cmd_ctx, 0, sizeof(cmd_ctx));
     memset(&can_state, 0, sizeof(can_state));
-    
+
     sc_tt_init(&can_state.tt);
 
     sc_init();
@@ -487,28 +648,45 @@ int main(int argc, char** argv)
             }
         }
         else if (0 == strcmp("--dsjw", argv[i])) {
-        if (i + 1 < argc) {
-            char* end = NULL;
-            data_user_constraints.sjw = (uint8_t)strtoul(argv[i + 1], &end, 10);
-            if (!end || end == argv[i + 1]) {
-                fprintf(stderr, "ERROR failed to convert '%s' to integer\n", argv[i + 1]);
+            if (i + 1 < argc) {
+                char* end = NULL;
+                data_user_constraints.sjw = (uint8_t)strtoul(argv[i + 1], &end, 10);
+                if (!end || end == argv[i + 1]) {
+                    fprintf(stderr, "ERROR failed to convert '%s' to integer\n", argv[i + 1]);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                if (data_user_constraints.sjw == 0) {
+                    fprintf(stderr, "ERROR invalid sjw %u\n", (unsigned)data_user_constraints.sjw);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                i += 2;
+            }
+            else {
+                fprintf(stderr, "ERROR %s expects a positive integer argument\n", argv[i]);
                 error = SC_DLL_ERROR_INVALID_PARAM;
                 goto Exit;
             }
+        }
+        else if (0 == strcmp("--tx", argv[i])) {
+            if (i + 1 < argc) {
+                if (tx_job_count == _countof(tx_jobs)) {
+                    fprintf(stderr, "ERROR Only %zu tx jobs available\n", _countof(tx_jobs));
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
 
-            if (data_user_constraints.sjw == 0) {
-                fprintf(stderr, "ERROR invalid sjw %u\n", (unsigned)data_user_constraints.sjw);
-                error = SC_DLL_ERROR_INVALID_PARAM;
-                goto Exit;
+                struct tx_job* job = &tx_jobs[tx_job_count++];
+                parse_tx_job(job, argv[i + 1]);
+
+                i += 2;
             }
+            else {
 
-            i += 2;
-        }
-        else {
-            fprintf(stderr, "ERROR %s expects a positive integer argument\n", argv[i]);
-            error = SC_DLL_ERROR_INVALID_PARAM;
-            goto Exit;
-        }
+            }
         }
         else {
             ++i;
@@ -615,7 +793,7 @@ int main(int argc, char** argv)
         can_info.nmbt_brp_max = dev->dev_to_host16(can_info.nmbt_brp_max);
         can_info.nmbt_tseg1_max = dev->dev_to_host16(can_info.nmbt_tseg1_max);
 
-        
+
     }
 
     // compute hw settings
@@ -670,7 +848,7 @@ int main(int argc, char** argv)
             }
         }
     }
-    
+
     msg_tx_buffer = malloc(256); // TX BUFFER WARNING
     if (!msg_tx_buffer) {
         error = SC_DLL_ERROR_OUT_OF_MEM;
@@ -697,12 +875,12 @@ int main(int argc, char** argv)
         feat->len = sizeof(*feat);
         feat->op = SC_FEAT_OP_OR;
         // try to enable CAN-FD and TXR
-        feat->arg = (dev_info.feat_perm | dev_info.feat_conf) & 
+        feat->arg = (dev_info.feat_perm | dev_info.feat_conf) &
             ((fdf ? SC_FEATURE_FLAG_FDF : 0) | SC_FEATURE_FLAG_TXR);
         cmd_tx_ptr += feat->len;
         ++cmd_count;
 
-        
+
         // set nominal bittiming
         struct sc_msg_bittiming* bt = (struct sc_msg_bittiming*)cmd_tx_ptr;
         memset(bt, 0, sizeof(*bt));
@@ -728,7 +906,7 @@ int main(int argc, char** argv)
             bt->tseg2 = data_settings.tseg2;
             cmd_tx_ptr += bt->len;
             ++cmd_count;
-        }        
+        }
 
         struct sc_msg_config* bus_on = (struct sc_msg_config*)cmd_tx_ptr;
         memset(bus_on, 0, sizeof(*bus_on));
@@ -752,7 +930,7 @@ int main(int argc, char** argv)
         }
 
         struct sc_msg_error* error_msgs = (struct sc_msg_error*)cmd_ctx.rx_buffer;
-        for (unsigned i = 0; i < cmd_count; ++i) {            
+        for (unsigned i = 0; i < cmd_count; ++i) {
             struct sc_msg_error* error_msg = &error_msgs[i];
             if (SC_ERROR_NONE != error_msg->error) {
                 fprintf(stderr, "cmd index %u failed: %d\n", i, error_msg->error);
@@ -767,79 +945,65 @@ int main(int argc, char** argv)
         goto Exit;
     }
 
-    const DWORD WAIT_TIMEOUT_MS = 500; // tx on timeout
-    DWORD last_send = 0;
+    DWORD timeout_ms = 0;
+
     while (1) {
-        error = sc_can_stream_rx(stream, 100);
+        error = sc_can_stream_rx(stream, timeout_ms);
         if (error) {
-            if (SC_DLL_ERROR_TIMEOUT != error) {                
+            if (SC_DLL_ERROR_TIMEOUT != error) {
                 fprintf(stderr, "sc_can_stream_run failed: %s (%d)\n", sc_strerror(error), error);
                 break;
             }
         }
 
-        DWORD now = GetTickCount();
-        if (now - last_send >= WAIT_TIMEOUT_MS) {
-            uint16_t bytes = 0;
-            PUCHAR ptr = msg_tx_buffer;
-            struct sc_msg_can_tx* tx = (struct sc_msg_can_tx*)ptr;
-            memset(tx, 0, 128);
+        if (tx_job_count) {
+            timeout_ms = 0xffffffff;
+            ULONGLONG now = GetTickCount64();
 
-            bytes = sizeof(*tx) + 64;
-            if (bytes & 3) {
-                bytes += 4 - (bytes & 3);
-            }
+            for (size_t i = 0; i < tx_job_count; ++i) {
+                struct tx_job* job = &tx_jobs[i];
+                if (0 == job->last_tx_ts_ms ||
+                    (job->interval_ms >= 0 && now - job->last_tx_ts_ms >= (unsigned)job->interval_ms)) {
+                    job->last_tx_ts_ms = now;
 
-            ptr += bytes;
+                    struct sc_msg_can_tx* tx = (struct sc_msg_can_tx*)msg_tx_buffer;
+                    uint8_t bytes = sizeof(*tx);
+                    if (job->flags & SC_CAN_FRAME_FLAG_RTR) {
 
-            tx->id = SC_MSG_CAN_TX;
-            tx->len = (uint8_t)bytes;
-            tx->can_id = 0x42;
-            tx->dlc = 15;
-            tx->flags = SC_CAN_FRAME_FLAG_FDF | SC_CAN_FRAME_FLAG_BRS;
-            tx->track_id = track_id++;
-            tx->data[0] = 0xde;
-            tx->data[1] = 0xad;
-            tx->data[2] = 0xbe;
-            tx->data[3] = 0xef;
-            tx->data[4] = (uint8_t)(tx_counter >> 24);
-            tx->data[5] = (uint8_t)(tx_counter >> 16);
-            tx->data[6] = (uint8_t)(tx_counter >> 8);
-            tx->data[7] = (uint8_t)(tx_counter >> 0);
-            
+                    }
+                    else {
+                        bytes += dlc_to_len(job->dlc);
+                        memcpy(tx->data, job->data, dlc_to_len(job->dlc));
+                    }
 
-            tx = (struct sc_msg_can_tx*)ptr;
-            bytes = sizeof(*tx);
-            if (bytes & 3) {
-                bytes += 4 - (bytes & 3);
-            }
+                    if (bytes & (SC_MSG_CAN_LEN_MULTIPLE-1)) {
+                        bytes += SC_MSG_CAN_LEN_MULTIPLE - (bytes & (SC_MSG_CAN_LEN_MULTIPLE - 1));
+                    }
 
-            ptr += bytes;
+                    tx->id = SC_MSG_CAN_TX;
+                    tx->len = bytes;
+                    tx->can_id = dev->dev_to_host32(job->can_id);
+                    tx->dlc = job->dlc;
+                    tx->flags = job->flags;
+                    tx->track_id = track_id++;
 
-            tx->id = SC_MSG_CAN_TX;
-            tx->len = (uint8_t)bytes;
-            tx->can_id = 0x12345;
-            tx->dlc = 0;
-            tx->flags = SC_CAN_FRAME_FLAG_EXT;
-            tx->track_id = track_id++;
-            
-            last_send = now;
 
-            bytes = (uint16_t)(ptr - msg_tx_buffer);
-            size_t w = 0;
-            error = sc_can_stream_tx(stream, msg_tx_buffer, bytes, -1, &w);
-            if (error) {
-                if (SC_DLL_ERROR_AGAIN != error) {
-                    fprintf(stderr, "sc_can_stream_tx failed: %s (%d)\n", sc_strerror(error), error);
-                    goto Exit;
+                    error = sc_can_stream_tx(stream, msg_tx_buffer, bytes);
+                    if (error) {
+                        if (SC_DLL_ERROR_AGAIN != error) {
+                            fprintf(stderr, "sc_can_stream_tx failed: %s (%d)\n", sc_strerror(error), error);
+                            goto Exit;
+                        }
+                    }
+
+                    if (job->interval_ms >= 0 && (DWORD)job->interval_ms < timeout_ms) {
+                        timeout_ms = job->interval_ms;
+                    }
                 }
             }
-            else {
-                if (w == bytes) {
-                    fprintf(stderr, "tx %lx\n", tx_counter);
-                    ++tx_counter;
-                }
-            }
+        }
+        else {
+            timeout_ms = INFINITE;
         }
     }
 
@@ -853,7 +1017,7 @@ Exit:
     }
 
     free(msg_tx_buffer);
-    
+
     sc_uninit();
     return error;
 }

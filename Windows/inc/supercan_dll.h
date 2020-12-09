@@ -48,6 +48,10 @@
 extern "C" {
 #endif
 
+#define SC_DLL_VERSION_MAJOR 0
+#define SC_DLL_VERSION_MINOR 2
+#define SC_DLL_VERSION_PATCH 0
+
 
 
 #define SC_DLL_ERROR_UNKNOWN                -1
@@ -67,6 +71,7 @@ extern "C" {
 #define SC_DLL_ERROR_REASSEMBLY_SPACE       14  ///< insufficient message reassembly buffer space
 #define SC_DLL_ERROR_TIMEOUT                15  ///< timeout
 #define SC_DLL_ERROR_AGAIN                  16  ///< try again
+#define SC_DLL_ERROR_BUFER_TOO_SMALL        17  ///< buffer too small
 
 typedef uint16_t(*sc_dev_to_host16)(uint16_t value);
 typedef uint32_t(*sc_dev_to_host32)(uint32_t value);
@@ -80,13 +85,13 @@ typedef struct sc_dev {
     uint8_t can_epp;
 } sc_dev_t;
 
-/** Initializes the library 
+/** Initializes the library
  *
  * This function is not thread-safe.
  */
 SC_DLL_API void sc_init(void);
 
-/** Uninitializes the library 
+/** Uninitializes the library
  *
  * This function is not thread-safe.
  */
@@ -95,8 +100,8 @@ SC_DLL_API void sc_uninit(void);
 /** Returns a textual description of the error code */
 SC_DLL_API char const* sc_strerror(int error);
 
-/** Scans the system for devices. 
- * 
+/** Scans the system for devices.
+ *
  * This function is not thread-safe.
  */
 SC_DLL_API int sc_dev_scan(void);
@@ -104,19 +109,30 @@ SC_DLL_API int sc_dev_scan(void);
 /** Gets the number of devices found. */
 SC_DLL_API int sc_dev_count(uint32_t* count);
 
+/** Gets the device identifier.
+ *
+ * \param index device index
+ * \param buf buffer to receive device identifier
+ * \param (inout) buffer capacity on call, length of the string on return,
+ *        not including the terminating \0 character.
+ *
+ * \returns error code
+ */
+SC_DLL_API int sc_dev_id_unicode(uint32_t index, wchar_t* buf, size_t* len);
+
 /** Open device by index. */
 SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t** dev);
 
 /** Closes the open device. */
 SC_DLL_API void sc_dev_close(sc_dev_t* dev);
 
-/** Submits a formated buffer down the USB stack to read from the device (bulk IN). 
- * 
+/** Submits a formated buffer down the USB stack to read from the device (bulk IN).
+ *
  * \param pipe  USB pipe 1-15
  * \param buffer buffer to fill with data returned from device
  * \param bytes capacity of the buffer
  * \param ov    standard Windows API overlapped
- * 
+ *
  * \returns error code
  * \see WinUsb_ReadPipe
  */
@@ -172,9 +188,9 @@ SC_DLL_API int sc_cmd_ctx_init(sc_cmd_ctx_t* ctx, sc_dev_t* dev);
 
 /** Sends command to device and processes result */
 SC_DLL_API int sc_cmd_ctx_run(
-    sc_cmd_ctx_t* ctx, 
-    uint16_t cmd_bytes, 
-    uint16_t* reply_bytes, 
+    sc_cmd_ctx_t* ctx,
+    uint16_t cmd_bytes,
+    uint16_t* reply_bytes,
     DWORD timeout_ms);
 
 
@@ -182,7 +198,7 @@ typedef void* sc_can_stream_t;
 typedef int (*sc_can_stream_rx_callback)(void* ctx, void const* ptr, uint16_t bytes);
 
 /** Uninitializes the stream
- * 
+ *
  * \param stream object to uninitialize, can be NULL
  *
  */
@@ -197,16 +213,16 @@ SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t stream);
  * \param callback  callback to invoke on message reception
  * \param rreqs  number of read requests to submit to the USB stack
  *      pass 0 to use default.
- * \param [out] stream  
- * 
+ * \param [out] stream
+ *
  * \returns error code
  */
 SC_DLL_API int sc_can_stream_init(
-    sc_dev_t* dev, 
-    DWORD buffer_size, 
+    sc_dev_t* dev,
+    DWORD buffer_size,
     void *ctx,
     sc_can_stream_rx_callback callback,
-    int rreqs, 
+    int rreqs,
     sc_can_stream_t* stream);
 
 
@@ -215,22 +231,18 @@ SC_DLL_API int sc_can_stream_init(
  * \param stream    CAN stream
  * \param ptr       Pointer to sc_msg_can_tx aligned to SC_MSG_CAN_LEN_MULTIPLE
  * \param bytes     Bytes in buffer
- * \param timeout_ms    timeout for transmission to device
- * \param [out] written Bytes written to device
  *
  * \returns error code
  */
 SC_DLL_API int sc_can_stream_tx(
     sc_can_stream_t stream,
-    void const* ptr, 
-    size_t bytes, 
-    DWORD timeout_ms,
-    size_t* written);
+    void const* ptr,
+    size_t bytes);
 
 /** Receives messages
- * 
+ *
  * Calls this function repeatedly to implement the message loop.
- * 
+ *
  * \param stream    CAN stream
  * \param timeout_ms    timeout in milliseconds, argument to WaitForMultipleObjects.
  * \returns error code

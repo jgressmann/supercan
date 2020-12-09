@@ -2,6 +2,15 @@
 //
 #include "resource.h"
 
+#define STR2(x) #x
+#define STR(x) STR2(x)
+#define SC_DLL_API
+#include "supercan_dll.h"
+
+#ifndef SC_BUILD_NUMBER
+#define SC_BUILD_NUMBER 0
+#endif
+
 #define APSTUDIO_READONLY_SYMBOLS
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -25,8 +34,8 @@ LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,1,0,0
- PRODUCTVERSION 0,1,0,0
+ FILEVERSION SC_DLL_VERSION_MAJOR,SC_DLL_VERSION_MINOR,SC_DLL_VERSION_PATCH,SC_BUILD_NUMBER
+ PRODUCTVERSION SC_DLL_VERSION_MAJOR,SC_DLL_VERSION_MINOR,SC_DLL_VERSION_PATCH,SC_BUILD_NUMBER
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -42,12 +51,12 @@ BEGIN
         BLOCK "000004b0"
         BEGIN
             VALUE "FileDescription", "SuperCAN"
-            VALUE "FileVersion", "0.1.0.0"
+            VALUE "FileVersion", STR(SC_DLL_VERSION_MAJOR) "." STR(SC_DLL_VERSION_MINOR) "." STR(SC_DLL_VERSION_PATCH) "." STR(SC_BUILD_NUMBER)
             VALUE "InternalName", "supercan.dll"
-            VALUE "LegalCopyright", "Copyright (C) 2020 Jean Gressmann"
+            VALUE "LegalCopyright", "Copyright (c) 2020 Jean Gressmann"
             VALUE "OriginalFilename", "supercan.dll"
             VALUE "ProductName", "SuperCAN"
-            VALUE "ProductVersion", "0.1.0.0"
+            VALUE "ProductVersion", STR(SC_DLL_VERSION_MAJOR) "." STR(SC_DLL_VERSION_MINOR) "." STR(SC_DLL_VERSION_PATCH) "." STR(SC_BUILD_NUMBER)
         END
     END
     BLOCK "VarFileInfo"
