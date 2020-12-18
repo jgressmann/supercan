@@ -134,10 +134,10 @@ echo INFO: Run tests for $seconds seconds | tee -a "$meta_log_path"
 
 cans="$can_good $can_test"
 if [ $init -ne 0 ];then
-	echo INFO: Initialize devices to nominal 1MBit/s data 5MBit/s | tee -a "$meta_log_path"
+	echo INFO: Initialize devices to nominal 1MBit/s data 8MBit/s | tee -a "$meta_log_path"
 	for can in $cans; do
 		ip link set down $can || true
-		ip link set $can type can bitrate 1000000 dbitrate 5000000 fd on
+		ip link set $can type can bitrate 1000000 dbitrate 8000000 fd on
 		ip link set up $can
 	done
 fi
