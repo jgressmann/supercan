@@ -63,6 +63,7 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 
 // I am going to assume Windows on ARM is little endian
 #define NATIVE_BYTE_ORDER SC_BYTE_ORDER_LE
+#define SC_CAN_STREAM_MAX_RX_WAIT_HANDLES 63
 
 
 static struct sc_data {
@@ -109,12 +110,13 @@ struct sc_buffer_seq {
 };
 
 struct sc_stream {
+    sc_can_stream_t exposed;
     struct sc_dev_ex* dev;
     void* ctx;
     sc_can_stream_rx_callback rx_callback;
     PUCHAR rx_buffers;
     PUCHAR tx_buffers;
-    HANDLE *rx_events;
+    HANDLE *wait_handles;
     OVERLAPPED* rx_ovs;
     uint8_t* rx_map;
     uint8_t* rx_reassembly_buffer;
@@ -293,7 +295,7 @@ SC_DLL_API int sc_dev_id_unicode(uint32_t index, wchar_t* buf, size_t* len)
         return SC_DLL_ERROR_NONE;
     }
 
-    return SC_DLL_ERROR_BUFER_TOO_SMALL;
+    return SC_DLL_ERROR_BUFFER_TOO_SMALL;
 }
 
 SC_DLL_API void sc_dev_close(sc_dev_t* dev)
@@ -313,7 +315,16 @@ SC_DLL_API void sc_dev_close(sc_dev_t* dev)
     }
 }
 
-SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
+SC_DLL_API int sc_dev_open_by_index(uint32_t index, sc_dev_t** dev)
+{
+    if (!dev || index >= sc_data.dev_count) {
+        return SC_DLL_ERROR_INVALID_PARAM;
+    }
+
+    return sc_dev_open_by_id(&sc_data.dev_list[sc_data.dev_name_indices[index]], dev);
+}
+
+SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
 {
     int error = SC_DLL_ERROR_NONE;
     struct sc_dev_ex *dev = NULL;
@@ -323,10 +334,8 @@ SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
     OVERLAPPED cmd_rx_overlapped = { 0 };
     OVERLAPPED cmd_tx_overlapped = { 0 };
 
-
-    if (!_dev || index >= sc_data.dev_count) {
-        error = SC_DLL_ERROR_INVALID_PARAM;
-        goto Error;
+    if (!_dev || !id) {
+        return SC_DLL_ERROR_INVALID_PARAM;
     }
 
     dev = calloc(1, sizeof(*dev));
@@ -352,7 +361,7 @@ SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
     }
 
     dev->dev_handle = CreateFile(
-        &sc_data.dev_list[sc_data.dev_name_indices[index]],
+        id,
         GENERIC_WRITE | GENERIC_READ,
         FILE_SHARE_WRITE | FILE_SHARE_READ,
         NULL,
@@ -844,6 +853,10 @@ SC_DLL_API char const* sc_strerror(int error)
         return "timeout";
     case SC_DLL_ERROR_AGAIN:
         return "try again later";
+    case SC_DLL_ERROR_BUFFER_TOO_SMALL:
+        return "buffer too small";
+    case SC_DLL_ERROR_USER_HANDLE_SIGNALED:
+        return "user provided handle was signaled";
     default:
         return "sc_strerror not implemented";
     }
@@ -879,9 +892,9 @@ SC_DLL_API int sc_dev_cancel(sc_dev_t *_dev, OVERLAPPED* ov)
     return SC_DLL_ERROR_NONE;
 }
 
-SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t _stream)
+SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t* _stream)
 {
-    struct sc_stream* stream = _stream;
+    struct sc_stream* stream = (struct sc_stream*)_stream;
 
     if (stream) {
         struct sc_dev_ex *dev = (struct sc_dev_ex*)stream->dev;
@@ -910,7 +923,7 @@ SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t _stream)
 
         free(stream->rx_buffers);
         free(stream->tx_buffers);
-        free(stream->rx_events);
+        free(stream->wait_handles);
         free(stream->rx_map);
         free(stream->rx_reassembly_buffer);
         free(stream->rx_parked);
@@ -924,7 +937,7 @@ SC_DLL_API int sc_can_stream_init(
     void* ctx,
     sc_can_stream_rx_callback callback,
     int rreqs,
-    sc_can_stream_t* _stream)
+    sc_can_stream_t** _stream)
 {
     struct sc_stream* stream = NULL;
     int error = SC_DLL_ERROR_NONE;
@@ -935,10 +948,10 @@ SC_DLL_API int sc_can_stream_init(
     }
 
     if (rreqs <= 0) {
-        rreqs = 4 * (buffer_size < dev->epp_size ? 1 : buffer_size / dev->epp_size);
+        rreqs = SC_CAN_STREAM_MAX_RX_WAIT_HANDLES;
     }
 
-    if (rreqs > 64) {
+    if (rreqs > SC_CAN_STREAM_MAX_RX_WAIT_HANDLES) {
         error = SC_DLL_ERROR_INVALID_PARAM; // WaitForMultipleObjects limit
         goto Exit;
     }
@@ -982,8 +995,8 @@ SC_DLL_API int sc_can_stream_init(
         goto Error;
     }
 
-    stream->rx_events = calloc(rreqs, sizeof(*stream->rx_events));
-    if (!stream->rx_events) {
+    stream->wait_handles = calloc(SC_CAN_STREAM_MAX_RX_WAIT_HANDLES+1, sizeof(*stream->wait_handles)); // to have space for the user handle
+    if (!stream->wait_handles) {
         error = SC_DLL_ERROR_OUT_OF_MEM;
         goto Error;
     }
@@ -1010,7 +1023,7 @@ SC_DLL_API int sc_can_stream_init(
         }
 
         stream->rx_ovs[i].hEvent = h;
-        stream->rx_events[i] = h;
+        stream->wait_handles[i] = h;
         stream->rx_map[i] = i;
     }
 
@@ -1053,12 +1066,12 @@ SC_DLL_API int sc_can_stream_init(
     stream->rx_submit_count = stream->rx_count;
     chunky_writer_set(&stream->w, &stream->tx_buffers[stream->tx_index * stream->buffer_size], (uint16_t)stream->buffer_size);
 
-    *_stream = stream;
+    *_stream = (sc_can_stream_t*)stream;
 Exit:
     return error;
 
 Error:
-    sc_can_stream_uninit(stream);
+    sc_can_stream_uninit((sc_can_stream_t*)stream);
     goto Exit;
 }
 
@@ -1119,7 +1132,7 @@ static inline int sc_rx_submit(
     }
 
     stream->rx_map[stream->rx_submit_count] = index;
-    stream->rx_events[stream->rx_submit_count] = stream->rx_ovs[index].hEvent;
+    stream->wait_handles[stream->rx_submit_count] = stream->rx_ovs[index].hEvent;
     ++stream->rx_submit_count;
 
     return SC_DLL_ERROR_NONE;
@@ -1183,9 +1196,9 @@ static int sc_process_chunks(
     return SC_DLL_ERROR_NONE;
 }
 
-SC_DLL_API int sc_can_stream_rx(sc_can_stream_t _stream, DWORD timeout_ms)
+SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
 {
-    struct sc_stream* stream = _stream;
+    struct sc_stream* stream = (struct sc_stream*)_stream;
     int error = SC_DLL_ERROR_NONE;
 
     if (!stream) {
@@ -1223,16 +1236,26 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t _stream, DWORD timeout_ms)
     }
 
     if (stream->rx_submit_count) {
-        DWORD result = WaitForMultipleObjects(stream->rx_submit_count, stream->rx_events, FALSE, timeout_ms);
+        DWORD wait_count = stream->rx_submit_count;
+        if (stream->exposed.user_handle) {
+            stream->wait_handles[wait_count++] = stream->exposed.user_handle;
+        }
+        
+        DWORD result = WaitForMultipleObjects(wait_count, stream->wait_handles, FALSE, timeout_ms);
 
-        if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + stream->rx_submit_count) {
-            uint8_t submit_index = (uint8_t)(result - WAIT_OBJECT_0);
+        if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + wait_count) {
+            DWORD handle_index = result - WAIT_OBJECT_0;
+            if (handle_index >= stream->rx_submit_count) {
+                return SC_DLL_ERROR_USER_HANDLE_SIGNALED;
+            }
+
+            uint8_t submit_index = (uint8_t)handle_index;
             uint8_t index = stream->rx_map[submit_index];
             assert(index < stream->rx_count);
             uint8_t replacement = stream->rx_map[stream->rx_submit_count - 1];
             assert(replacement < stream->rx_count);
             stream->rx_map[submit_index] = replacement;
-            stream->rx_events[submit_index] = stream->rx_ovs[replacement].hEvent;
+            stream->wait_handles[submit_index] = stream->rx_ovs[replacement].hEvent;
             --stream->rx_submit_count;
 
 
@@ -1362,11 +1385,11 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
 }
 
 SC_DLL_API int sc_can_stream_tx(
-    sc_can_stream_t _stream,
+    sc_can_stream_t* _stream,
     void const* _ptr,
     size_t bytes)
 {
-    struct sc_stream* stream = _stream;
+    struct sc_stream* stream = (struct sc_stream*)_stream;
     uint8_t const* ptr = _ptr;
     uint8_t const* end = ptr + bytes;
     int error = SC_DLL_ERROR_NONE;

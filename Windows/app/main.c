@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <signal.h>
 
 #ifndef _countof
 #   define _countof(x) (sizeof(x)/sizeof((x)[0]))
@@ -485,6 +486,20 @@ static void parse_tx_job(struct tx_job* job, char* str)
     }
 }
 
+HANDLE s_Shutdown = NULL;
+
+
+static void SignalHandler(int sig)
+{
+    (void)sig;
+
+    fprintf(stderr, "\nreceived SIG %d, signalling shutdown\n", sig);
+
+    if (s_Shutdown) {
+        SetEvent(s_Shutdown);
+    }
+}
+
 int main(int argc, char** argv)
 {
     struct can_state can_state;
@@ -492,7 +507,7 @@ int main(int argc, char** argv)
     uint32_t count = 0;
     sc_dev_t* dev = NULL;
     sc_cmd_ctx_t cmd_ctx;
-    sc_can_stream_t stream = NULL;
+    sc_can_stream_t *stream = NULL;
     bool fdf = false;
     unsigned log_flags = 0;
     struct can_bit_timing_settings nominal_settings, data_settings;
@@ -695,6 +710,16 @@ int main(int argc, char** argv)
 
     can_state.log_flags = log_flags;
 
+    s_Shutdown = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!s_Shutdown) {
+        error = -1;
+        fprintf(stderr, "failed to create shutdown event: (%d)\n", GetLastError());
+        goto Exit;
+    }
+
+    signal(SIGINT, &SignalHandler);
+    signal(SIGTERM, &SignalHandler);
+
 
     error = sc_dev_scan();
     if (error) {
@@ -716,7 +741,7 @@ int main(int argc, char** argv)
 
     fprintf(stdout, "%u " SC_NAME " devices found\n", count);
 
-    error = sc_dev_open(0, &dev);
+    error = sc_dev_open_by_index(0, &dev);
     if (error) {
         fprintf(stderr, "sc_dev_open failed: %s (%d)\n", sc_strerror(error), error);
         goto Exit;
@@ -945,11 +970,19 @@ int main(int argc, char** argv)
         goto Exit;
     }
 
+    stream->user_handle = s_Shutdown;
+
     DWORD timeout_ms = 0;
+
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
     while (1) {
         error = sc_can_stream_rx(stream, timeout_ms);
         if (error) {
+            if (SC_DLL_ERROR_USER_HANDLE_SIGNALED) {
+                break;
+            }
+
             if (SC_DLL_ERROR_TIMEOUT != error) {
                 fprintf(stderr, "sc_can_stream_run failed: %s (%d)\n", sc_strerror(error), error);
                 break;
@@ -1019,5 +1052,10 @@ Exit:
     free(msg_tx_buffer);
 
     sc_uninit();
+
+    if (s_Shutdown) {
+        CloseHandle(s_Shutdown);
+    }
+
     return error;
 }
