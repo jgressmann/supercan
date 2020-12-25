@@ -3,3 +3,5 @@
 ################################################################################
 
 /Windows/inc/supercan_srv.tlb
+/Windows/supercan_srv/supercansrv_i.h
+/Windows/supercan_srv/supercansrv_i.c
