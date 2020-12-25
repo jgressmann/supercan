@@ -191,6 +191,9 @@ LangString desc_sec_base ${LANG_GERMAN} "Installiert Komponenten für den Zugrif
 LangString desc_sec_dev ${LANG_ENGLISH} "Installs header and libraries for application development."
 LangString desc_sec_dev ${LANG_GERMAN} "Installiert Header and Bibiotheken für die Anwendungsentwicklung."
 
+LangString mb_query_continue_installation ${LANG_ENGLISH} "${SC_NAME} still seems to be installed.$\n$\nContinue with installation?"
+LangString mb_query_continue_installation ${LANG_GERMAN} "${SC_NAME} scheint not installiert zu sein.$\n$\nMit dieser Installation fortfahren?"
+
 
 
 ;Assign language strings to sections
@@ -272,7 +275,7 @@ Function .onInit
 		;MessageBox MB_OK "runinng uninstall $0"
     ExecWait '"$0" /S _?=$1' $2
 		${If} $2 <> 0
-			MessageBox MB_ICONQUESTION|MB_YESNO "${SC_NAME} still seems to be installed.$\n$\nContinue with installation?" IDYES next IDNO exit_abort
+			MessageBox MB_ICONQUESTION|MB_YESNO "$(mb_query_continue_installation)" IDYES next IDNO exit_abort
 		${EndIf}
 next:	
 		Delete "$0"
