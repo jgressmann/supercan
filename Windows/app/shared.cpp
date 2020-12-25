@@ -377,6 +377,10 @@ int run(app_ctx* ac)
             return map_error_code_to_error(e);
         }
 
+        if (com_ctx->rx.hdr->error) {
+            return com_ctx->rx.hdr->error;
+        }
+
         process_rx(ac);
 
         if (ac->tx_job_count) {
