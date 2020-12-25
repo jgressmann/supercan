@@ -222,6 +222,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\inc\supercan_srv.h" />
     <ClInclude Include="CoSuperCAN.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="pch.h" />

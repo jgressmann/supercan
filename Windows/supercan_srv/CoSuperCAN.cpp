@@ -92,6 +92,16 @@ inline int map_device_error(uint8_t error)
 	}
 }
 
+inline int map_win_error(DWORD error)
+{
+	switch (error) {
+	case 0:
+		return SC_DLL_ERROR_NONE;
+	default:
+		return SC_DLL_ERROR_UNKNOWN;
+	}
+}
+
 
 inline uint8_t dlc_to_len(uint8_t dlc)
 {
@@ -151,8 +161,7 @@ public:
 	sc_msg_dev_info dev_info;
 	sc_msg_can_info can_info;
 	
-	//
-	//uint16_t cmd_buffer_size() const { return m_Device->cmd_buffer_size; }
+	
 	uint16_t dev_to_host16(uint16_t value) const { return m_Device->dev_to_host16(value); }
 	uint32_t dev_to_host32(uint32_t value) const { return m_Device->dev_to_host32(value); }
 	uint8_t* cmd_tx_buffer() const { return m_CmdCtx.tx_buffer; }
@@ -165,10 +174,11 @@ private:
 	void TxMain();
 	static int OnRx(void* ctx, void const* ptr, uint16_t bytes);
 	int OnRx(sc_msg_header const* ptr, unsigned bytes);
-	void Broadcast(sc_msg_header const* msg, uint16_t bytes);
 	void ResetComDeviceState(size_t index, uint32_t generation);
 	int Map();
 	void Unmap();
+	void SetDeviceError(int error);
+
 
 private:
 	struct com_device_mm_data_private {
@@ -436,12 +446,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					SetEvent(priv->rx.ev);
 				}
 			}
-			else {
-				//ResetComDeviceState(i, gen);
-			}
-
 		}
-		//Broadcast(msg, bytes);
 	} break;
 	case SC_MSG_CAN_STATUS: {
 		sc_msg_can_status* status = reinterpret_cast<sc_msg_can_status*>(msg);
@@ -639,6 +644,7 @@ int ScDev::Map()
 		priv->rx.hdr->put_index = 0;
 		priv->rx.hdr->rx_lost = 0;
 		priv->rx.hdr->txr_lost = 0;
+		priv->rx.hdr->error = 0;
 
 		bytes = data->tx.elements * sizeof(sc_can_mm_slot_t) + sizeof(sc_can_mm_header);
 		priv->tx.file = CreateFileMappingW(
@@ -671,6 +677,7 @@ int ScDev::Map()
 		priv->tx.hdr->put_index = 0;
 		priv->tx.hdr->rx_lost = 0;
 		priv->tx.hdr->txr_lost = 0;
+		priv->tx.hdr->error = 0;
 
 		// events
 		priv->rx.ev = CreateEventW(nullptr, FALSE, FALSE, data->rx.ev_name);
@@ -915,6 +922,7 @@ void ScDev::RxMain()
 			done = true;
 			break;
 		default:
+			SetDeviceError(error);
 			LOG_ERROR("sc_can_stream_rx failed: %s (%d)\n", sc_strerror(error), error);
 			done = true;
 			break;
@@ -960,7 +968,9 @@ void ScDev::TxMain()
 		else if (WAIT_TIMEOUT == r) {
 		}
 		else {
-			LOG_ERROR("WaitForMultipleObjects failed: %lu (error=%lu)\n", r, GetLastError());
+			auto e = GetLastError();
+			SetDeviceError(map_win_error(e));
+			LOG_ERROR("WaitForMultipleObjects failed: %lu (error=%lu)\n", r, e);
 			break;
 		}
 
@@ -1049,6 +1059,7 @@ void ScDev::TxMain()
 							SetEvent(priv->tx.ev);
 						}
 						else {
+							SetDeviceError(map_win_error(GetLastError()));
 							done = true;
 							break;
 						}
@@ -1075,7 +1086,14 @@ void ScDev::TxMain()
 	}
 }
 
-
+void ScDev::SetDeviceError(int error) 
+{
+	for (size_t i = 0; i < _countof(m_ComDeviceData); ++i) {
+		auto* priv = &m_ComDeviceDataPrivate[i];
+		priv->rx.hdr->error = error;
+		priv->tx.hdr->error = error;
+	}
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////

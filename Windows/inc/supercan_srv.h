@@ -38,23 +38,14 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-//
-///** Windows native byte order received frame
-// *
-// */
-//typedef struct sc_can_rx_frame {
-//    uint32_t can_id;
-//    uint32_t timestamp_us;
-//    uint8_t dlc;
-//    uint8_t flags;
-//    uint8_t reserved[2];
-//    uint8_t data[64];
-//} sc_can_rx_frame_t;
+
+/* These structures follow the SuperCAN protocol but are in always 
+ * in host byte order.
+ */
 
 enum sc_can_data_type {
     SC_CAN_DATA_TYPE_NONE,
     SC_CAN_DATA_TYPE_STATUS,
-    //SC_CAN_DATA_TYPE_ERROR,
     SC_CAN_DATA_TYPE_RX,
     SC_CAN_DATA_TYPE_TX,
     SC_CAN_DATA_TYPE_TXR
@@ -106,17 +97,7 @@ struct sc_mm_can_status {
     uint8_t tx_fifo_size;       ///< CAN tx fifo fill state
 };
 
-//struct sc_can_mm_slot {
-//    
-//    struct sc_can_frame data;
-//    /*union sc_can_mm_slot {
-//        struct sc_can_tx_frame tx;
-//        struct sc_can_tx_frame txr;
-//        struct sc_can_rx_frame rx;
-//    } data;*/
-//};
 
-//typedef struct sc_can_data sc_can_mm_slot_t;
 typedef union sc_can_mm_slot {
     struct sc_mm_header hdr;
     struct sc_mm_can_rx rx;
@@ -128,10 +109,9 @@ typedef union sc_can_mm_slot {
 struct sc_can_mm_header {
     volatile uint64_t rx_lost;
     volatile uint64_t txr_lost;
-    volatile uint32_t get_index; // not an index, need to %
-    volatile uint32_t put_index; // not an index, need to %
-    //volatile uint32_t generation;  // internal, do not use
-    //uint8_t reserved[4];
+    volatile uint32_t get_index; // not an index, need to be %'d
+    volatile uint32_t put_index; // not an index, need to be %'d
+    volatile int error;
     sc_can_mm_slot_t slots[0];
 };
 
