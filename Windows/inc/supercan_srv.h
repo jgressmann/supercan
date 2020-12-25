@@ -111,7 +111,7 @@ struct sc_can_mm_header {
     volatile uint64_t txr_lost;
     volatile uint32_t get_index; // not an index, need to be %'d
     volatile uint32_t put_index; // not an index, need to be %'d
-    volatile int error;
+    volatile int32_t error;
     sc_can_mm_slot_t slots[0];
 };
 
