@@ -10,14 +10,13 @@
 
 ;General
 !define SC_NAME "SuperCAN"
+!define SC_GUID "{8688E45F-740D-4B9D-B876-9650E29F2AD7}"
 !define LICENSE_FILE_PATH ..\..\LICENSE
-;!define REG_PATH "Software\${SC_NAME}"
-;!define REG_HK HKLM
-!define INSTALLER_NAME "${SC_NAME} Installer"
+!define INSTALLER_NAME "${SC_NAME}"
 !define INSTALLER_MAJOR 0
-!define INSTALLER_MINOR 1
+!define INSTALLER_MINOR 2
 !define INSTALLER_PATCH 0
-!define APP_INSTALL_PATH "Software\Microsoft\Windows\CurrentVersion\Uninstall\${SC_NAME}"
+!define APP_INSTALL_PATH "Software\Microsoft\Windows\CurrentVersion\Uninstall\${SC_GUID}"
 
 
 !ifndef SC_VERSION_MAJOR
@@ -31,6 +30,7 @@
 !ifndef SC_VERSION_PATCH
   !define SC_VERSION_PATCH 0
 !endif
+
 
 
 !define WriteAppInstallKeyStr "!insertmacro _WriteAppInstallKeyStr"
@@ -58,7 +58,7 @@ SetCompressor /SOLID lzma
 
 
 ManifestSupportedOS Win10
-Name  "${SC_NAME} Installer"
+Name  "${INSTALLER_NAME}"
 OutFile "supercan_inst.exe"
 Unicode True
 
@@ -68,7 +68,9 @@ Unicode True
 InstallDir "$PROGRAMFILES64\${SC_NAME}"
 
 ;Get installation folder from registry if available
-InstallDirRegKey HKLM "InstallLocation" ""
+InstallDirRegKey HKLM "${APP_INSTALL_PATH" "InstallLocation"
+
+
 
 ;Request application privileges for Windows Vista
 RequestExecutionLevel admin
@@ -139,7 +141,7 @@ Section "$(sec_base_name)" sec_base
 	${WriteAppInstallKeyDWORD} "NoModify" "1"
 	${WriteAppInstallKeyDWORD} "NoRepair" "1"
 
-	WriteUninstaller "$INSTDIR\Uninstall.exe"
+	WriteUninstaller "$INSTDIR\uninstall.exe"
 
 SectionEnd
 
@@ -203,10 +205,7 @@ LangString desc_sec_dev ${LANG_GERMAN} "Installiert Header and Bibiotheken für 
 
 
 ;--------------------------------
-
 ;Uninstaller Section
-
-
 
 Section "Uninstall"
 
@@ -214,16 +213,10 @@ Section "Uninstall"
 !insertmacro UnInstallLib REGEXE NOTSHARED NOREBOOT_PROTECTED "$INSTDIR\bin\supercan_srv64.exe"
 
 
-;ADD YOUR OWN FILES HERE...
-
-
-
-Delete "$INSTDIR\Uninstall.exe"
-
+Delete "$INSTDIR\uninstall.exe"
 
 
 RMDir /r "$INSTDIR"
-
 
 
 ;DeleteRegKey /ifempty ${REG_HK} ${REG_PATH}
@@ -240,7 +233,75 @@ VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductName" "${INSTALLER_NAME}"
 ;VIAddVersionKey /LANG=${LANG_ENGLISH} "Comments" "A test comment"
 ;VIAddVersionKey /LANG=${LANG_ENGLISH} "CompanyName" "Fake company"
 ;VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalTrademarks" "Test Application is a trademark of Fake company"
-VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "Copyright (C) 2020, Jean Gressmann"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "Copyright (C) 2020, Jean Gressmann. All rights reserved."
 VIAddVersionKey /LANG=${LANG_ENGLISH} "FileDescription" "${INSTALLER_NAME}"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductVersion" "${INSTALLER_MAJOR}.${INSTALLER_MINOR}.${INSTALLER_PATCH}.0"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "FileVersion" "${INSTALLER_MAJOR}.${INSTALLER_MINOR}.${INSTALLER_PATCH}.0"
+
+;https://nsis.sourceforge.io/Trim_quotes
+Function TrimQuotes
+Exch $R0
+Push $R1
+ 
+  StrCpy $R1 $R0 1
+  StrCmp $R1 `"` 0 +2
+    StrCpy $R0 $R0 `` 1
+  StrCpy $R1 $R0 1 -1
+  StrCmp $R1 `"` 0 +2
+    StrCpy $R0 $R0 -1
+ 
+Pop $R1
+Exch $R0
+FunctionEnd
+ 
+!macro _TrimQuotes Input Output
+  Push `${Input}`
+  Call TrimQuotes
+  Pop ${Output}
+!macroend
+!define TrimQuotes `!insertmacro _TrimQuotes`
+
+Function .onInit
+	ReadRegStr $0 HKLM "${APP_INSTALL_PATH}" "UninstallString"
+	ReadRegStr $1 HKLM "${APP_INSTALL_PATH}" "InstallLocation"
+	${TrimQuotes} $0 $0
+	${TrimQuotes} $1 $1
+	;MessageBox MB_OK "$0"
+	
+	${If} $0 != ""
+		;MessageBox MB_OK "runinng uninstall $0"
+    ExecWait '"$0" /S _?=$1' $2
+		${If} $2 <> 0
+			MessageBox MB_ICONQUESTION|MB_YESNO "${SC_NAME} still seems to be installed.$\n$\nContinue with installation?" IDYES next IDNO exit_abort
+		${EndIf}
+next:	
+		Delete "$0"
+		RMDir "$1"
+	
+
+		; ;ExecWait '"$2" /S _?=$3' $1 ; This assumes the existing uninstaller is a NSIS uninstaller, other uninstallers don't support /S nor _?=
+	
+		; ;ExecShellWait "" '"$0"'
+		; IfFileExists $0 0 exit_abort
+		; ;ReadRegStr $0 HKLM "${APP_INSTALL_PATH}" "UninstallString"
+		; ;${If} $0 != ""
+		; 	MessageBox MB_OK "still have $0, exit code=$2"
+			
+
+			;Goto +1
+		;${EndIf}
+		; ${If} $1 <> 0
+			
+		; ${EndIf}
+
+	;${Else}
+		;MessageBox MB_OK "no previous installation"
+		;DetailPrint "no previous installation"
+	${EndIf}
+
+	Return
+exit_abort:
+	Abort	
+; exit_continue:
+; 	Return
+FunctionEnd
