@@ -53,7 +53,7 @@ BEGIN
             VALUE "FileDescription", "SuperCAN"
             VALUE "FileVersion", STR(SC_DLL_VERSION_MAJOR) "." STR(SC_DLL_VERSION_MINOR) "." STR(SC_DLL_VERSION_PATCH) "." STR(SC_BUILD_NUMBER)
             VALUE "InternalName", "supercan.dll"
-            VALUE "LegalCopyright", "Copyright (c) 2020 Jean Gressmann"
+            VALUE "LegalCopyright", "Copyright (C) 2020 Jean Gressmann"
             VALUE "OriginalFilename", "supercan.dll"
             VALUE "ProductName", "SuperCAN"
             VALUE "ProductVersion", STR(SC_DLL_VERSION_MAJOR) "." STR(SC_DLL_VERSION_MINOR) "." STR(SC_DLL_VERSION_PATCH) "." STR(SC_BUILD_NUMBER)
