@@ -559,8 +559,8 @@ extern "C" int run_shared(struct app_ctx* ac)
 
         fprintf(stdout, "Attempt to open device with%s configuration access...", ac->config ? "" : "out");
 
-        ISuperCANDevicePtr ptr;
-        hr = sc->DeviceOpen(0, ac->config, (ISuperCANDevice**)&ptr);
+        ISuperCANDevicePtr device_ptr;
+        hr = sc->DeviceOpen(0, ac->config, (ISuperCANDevice**)&device_ptr);
         if (FAILED(hr)) {
             fprintf(stdout, "FAILURE\n");
             fprintf(stderr, "ERROR: failed to open device index=0 (hr=%lx)\n", hr);
@@ -569,9 +569,13 @@ extern "C" int run_shared(struct app_ctx* ac)
 
         fprintf(stdout, "SUCCESS\n");
 
-        com_ctx.dev = ptr;
+        // release SuperCAN to verify the device keeps the COM server loaded
+        sc.Release();
 
-        hr = ptr->GetDeviceData(&com_ctx.dev_data);
+
+        com_ctx.dev = device_ptr;
+
+        hr = device_ptr->GetDeviceData(&com_ctx.dev_data);
         if (FAILED(hr)) {
             fprintf(stderr, "ERROR: failed to get device data (hr=%lx)\n", hr);
             return map_hr_to_error(hr);
@@ -590,7 +594,7 @@ extern "C" int run_shared(struct app_ctx* ac)
         SysFreeString(com_ctx.dev_data.name);
         com_ctx.dev_data.name = nullptr;
 
-        hr = ptr->GetRingBufferMappings(&rx_mm_data, &tx_mm_data);
+        hr = device_ptr->GetRingBufferMappings(&rx_mm_data, &tx_mm_data);
         if (FAILED(hr)) {
             fprintf(stderr, "ERROR: failed to get RX/TX ring buffer configuration (hr=%lx)\n", hr);
             return map_hr_to_error(hr);

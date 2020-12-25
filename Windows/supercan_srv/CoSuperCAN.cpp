@@ -247,6 +247,7 @@ public:
 	STDMETHOD(SetDataBitTiming)(SuperCANBitTimingParams params);
 	STDMETHOD(GetDeviceData)(SuperCANDeviceData* data);
 	void Init(const ScDevPtr& dev, size_t index, com_device_data* mm, bool config_access);
+	void SetSuperCAN(ISuperCAN* sc);
 	
 
 private:
@@ -256,6 +257,7 @@ private:
 
 private:
 	ScDevPtr m_SharedDevice;
+	ISuperCAN* m_Sc;
 	com_device_data* m_Mm;
 	size_t m_Index;
 	bool m_ConfigurationAccess;
@@ -1109,10 +1111,15 @@ XSuperCANDevice::~XSuperCANDevice()
 			m_SharedDevice->RemoveComDevice(m_Index);
 		}
 	}
+
+	if (m_Sc) {
+		m_Sc->Release();
+	}
 }
 
 XSuperCANDevice::XSuperCANDevice()
 {
+	m_Sc = nullptr;
 	m_Index = 0;
 	m_Mm = nullptr;
 	m_ConfigurationAccess = false;
@@ -1315,6 +1322,18 @@ STDMETHODIMP XSuperCANDevice::SetDataBitTiming(SuperCANBitTimingParams params)
 	return _Cmd(bt->len);
 }
 
+void XSuperCANDevice::SetSuperCAN(ISuperCAN* sc)
+{
+	ATLASSERT(sc);
+
+	if (m_Sc) {
+		m_Sc->Release();
+		m_Sc = nullptr;
+	}
+
+	sc->AddRef();
+	m_Sc = sc;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
@@ -1463,6 +1482,8 @@ STDMETHODIMP XSuperCAN::DeviceOpen(
 			com_device->Release();
 			return SC_HRESULT_FROM_ERROR(error);
 		}
+
+		com_device->SetSuperCAN(this);
 		
 		*dev = static_cast<ISuperCANDevice*>(com_device);
 	}
