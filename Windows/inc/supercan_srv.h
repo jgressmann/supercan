@@ -25,11 +25,9 @@
 
 #pragma once
 
-#include "supercan_winapi.h"
-
 #ifdef _MSC_VER
 #   pragma warning(push)
-#   pragma warning(disable: 4200)
+#   pragma warning(disable: 4200) // zero sized array in struct
 #endif
 
 #define SC_FACILITY 0x0200
@@ -117,7 +115,6 @@ typedef union sc_can_mm_slot {
 
 struct sc_can_mm_header {
     volatile uint64_t rx_lost;      // messages lost due to full rx ring
-    volatile uint64_t txr_lost;     // transmit receipts lost due to full rx ring
     volatile uint32_t get_index;    // not an index, need to be %'d
     volatile uint32_t put_index;    // not an index, need to be %'d
     volatile int32_t error;         // device error

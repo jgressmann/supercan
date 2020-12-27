@@ -455,7 +455,8 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					// rogue client
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					++priv->rx.hdr->txr_lost;
+					//++priv->rx.hdr->txr_lost;
+					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->rx_lost);
 					SetEvent(priv->rx.ev);
 				}
 				else {
@@ -498,7 +499,8 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					// rogue client
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					++priv->rx.hdr->rx_lost;
+					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->rx_lost);
+					//++priv->rx.hdr->rx_lost;
 					SetEvent(priv->rx.ev);
 				}
 				else {
@@ -547,7 +549,8 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					// rogue client
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					++priv->rx.hdr->rx_lost;
+					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->rx_lost);
+					//++priv->rx.hdr->rx_lost;
 					SetEvent(priv->rx.ev);
 				}
 				else {
@@ -597,7 +600,8 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					// rogue client
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					++priv->rx.hdr->rx_lost;
+					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->rx_lost);
+					//++priv->rx.hdr->rx_lost;
 					SetEvent(priv->rx.ev);
 				}
 				else {
@@ -647,8 +651,8 @@ void ScDev::ResetComDeviceStateTx(sc_com_dev_index_t index, uint32_t generation)
 void ScDev::ResetComDeviceStateRx(sc_com_dev_index_t index, uint32_t generation)
 {
 	auto* priv = &m_ComDeviceDataPrivate[index];
-	priv->rx.hdr->rx_lost = 0;
-	priv->rx.hdr->txr_lost = 0;
+	InterlockedExchange64((volatile LONG64*)&priv->rx.hdr->rx_lost, 0);
+	//InterlockedExchange64((volatile LONG64*)&priv->rx.hdr->txr_lost, 0);
 	priv->rx_sc_dev_generation.store(generation, std::memory_order_release);
 }
 
@@ -746,7 +750,7 @@ int ScDev::Map()
 		priv->rx.hdr->get_index = 0;
 		priv->rx.hdr->put_index = 0;
 		priv->rx.hdr->rx_lost = 0;
-		priv->rx.hdr->txr_lost = 0;
+		//priv->rx.hdr->txr_lost = 0;
 		priv->rx.hdr->error = 0;
 
 		bytes = data->tx.elements * sizeof(sc_can_mm_slot_t) + sizeof(sc_can_mm_header);
@@ -779,7 +783,7 @@ int ScDev::Map()
 		priv->tx.hdr->get_index = 0;
 		priv->tx.hdr->put_index = 0;
 		priv->tx.hdr->rx_lost = 0;
-		priv->tx.hdr->txr_lost = 0;
+		//priv->tx.hdr->txr_lost = 0;
 		priv->tx.hdr->error = 0;
 
 		// events
