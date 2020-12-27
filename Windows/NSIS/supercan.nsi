@@ -15,7 +15,7 @@
 !define INSTALLER_NAME "${SC_NAME}"
 !define INSTALLER_MAJOR 0
 !define INSTALLER_MINOR 2
-!define INSTALLER_PATCH 0
+!define INSTALLER_PATCH 1
 !define APP_INSTALL_PATH "Software\Microsoft\Windows\CurrentVersion\Uninstall\${SC_GUID}"
 
 
@@ -155,6 +155,11 @@ Section /o "$(sec_dev_name)" sec_dev
 	File ..\Win32\Release\supercan32.lib
 	File ..\x64\Release\supercan64.lib
 
+	SetOutPath "$INSTDIR\src"
+	File ..\..\src\supercan.h
+	File ..\..\src\supercan_misc.h
+	File ..\..\src\can_bit_timing.*
+
 SectionEnd
 
 Section "" sec_hidden
@@ -212,20 +217,19 @@ LangString mb_query_continue_installation ${LANG_GERMAN} "${SC_NAME} scheint not
 
 Section "Uninstall"
 
-;File ${LICENSE_FILE_PATH}
-!insertmacro UnInstallLib REGEXE NOTSHARED NOREBOOT_PROTECTED "$INSTDIR\bin\supercan_srv64.exe"
+	!insertmacro UnInstallLib REGEXE NOTSHARED NOREBOOT_PROTECTED "$INSTDIR\bin\supercan_srv64.exe"
 
+	Delete "$INSTDIR\LICENSE"
+	Delete "$INSTDIR\uninstall.exe"
 
-Delete "$INSTDIR\uninstall.exe"
+	RMDir /r "$INSTDIR\bin"
+	RMDir /r "$INSTDIR\inc"
+	RMDir /r "$INSTDIR\lib"
+	RMDir /r "$INSTDIR\src"
 
+	RMDir "$INSTDIR"
 
-RMDir /r "$INSTDIR"
-
-
-;DeleteRegKey /ifempty ${REG_HK} ${REG_PATH}
-DeleteRegKey HKLM "${APP_INSTALL_PATH}"
-
-
+	DeleteRegKey HKLM "${APP_INSTALL_PATH}"
 
 SectionEnd
 
@@ -273,16 +277,19 @@ Function .onInit
 	
 	${If} $0 != ""
 		;MessageBox MB_OK "runinng uninstall $0"
-    ExecWait '"$0" /S _?=$1' $2
+    	ExecWait '"$0" /S' $2
 		${If} $2 <> 0
 			MessageBox MB_ICONQUESTION|MB_YESNO "$(mb_query_continue_installation)" IDYES next IDNO exit_abort
 		${EndIf}
 next:	
-		Delete "$0"
-		RMDir "$1"
-	
+		; the installer can't delete itself when invoked like this
+		;Delete "$0"
+		;RMDir "$1"
+		; ClearErrors
+		; RMDir "$1"
+		; ClearErrors
 
-		; ;ExecWait '"$2" /S _?=$3' $1 ; This assumes the existing uninstaller is a NSIS uninstaller, other uninstallers don't support /S nor _?=
+		;;ExecWait '"$2" /S _?=$3' $1 ; This assumes the existing uninstaller is a NSIS uninstaller, other uninstallers don't support /S nor _?=
 	
 		; ;ExecShellWait "" '"$0"'
 		; IfFileExists $0 0 exit_abort
@@ -305,6 +312,4 @@ next:
 	Return
 exit_abort:
 	Abort	
-; exit_continue:
-; 	Return
 FunctionEnd
