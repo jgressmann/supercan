@@ -32,6 +32,8 @@
 #include "../inc/supercan_dll.h"
 #include "../inc/supercan_winapi.h"
 #include "../inc/supercan_srv.h"
+#include "../src/supercan_misc.h"
+
 
 
 #ifdef min
@@ -45,7 +47,6 @@ OBJECT_ENTRY_AUTO(CLSID_CSuperCAN, CSuperCAN)
 #include <vector>
 #include <memory>
 #include <string>
-#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <atomic>
@@ -53,6 +54,7 @@ OBJECT_ENTRY_AUTO(CLSID_CSuperCAN, CSuperCAN)
 #define CMD_TIMEOUT_MS 1000
 #define MAX_COM_DEVICES_PER_SC_DEVICE_BITS 3
 #define MAX_COM_DEVICES_PER_SC_DEVICE (1u<<MAX_COM_DEVICES_PER_SC_DEVICE_BITS)
+
 
 
 #define LOG2(prefix, ...) \
@@ -69,8 +71,8 @@ OBJECT_ENTRY_AUTO(CLSID_CSuperCAN, CSuperCAN)
 namespace
 {
 
-
-
+constexpr unsigned long CONFIG_ACCESS_TIMEOUT_MS = 1ul << 13;
+typedef uint8_t sc_com_dev_index_t;
 
 inline int map_device_error(uint8_t error)
 {
@@ -152,9 +154,12 @@ public:
 
 	int Init(std::wstring&& name);
 	void Uninit();
-	int AddComDevice(XSuperCANDevice* device, bool request_config_access);
+	int AddComDevice(XSuperCANDevice* device);
 	void RemoveComDevice(size_t index);
-	int Cmd(uint16_t bytes_in, uint16_t* bytes_out);
+	int Cmd(sc_com_dev_index_t index, uint16_t bytes_in, uint16_t* bytes_out);
+	bool AcquireConfigurationAccess(sc_com_dev_index_t index, unsigned long* timeout_ms);
+	void ReleaseConfigurationAccess(sc_com_dev_index_t index);
+	int SetBus(sc_com_dev_index_t index, bool on);
 
 public:
 	const std::wstring& name() const { return m_Name; }
@@ -174,10 +179,14 @@ private:
 	void TxMain();
 	static int OnRx(void* ctx, void const* ptr, uint16_t bytes);
 	int OnRx(sc_msg_header const* ptr, unsigned bytes);
-	void ResetComDeviceState(size_t index, uint32_t generation);
+	void ResetComDeviceStateTx(sc_com_dev_index_t index, uint32_t generation);
+	void ResetComDeviceStateRx(sc_com_dev_index_t index, uint32_t generation);
 	int Map();
 	void Unmap();
 	void SetDeviceError(int error);
+	int SetBusOn();
+	void SetBusOff();
+	bool VerifyConfigurationAccess(sc_com_dev_index_t index) const;
 
 
 private:
@@ -191,6 +200,7 @@ private:
 	struct com_device_txr_data {
 		std::atomic<uint32_t> track_id;
 		std::atomic<uint32_t> index;
+		std::atomic<uint32_t> com_dev_generation;
 	};
 
 	struct com_device_data_private {
@@ -198,7 +208,9 @@ private:
 		com_device_mm_data_private tx;
 		XSuperCANDevice* com_device;
 		std::atomic<uint32_t> com_dev_generation;
-		std::atomic<uint32_t> sc_dev_generation;
+		std::atomic<uint32_t> rx_sc_dev_generation;
+		std::atomic<uint32_t> tx_sc_dev_generation;
+		//std::atomic<bool> com_dev_present;
 	};
 
 private:
@@ -206,16 +218,18 @@ private:
 	sc_dev_t* m_Device;
 	sc_cmd_ctx_t m_CmdCtx;
 	sc_can_stream_t *m_Stream;
+	sc_dev_time_tracker m_TimeTracker;
 	HANDLE m_Shutdown;
 	HANDLE m_RxThread;
 	HANDLE m_TxThread;
+	HANDLE m_TxFifoAvailable;
 	CRITICAL_SECTION m_Lock;
 	com_device_data m_ComDeviceData[MAX_COM_DEVICES_PER_SC_DEVICE];
 	com_device_data_private m_ComDeviceDataPrivate[MAX_COM_DEVICES_PER_SC_DEVICE];
-	size_t m_ComDeviceCount;
-	size_t m_ConfigurationAccessIndex;
-	HANDLE m_TxFifoAvailable;
+	sc_com_dev_index_t m_ComDeviceCount;
+	sc_com_dev_index_t m_ConfigurationAccessIndex;
 	com_device_txr_data m_TxrMap[256];
+	DWORD m_ConfigurationAccessClaimed;
 };
 
 using ScDevPtr = std::shared_ptr<ScDev>;
@@ -239,28 +253,27 @@ public:
 	XSuperCANDevice();
 
 public:
-	STDMETHOD(HasConfigurationAccess)(boolean *config_access);
+	STDMETHOD(AcquireConfigurationAccess)(
+		boolean* config_access, 
+		unsigned long* timeout_ms);
+	STDMETHOD(ReleaseConfigurationAccess)();
 	STDMETHOD(GetRingBufferMappings)(SuperCANRingBufferMapping* rx, SuperCANRingBufferMapping* tx);
 	STDMETHOD(SetBus)(boolean on);
 	STDMETHOD(SetFeatureFlags)(unsigned long flags);
 	STDMETHOD(SetNominalBitTiming)(SuperCANBitTimingParams params);
 	STDMETHOD(SetDataBitTiming)(SuperCANBitTimingParams params);
 	STDMETHOD(GetDeviceData)(SuperCANDeviceData* data);
-	void Init(const ScDevPtr& dev, size_t index, com_device_data* mm, bool config_access);
+	void Init(const ScDevPtr& dev, sc_com_dev_index_t index, com_device_data* mm);
 	void SetSuperCAN(ISuperCAN* sc);
-	
 
 private:
 	HRESULT _Cmd(uint16_t len) const;
-	bool HasConfigurationAccess() const { return m_ConfigurationAccess; }
-
 
 private:
 	ScDevPtr m_SharedDevice;
 	ISuperCAN* m_Sc;
 	com_device_data* m_Mm;
-	size_t m_Index;
-	bool m_ConfigurationAccess;
+	sc_com_dev_index_t m_Index;
 };
 
 
@@ -282,7 +295,6 @@ public:
 	STDMETHOD(DeviceGetCount)(unsigned long* count);
 	STDMETHOD(DeviceOpen)(
 		unsigned long index, 
-		boolean request_config_access, 
 		ISuperCANDevice** dev);
 
 private:
@@ -299,6 +311,7 @@ private:
 ScDev::~ScDev()
 {
 	Uninit();
+
 	DeleteCriticalSection(&m_Lock);
 }
 
@@ -327,10 +340,28 @@ ScDev::ScDev()
 	}
 
 	m_TxFifoAvailable = nullptr;
+	m_ConfigurationAccessClaimed = 0;
+	ZeroMemory(&m_TimeTracker, sizeof(m_TimeTracker));
 }
 
-int ScDev::Cmd(uint16_t bytes_in, uint16_t* bytes_out)
+bool ScDev::VerifyConfigurationAccess(sc_com_dev_index_t index) const
 {
+	assert(index < MAX_COM_DEVICES_PER_SC_DEVICE);
+
+	auto now = GetTickCount();
+	auto elapsed = now - m_ConfigurationAccessClaimed;
+
+	if (index == m_ConfigurationAccessIndex &&
+		elapsed < CONFIG_ACCESS_TIMEOUT_MS) {
+		return true;
+	}
+
+	return false;
+}
+
+int ScDev::Cmd(sc_com_dev_index_t index, uint16_t bytes_in, uint16_t* bytes_out)
+{
+	assert(index < MAX_COM_DEVICES_PER_SC_DEVICE);
 	assert(bytes_in);
 	assert(bytes_out);
 
@@ -338,6 +369,10 @@ int ScDev::Cmd(uint16_t bytes_in, uint16_t* bytes_out)
 
 	if (bytes_in > m_Device->cmd_buffer_size) {
 		return SC_DLL_ERROR_INVALID_PARAM;
+	}
+
+	if (!VerifyConfigurationAccess(index)) {
+		return SC_DLL_ERROR_ACCESS_DENIED;
 	}
 
 	auto error = sc_cmd_ctx_run(&m_CmdCtx, bytes_in, bytes_out, CMD_TIMEOUT_MS);
@@ -348,7 +383,41 @@ int ScDev::Cmd(uint16_t bytes_in, uint16_t* bytes_out)
 	return SC_DLL_ERROR_NONE;
 }
 
+bool ScDev::AcquireConfigurationAccess(
+	sc_com_dev_index_t index,
+	unsigned long* timeout_ms)
+{
+	assert(index < MAX_COM_DEVICES_PER_SC_DEVICE);
+	assert(timeout_ms);
 
+	Guard g(m_Lock);
+
+	*timeout_ms = CONFIG_ACCESS_TIMEOUT_MS;
+	DWORD now = GetTickCount();
+	DWORD elapsed = now - m_ConfigurationAccessClaimed;
+
+	if (m_ConfigurationAccessIndex == index 
+		|| m_ConfigurationAccessIndex == MAX_COM_DEVICES_PER_SC_DEVICE
+		|| elapsed > CONFIG_ACCESS_TIMEOUT_MS
+		) {
+		m_ConfigurationAccessIndex = index;
+		m_ConfigurationAccessClaimed = now;
+		return true;
+	}
+
+	return false;
+}
+
+void ScDev::ReleaseConfigurationAccess(sc_com_dev_index_t index)
+{
+	assert(index < MAX_COM_DEVICES_PER_SC_DEVICE);
+
+	Guard g(m_Lock);
+
+	if (index == m_ConfigurationAccessIndex) {
+		m_ConfigurationAccessIndex = MAX_COM_DEVICES_PER_SC_DEVICE;
+	}
+}
 
 int ScDev::OnRx(void* ctx, void const* ptr, uint16_t bytes)
 {
@@ -362,19 +431,23 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 	switch (msg->id) {
 	case SC_MSG_CAN_TXR: {
 		sc_msg_can_txr *txr = reinterpret_cast<sc_msg_can_txr*>(msg);
+		txr->timestamp_us = m_Device->dev_to_host32(txr->timestamp_us);
+		auto ts = sc_tt_track(&m_TimeTracker, txr->timestamp_us);
 
 		auto index = m_TxrMap[txr->track_id].index.load(std::memory_order_acquire);
 		if (index < MAX_COM_DEVICES_PER_SC_DEVICE) {
+			auto com_dev_gen_tx = m_TxrMap[txr->track_id].com_dev_generation.load(std::memory_order_acquire);
 			auto track_id = m_TxrMap[txr->track_id].track_id.load(std::memory_order_acquire);
+			
 			m_TxrMap[txr->track_id].index.store(MAX_COM_DEVICES_PER_SC_DEVICE, std::memory_order_release);
 			ReleaseSemaphore(m_TxFifoAvailable, 1, nullptr);
 
 			auto* data = &m_ComDeviceData[index];
 			auto* priv = &m_ComDeviceDataPrivate[index];
+			auto com_dev_gen_rx = priv->com_dev_generation.load(std::memory_order_acquire);
+			auto rx_sc_dev_gen = priv->rx_sc_dev_generation.load(std::memory_order_acquire);
 
-			auto com_dev_gen = priv->com_dev_generation.load(std::memory_order_acquire);
-			auto sc_dev_gen = priv->sc_dev_generation.load(std::memory_order_acquire);
-			if (com_dev_gen == sc_dev_gen) {
+			if (com_dev_gen_rx == com_dev_gen_tx && com_dev_gen_rx == rx_sc_dev_gen) {
 				auto gi = priv->rx.hdr->get_index;
 				auto pi = priv->rx.hdr->put_index;
 				auto used = pi - gi;
@@ -391,7 +464,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					slot->txr.type = SC_CAN_DATA_TYPE_TXR;
 					slot->txr.flags = txr->flags;
 					slot->txr.track_id = track_id;
-					slot->txr.timestamp_us = m_Device->dev_to_host32(txr->timestamp_us);
+					slot->txr.timestamp_us = ts;
 
 					++priv->rx.index;
 
@@ -400,7 +473,6 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					SetEvent(priv->rx.ev);
 				}
 			}
-
 		}
 		else {
 			// rogue txr message?
@@ -410,13 +482,14 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 		sc_msg_can_rx* rx = reinterpret_cast<sc_msg_can_rx*>(msg);
 		rx->can_id = m_Device->dev_to_host32(rx->can_id);
 		rx->timestamp_us = m_Device->dev_to_host32(rx->timestamp_us);
+		auto ts = sc_tt_track(&m_TimeTracker, rx->timestamp_us);
 
-		for (size_t i = 0; i < _countof(m_ComDeviceData); ++i) {
+		for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceData); ++i) {
 			auto* data = &m_ComDeviceData[i];
 			auto* priv = &m_ComDeviceDataPrivate[i];
 
 			auto com_dev_gen = priv->com_dev_generation.load(std::memory_order_acquire);
-			auto sc_dev_gen = priv->sc_dev_generation.load(std::memory_order_acquire);
+			auto sc_dev_gen = priv->rx_sc_dev_generation.load(std::memory_order_acquire);
 			if (com_dev_gen == sc_dev_gen) {
 				auto gi = priv->rx.hdr->get_index;
 				auto pi = priv->rx.hdr->put_index;
@@ -435,7 +508,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					slot->rx.can_id = rx->can_id;
 					slot->rx.dlc = rx->dlc;
 					slot->rx.flags = rx->flags;
-					slot->rx.timestamp_us = rx->timestamp_us;
+					slot->rx.timestamp_us = ts;
 
 					if (!(slot->rx.flags & SC_CAN_FRAME_FLAG_RTR)) {
 						memcpy(slot->rx.data, rx->data, dlc_to_len(rx->dlc));
@@ -448,6 +521,9 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					SetEvent(priv->rx.ev);
 				}
 			}
+			else {
+				ResetComDeviceStateRx(i, com_dev_gen);
+			}
 		}
 	} break;
 	case SC_MSG_CAN_STATUS: {
@@ -455,13 +531,14 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 		status->rx_lost = m_Device->dev_to_host16(status->rx_lost);
 		status->tx_dropped = m_Device->dev_to_host16(status->tx_dropped);
 		status->timestamp_us = m_Device->dev_to_host32(status->timestamp_us);
+		auto ts = sc_tt_track(&m_TimeTracker, status->timestamp_us);
 
-		for (size_t i = 0; i < _countof(m_ComDeviceData); ++i) {
+		for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceData); ++i) {
 			auto* data = &m_ComDeviceData[i];
 			auto* priv = &m_ComDeviceDataPrivate[i];
 
 			auto com_dev_gen = priv->com_dev_generation.load(std::memory_order_acquire);
-			auto sc_dev_gen = priv->sc_dev_generation.load(std::memory_order_acquire);
+			auto sc_dev_gen = priv->rx_sc_dev_generation.load(std::memory_order_acquire);
 			if (com_dev_gen == sc_dev_gen) {
 				auto gi = priv->rx.hdr->get_index;
 				auto pi = priv->rx.hdr->put_index;
@@ -470,8 +547,8 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					// rogue client
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					//++data->rx.hdr->rx_lost;
-					//SetEvent(data->rx.ev);
+					++priv->rx.hdr->rx_lost;
+					SetEvent(priv->rx.ev);
 				}
 				else {
 					uint32_t index = priv->rx.index % data->rx.elements;
@@ -480,7 +557,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					slot->status.type = SC_CAN_DATA_TYPE_STATUS;
 					slot->status.flags = status->flags;
 					slot->status.bus_status = status->bus_status;
-					slot->status.timestamp_us = status->timestamp_us;
+					slot->status.timestamp_us = ts;
 					slot->status.rx_lost = status->rx_lost;
 					slot->status.tx_dropped = status->tx_dropped;
 					slot->status.rx_errors = status->rx_errors;
@@ -496,6 +573,52 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					SetEvent(priv->rx.ev);
 				}
 			}
+			else {
+				ResetComDeviceStateRx(i, com_dev_gen);
+			}
+		}
+	} break;
+	case SC_MSG_CAN_ERROR: {
+		auto* error = reinterpret_cast<sc_msg_can_error*>(msg);
+		error->timestamp_us = m_Device->dev_to_host32(error->timestamp_us);
+		auto ts = sc_tt_track(&m_TimeTracker, error->timestamp_us);
+		
+		for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceData); ++i) {
+			auto* data = &m_ComDeviceData[i];
+			auto* priv = &m_ComDeviceDataPrivate[i];
+
+			auto com_dev_gen = priv->com_dev_generation.load(std::memory_order_acquire);
+			auto sc_dev_gen = priv->rx_sc_dev_generation.load(std::memory_order_acquire);
+			if (com_dev_gen == sc_dev_gen) {
+				auto gi = priv->rx.hdr->get_index;
+				auto pi = priv->rx.hdr->put_index;
+				auto used = pi - gi;
+				if (pi != priv->rx.index || used > data->rx.elements) {
+					// rogue client
+				}
+				else if (used == data->rx.elements) { // just be safe, could be a rogue client
+					++priv->rx.hdr->rx_lost;
+					SetEvent(priv->rx.ev);
+				}
+				else {
+					uint32_t index = priv->rx.index % data->rx.elements;
+					sc_can_mm_slot_t* slot = &priv->rx.hdr->slots[index];
+
+					slot->error.type = SC_CAN_DATA_TYPE_ERROR;
+					slot->error.flags = error->flags;
+					slot->error.timestamp_us = ts;
+					slot->error.error = error->error;
+
+					++priv->rx.index;
+
+					priv->rx.hdr->put_index = priv->rx.index;
+
+					SetEvent(priv->rx.ev);
+				}
+			}
+			else {
+				ResetComDeviceStateRx(i, com_dev_gen);
+			}
 		}
 	} break;
 	}
@@ -503,60 +626,36 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 	return SC_DLL_ERROR_NONE;
 }
 
-void ScDev::ResetComDeviceState(size_t index, uint32_t generation)
+void ScDev::ResetComDeviceStateTx(sc_com_dev_index_t index, uint32_t generation)
 {
 	auto* priv = &m_ComDeviceDataPrivate[index];
-	ResetEvent(priv->rx.ev);
+	//ResetEvent(priv->rx.ev);
 	ResetEvent(priv->tx.ev);
+	//priv->rx.hdr->rx_lost = 0;
+	//priv->rx.hdr->txr_lost = 0;
+	//priv->rx.hdr->get_index = priv->rx.hdr->put_index;
+	//priv->rx.index = 0;
+	
+	//priv->tx.hdr->rx_lost = 0;
+	//priv->tx.hdr->txr_lost = 0;
+	priv->tx.hdr->get_index = priv->tx.hdr->put_index;
+	priv->tx.index = priv->tx.hdr->get_index;
+
+	priv->tx_sc_dev_generation.store(generation, std::memory_order_release);
+}
+
+void ScDev::ResetComDeviceStateRx(sc_com_dev_index_t index, uint32_t generation)
+{
+	auto* priv = &m_ComDeviceDataPrivate[index];
 	priv->rx.hdr->rx_lost = 0;
 	priv->rx.hdr->txr_lost = 0;
-	priv->rx.hdr->get_index = 0;
-	priv->rx.hdr->put_index = 0;
-	
-	priv->tx.hdr->rx_lost = 0;
-	priv->tx.hdr->txr_lost = 0;
-	priv->tx.hdr->get_index = 0;
-	priv->tx.hdr->put_index = 0;
-
-	priv->rx.index = 0;
-	priv->tx.index = 0;
-	
-
-	priv->sc_dev_generation.store(generation, std::memory_order_release);
+	priv->rx_sc_dev_generation.store(generation, std::memory_order_release);
 }
 
 
 void ScDev::Uninit()
 {
-	if (m_Shutdown) {
-
-		SetEvent(m_Shutdown);
-
-		if (m_RxThread) {
-			WaitForSingleObject(m_RxThread, INFINITE);
-			m_RxThread = nullptr;
-		}
-
-		if (m_TxThread) {
-			WaitForSingleObject(m_TxThread, INFINITE);
-			m_TxThread = nullptr;
-		}
-
-		ResetEvent(m_Shutdown);
-
-		CloseHandle(m_Shutdown);
-		m_Shutdown = nullptr;
-	}
-
-	if (m_TxFifoAvailable) {
-		CloseHandle(m_TxFifoAvailable);
-		m_TxFifoAvailable = nullptr;
-	}
-
-	if (m_Stream) {
-		sc_can_stream_uninit(m_Stream);
-		m_Stream = nullptr;
-	}
+	SetBusOff();
 
 	sc_cmd_ctx_uninit(&m_CmdCtx);
 	ZeroMemory(&m_CmdCtx, sizeof(m_CmdCtx));
@@ -567,6 +666,8 @@ void ScDev::Uninit()
 	}
 
 	Unmap();
+
+	//m_ConfigurationAccessClaimed = 0;
 }
 
 void ScDev::Unmap()
@@ -800,6 +901,64 @@ int ScDev::Init(std::wstring&& name)
 		can_info.nmbt_tseg1_max = m_Device->dev_to_host16(can_info.nmbt_tseg1_max);
 	}
 
+success_exit:
+	return error;
+
+error_exit:
+	Uninit();
+
+	goto success_exit;
+}
+
+void ScDev::SetBusOff()
+{
+	if (m_CmdCtx.dev) {
+		sc_msg_config* bus = reinterpret_cast<sc_msg_config*>(m_CmdCtx.tx_buffer);
+		bus->id = SC_MSG_BUS;
+		bus->len = sizeof(*bus);
+		bus->arg = 0;
+
+		uint16_t bytes_out;
+		sc_cmd_ctx_run(&m_CmdCtx, bus->len, &bytes_out, CMD_TIMEOUT_MS);
+	}
+
+	if (m_Shutdown) {
+		SetEvent(m_Shutdown);
+
+		if (m_RxThread) {
+			WaitForSingleObject(m_RxThread, INFINITE);
+			m_RxThread = nullptr;
+		}
+
+		if (m_TxThread) {
+			WaitForSingleObject(m_TxThread, INFINITE);
+			m_TxThread = nullptr;
+		}
+
+		CloseHandle(m_Shutdown);
+		m_Shutdown = nullptr;
+	}
+
+	if (m_TxFifoAvailable) {
+		CloseHandle(m_TxFifoAvailable);
+		m_TxFifoAvailable = nullptr;
+	}
+
+	if (m_Stream) {
+		sc_can_stream_uninit(m_Stream);
+		m_Stream = nullptr;
+	}
+
+	memset(&m_TimeTracker, 0, sizeof(m_TimeTracker));
+}
+
+int ScDev::SetBusOn()
+{
+	int error = SC_DLL_ERROR_NONE;
+	DWORD thread_id = 0;
+
+	sc_tt_init(&m_TimeTracker);
+
 	error = sc_can_stream_init(
 		m_Device,
 		can_info.msg_buffer_size,
@@ -826,8 +985,6 @@ int ScDev::Init(std::wstring&& name)
 		goto error_exit;
 	}
 
-	
-
 	m_RxThread = CreateThread(NULL, 0, &ScDev::RxMain, this, 0, &thread_id);
 	if (!m_RxThread) {
 		error = SC_DLL_ERROR_OUT_OF_MEM;
@@ -840,16 +997,59 @@ int ScDev::Init(std::wstring&& name)
 		goto error_exit;
 	}
 
+	sc_msg_config* bus = reinterpret_cast<sc_msg_config*>(m_CmdCtx.tx_buffer);
+	bus->id = SC_MSG_BUS;
+	bus->len = sizeof(*bus);
+	bus->arg = m_Device->dev_to_host16(1);
+
+	uint16_t bytes_out = 0;
+	error = sc_cmd_ctx_run(&m_CmdCtx, bus->len, &bytes_out, CMD_TIMEOUT_MS);
+	if (error) {
+		goto error_exit;
+	}
+
+	auto *e = reinterpret_cast<sc_msg_error*>(m_CmdCtx.rx_buffer);
+	if (bytes_out < sizeof(*e)) {
+		error = SC_DLL_ERROR_PROTO_VIOLATION;
+		goto error_exit;
+	}
+
+	if (e->id != SC_MSG_ERROR || e->len < sizeof(*e)) {
+		error = SC_DLL_ERROR_PROTO_VIOLATION;
+		goto error_exit;
+	}
+
+	if (e->error) {
+		error = map_device_error(e->error);
+		goto error_exit;
+	}
+
 success_exit:
 	return error;
 
 error_exit:
-	Uninit();
-
+	SetBusOff();
 	goto success_exit;
 }
 
-int ScDev::AddComDevice(XSuperCANDevice* device, bool request_config_access)
+int ScDev::SetBus(sc_com_dev_index_t index, bool on)
+{
+	Guard g(m_Lock);
+
+	if (!VerifyConfigurationAccess(index)) {
+		return SC_DLL_ERROR_ACCESS_DENIED;
+	}
+
+	SetBusOff();
+
+	if (on) {
+		return SetBusOn();
+	}
+
+	return SC_DLL_ERROR_NONE;
+}
+
+int ScDev::AddComDevice(XSuperCANDevice* device)
 {
 	assert(device);
 
@@ -859,18 +1059,10 @@ int ScDev::AddComDevice(XSuperCANDevice* device, bool request_config_access)
 		return SC_DLL_ERROR_OUT_OF_MEM;
 	}
 
-	auto config_access = false;
-	if (request_config_access && 
-		MAX_COM_DEVICES_PER_SC_DEVICE == m_ConfigurationAccessIndex) {
-		config_access = true;
-		m_ConfigurationAccessIndex = m_ComDeviceCount;
-	}
-
 	device->Init(
 		shared_from_this(), 
 		m_ComDeviceCount, 
-		&m_ComDeviceData[m_ComDeviceCount],
-		config_access);
+		&m_ComDeviceData[m_ComDeviceCount]);
 	m_ComDeviceDataPrivate[m_ComDeviceCount].com_device = device;
 	++m_ComDeviceDataPrivate[m_ComDeviceCount].com_dev_generation;
 	
@@ -955,7 +1147,7 @@ void ScDev::TxMain()
 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
 	DWORD wait_timeout_ms = INFINITE;
-	size_t start_index = 0;
+	sc_com_dev_index_t start_index = 0;
 
 	for (bool done = false; !done; ) {
 		auto r = WaitForMultipleObjects(static_cast<DWORD>(_countof(handles)), handles, FALSE, wait_timeout_ms);
@@ -984,14 +1176,14 @@ void ScDev::TxMain()
 			auto* priv = &m_ComDeviceDataPrivate[index];
 
 			auto com_dev_gen = priv->com_dev_generation.load(std::memory_order_acquire);
-			auto sc_dev_gen = priv->sc_dev_generation.load(std::memory_order_acquire);
+			auto sc_dev_gen = priv->tx_sc_dev_generation.load(std::memory_order_acquire);
 			if (com_dev_gen == sc_dev_gen) {
 				auto gi = priv->tx.hdr->get_index;
 				auto pi = priv->tx.hdr->put_index;
 				auto used = pi - gi;
 				if (gi != priv->tx.index || used > data->tx.elements) {
 					// rogue client
-					LOG_WARN("TX ring index=%zu gi=%lu pi=%lu used=%lu elements=%lu is inconsistent, resetting ring\n",
+					LOG_WARN("TX ring index=%u gi=%lu pi=%lu used=%lu elements=%lu is inconsistent, resetting ring\n",
 						index,
 						static_cast<unsigned long>(gi),
 						static_cast<unsigned long>(pi),
@@ -1038,6 +1230,7 @@ void ScDev::TxMain()
 							
 							m_TxrMap[txr_slot].track_id.store(slot->tx.track_id, std::memory_order_release);
 							m_TxrMap[txr_slot].index.store(static_cast<uint32_t>(index), std::memory_order_release);
+							m_TxrMap[txr_slot].com_dev_generation.store(com_dev_gen, std::memory_order_release);
 
 							tx->track_id = static_cast<uint8_t>(txr_slot);
 
@@ -1069,7 +1262,7 @@ void ScDev::TxMain()
 					else {
 						// drop
 						//++data->tx.hdr->txr_lost;
-						LOG_WARN("TX ring index=%zu unhandled entry type=%d will be ignored\n", index, slot->tx.type);
+						LOG_WARN("TX ring index=%u unhandled entry type=%d will be ignored\n", index, slot->tx.type);
 
 						++priv->tx.index;
 
@@ -1082,7 +1275,7 @@ void ScDev::TxMain()
 				}
 			}
 			else {
-				ResetComDeviceState(index, com_dev_gen);
+				ResetComDeviceStateTx(index, com_dev_gen);
 			}
 		}
 	}
@@ -1122,7 +1315,6 @@ XSuperCANDevice::XSuperCANDevice()
 	m_Sc = nullptr;
 	m_Index = 0;
 	m_Mm = nullptr;
-	m_ConfigurationAccess = false;
 }
 
 
@@ -1148,20 +1340,35 @@ STDMETHODIMP XSuperCANDevice::GetRingBufferMappings(SuperCANRingBufferMapping* r
 
 void XSuperCANDevice::Init(
 	const ScDevPtr& dev, 
-	size_t index, 
-	com_device_data* mm,
-	bool config_access)
+	sc_com_dev_index_t index,
+	com_device_data* mm)
 {
 	m_SharedDevice = dev;
 	m_Index = index;
 	m_Mm = mm;
-	m_ConfigurationAccess = config_access;
 }
 
-STDMETHODIMP XSuperCANDevice::HasConfigurationAccess(boolean* result)
+
+STDMETHODIMP XSuperCANDevice::AcquireConfigurationAccess(
+	boolean* result,
+	unsigned long* timeout_ms)
 {
+	ObjectLock g(this); 
+
 	ATLASSERT(result);
-	*result = m_ConfigurationAccess;
+	ATLASSERT(timeout_ms);
+
+	*result = m_SharedDevice->AcquireConfigurationAccess(m_Index, timeout_ms);
+
+	return S_OK;
+}
+
+STDMETHODIMP XSuperCANDevice::ReleaseConfigurationAccess()
+{
+	ObjectLock g(this);
+
+	m_SharedDevice->ReleaseConfigurationAccess(m_Index);
+
 	return S_OK;
 }
 
@@ -1171,7 +1378,7 @@ HRESULT XSuperCANDevice::_Cmd(uint16_t len) const
 
 	uint16_t len_out = 0;
 
-	auto error = m_SharedDevice->Cmd(len, &len_out);
+	auto error = m_SharedDevice->Cmd(m_Index, len, &len_out);
 	if (error) {
 		return SC_HRESULT_FROM_ERROR(error);
 	}
@@ -1195,28 +1402,20 @@ STDMETHODIMP XSuperCANDevice::SetBus(boolean on)
 {
 	ObjectLock g(this);
 
-	if (!HasConfigurationAccess()) {
-		return E_ACCESSDENIED;
+	auto error = m_SharedDevice->SetBus(m_Index, on != 0);
+	if (error) {
+		SC_HRESULT_FROM_ERROR(error);
 	}
 
-	sc_msg_config* bus = reinterpret_cast<sc_msg_config*>(m_SharedDevice->cmd_tx_buffer());
-	bus->id = SC_MSG_BUS;
-	bus->len = sizeof(*bus);
-	bus->arg = m_SharedDevice->dev_to_host16(on);
-	
-	return _Cmd(bus->len);
+	return S_OK;
 }
 
 STDMETHODIMP XSuperCANDevice::SetFeatureFlags(unsigned long flags)
 {
 	ObjectLock g(this);
 
-	if (!HasConfigurationAccess()) {
-		return E_ACCESSDENIED;
-	}
-
 	// Ensure TXR is configured,
-	// Init checks for it
+	// Init checks for it.
 	flags |= SC_FEATURE_FLAG_TXR;
 
 	sc_msg_features* feat = reinterpret_cast<sc_msg_features*>(m_SharedDevice->cmd_tx_buffer());
@@ -1288,10 +1487,6 @@ STDMETHODIMP XSuperCANDevice::SetNominalBitTiming(SuperCANBitTimingParams params
 {
 	ObjectLock g(this);
 
-	if (!HasConfigurationAccess()) {
-		return E_ACCESSDENIED;
-	}
-
 	sc_msg_bittiming* bt = reinterpret_cast<sc_msg_bittiming*>(m_SharedDevice->cmd_tx_buffer());
 	bt->id = SC_MSG_NM_BITTIMING;
 	bt->len = sizeof(*bt);
@@ -1306,10 +1501,6 @@ STDMETHODIMP XSuperCANDevice::SetNominalBitTiming(SuperCANBitTimingParams params
 STDMETHODIMP XSuperCANDevice::SetDataBitTiming(SuperCANBitTimingParams params)
 {
 	ObjectLock g(this);
-
-	if (!HasConfigurationAccess()) {
-		return E_ACCESSDENIED;
-	}
 
 	sc_msg_bittiming* bt = reinterpret_cast<sc_msg_bittiming*>(m_SharedDevice->cmd_tx_buffer());
 	bt->id = SC_MSG_DT_BITTIMING;
@@ -1455,7 +1646,6 @@ STDMETHODIMP XSuperCAN::DeviceGetCount(unsigned long* count)
 
 STDMETHODIMP XSuperCAN::DeviceOpen(
 	unsigned long index, 
-	boolean request_config_access,
 	ISuperCANDevice** dev)
 {
 	ATLASSERT(dev);
@@ -1477,7 +1667,7 @@ STDMETHODIMP XSuperCAN::DeviceOpen(
 
 		com_device->AddRef();
 
-		auto error = sc_device->AddComDevice(com_device, request_config_access != 0);
+		auto error = sc_device->AddComDevice(com_device);
 		if (error) {
 			com_device->Release();
 			return SC_HRESULT_FROM_ERROR(error);
@@ -1557,12 +1747,11 @@ STDMETHODIMP CSuperCAN::DeviceGetCount(unsigned long* count)
 
 STDMETHODIMP CSuperCAN::DeviceOpen(
 	unsigned long index, 
-	boolean request_config_access,
 	ISuperCANDevice** dev)
 {
 	if (!m_Instance) {
 		return E_OUTOFMEMORY;
 	}
 
-	return m_Instance->DeviceOpen(index, request_config_access, dev);
+	return m_Instance->DeviceOpen(index, dev);
 }

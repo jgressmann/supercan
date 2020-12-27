@@ -74,7 +74,10 @@ library SuperCAN
 	]
 	interface ISuperCANDevice : IUnknown
 	{
-		HRESULT HasConfigurationAccess([out,retval] boolean* config_access);
+		HRESULT AcquireConfigurationAccess(
+			[out] boolean* config_access, 
+			[out] unsigned long* timeout_ms);
+		HRESULT ReleaseConfigurationAccess();
 		HRESULT GetRingBufferMappings(
 			[out] struct SuperCANRingBufferMapping* rx, 
 			[out] struct SuperCANRingBufferMapping* tx);
@@ -99,7 +102,6 @@ library SuperCAN
 		HRESULT DeviceGetCount([out] unsigned long* count);
 		HRESULT DeviceOpen(
 			[in] unsigned long index, 
-			[in] boolean request_config_access,
 			[out] ISuperCANDevice** dev);
 	};
 

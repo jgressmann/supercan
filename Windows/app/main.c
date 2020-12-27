@@ -225,7 +225,7 @@ int main(int argc, char** argv)
     ac.data_user_constraints.sjw = 1;
     ac.config = true;
 
-    sc_tt_init(&ac.tt);
+    
 
     for (int i = 1; i < argc; ) {
         if (0 == strcmp("-h", argv[i]) ||

@@ -40,6 +40,9 @@
     <ClInclude Include="..\inc\supercan_srv.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\supercan_misc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="supercan_srv.cpp">

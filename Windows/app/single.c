@@ -25,6 +25,7 @@
 
 
 #include "app.h"
+#include "supercan_misc.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +35,7 @@
 
 struct can_state {
     sc_dev_t* dev;
+    struct sc_dev_time_tracker tt;
     uint64_t rx_last_ts;
     bool rx_has_xtd_frame;
     bool rx_has_fdf_frame;
@@ -83,7 +85,7 @@ static bool process_buffer(
             uint16_t rx_lost = s->dev->dev_to_host16(status->rx_lost);
             uint16_t tx_dropped = s->dev->dev_to_host16(status->tx_dropped);
 
-            sc_tt_track(&ac->tt, timestamp_us);
+            sc_tt_track(&s->tt, timestamp_us);
 
             if (ac->log_flags & LOG_FLAG_BUS_STATE) {
                 fprintf(stdout, "rx lost=%u tx dropped=%u rx errors=%u tx errors=%u bus=", rx_lost, tx_dropped, status->rx_errors, status->tx_errors);
@@ -116,7 +118,7 @@ static bool process_buffer(
 
             uint32_t timestamp_us = s->dev->dev_to_host32(error_msg->timestamp_us);
 
-            sc_tt_track(&ac->tt, timestamp_us);
+            sc_tt_track(&s->tt, timestamp_us);
 
             if (SC_CAN_ERROR_NONE != error_msg->error) {
                 fprintf(
@@ -156,7 +158,7 @@ static bool process_buffer(
             uint8_t len = dlc_to_len(rx->dlc);
             uint8_t bytes = sizeof(*rx);
 
-            uint64_t ts_us = sc_tt_track(&ac->tt, timestamp_us);
+            uint64_t ts_us = sc_tt_track(&s->tt, timestamp_us);
 
             if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR)) {
                 bytes += len;
@@ -175,9 +177,8 @@ static bool process_buffer(
                         fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
                     }
                 }
-                else {
-                    s->rx_last_ts = ts_us;
-                }
+
+                s->rx_last_ts = ts_us;
 
                 fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
             }
@@ -225,7 +226,7 @@ static bool process_buffer(
 
             uint32_t timestamp_us = s->dev->dev_to_host32(txr->timestamp_us);
 
-            sc_tt_track(&ac->tt, timestamp_us);
+            sc_tt_track(&s->tt, timestamp_us);
 
             if (ac->log_flags & LOG_FLAG_TXR) {
                 if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
@@ -282,6 +283,8 @@ int run_single(struct app_ctx* ac)
 
     memset(&can_state, 0, sizeof(can_state));
     memset(&cmd_ctx, 0, sizeof(cmd_ctx));
+
+    sc_tt_init(&can_state.tt);
 
     ac->priv = &can_state;
     

@@ -48,7 +48,8 @@ enum sc_can_data_type {
     SC_CAN_DATA_TYPE_STATUS,
     SC_CAN_DATA_TYPE_RX,
     SC_CAN_DATA_TYPE_TX,
-    SC_CAN_DATA_TYPE_TXR
+    SC_CAN_DATA_TYPE_TXR,
+    SC_CAN_DATA_TYPE_ERROR,
 };
 
 struct sc_mm_header {
@@ -61,7 +62,7 @@ struct sc_mm_can_rx {
     uint8_t flags;
     uint8_t reserved;
     uint32_t can_id;
-    uint32_t timestamp_us;
+    uint64_t timestamp_us;
     uint8_t data[64];
 };
 
@@ -80,7 +81,7 @@ struct sc_mm_can_txr {
     uint8_t reserved[2];
     uint8_t flags;
     uint32_t track_id;
-    uint32_t timestamp_us;
+    uint64_t timestamp_us;
 };
 
 struct sc_mm_can_status {
@@ -88,15 +89,22 @@ struct sc_mm_can_status {
     uint8_t reserved;
     uint8_t flags;              ///< CAN bus status flags
     uint8_t bus_status;
-    uint32_t timestamp_us;
     uint16_t rx_lost;           ///< messages CAN -> USB lost since last time due to full rx fifo
     uint16_t tx_dropped;        ///< messages USB -> CAN dropped since last time due of full tx fifo
+    uint64_t timestamp_us;
     uint8_t rx_errors;          ///< CAN rx error counter
     uint8_t tx_errors;          ///< CAN tx error counter
     uint8_t rx_fifo_size;       ///< CAN rx fifo fill state
     uint8_t tx_fifo_size;       ///< CAN tx fifo fill state
 };
 
+struct sc_mm_can_error {
+    uint8_t type;
+    uint8_t error;
+    uint8_t flags;
+    uint8_t reserved[5];
+    uint64_t timestamp_us;
+};
 
 typedef union sc_can_mm_slot {
     struct sc_mm_header hdr;
@@ -104,14 +112,15 @@ typedef union sc_can_mm_slot {
     struct sc_mm_can_tx tx;
     struct sc_mm_can_txr txr;
     struct sc_mm_can_status status;
+    struct sc_mm_can_error error;
 } sc_can_mm_slot_t;
 
 struct sc_can_mm_header {
-    volatile uint64_t rx_lost;
-    volatile uint64_t txr_lost;
-    volatile uint32_t get_index; // not an index, need to be %'d
-    volatile uint32_t put_index; // not an index, need to be %'d
-    volatile int32_t error;
+    volatile uint64_t rx_lost;      // messages lost due to full rx ring
+    volatile uint64_t txr_lost;     // transmit receipts lost due to full rx ring
+    volatile uint32_t get_index;    // not an index, need to be %'d
+    volatile uint32_t put_index;    // not an index, need to be %'d
+    volatile int32_t error;         // device error
     sc_can_mm_slot_t slots[0];
 };
 

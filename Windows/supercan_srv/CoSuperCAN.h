@@ -33,7 +33,7 @@
 
 class ATL_NO_VTABLE CSuperCAN :
     //public ATL::CComObjectRootEx<ATL::CComSingleThreadModel>,
-	public ATL::CComObjectRoot,
+	public ATL::CComObjectRoot, // doesn't matter, uses module lock
     public ATL::CComCoClass<CSuperCAN, &CLSID_CSuperCAN>,
     public ISuperCAN
 {
@@ -51,10 +51,8 @@ public:
 public:
 	STDMETHOD(DeviceScan)(unsigned long* count);
 	STDMETHOD(DeviceGetCount)(unsigned long* count);
-
 	STDMETHOD(DeviceOpen)(
 		unsigned long index, 
-		boolean request_config_access,
 		ISuperCANDevice** dev);
 
 private:

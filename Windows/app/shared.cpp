@@ -126,8 +126,7 @@ void process_rx(app_ctx* ac)
             switch (hdr->type) {
             case SC_CAN_DATA_TYPE_STATUS: {
                 auto* status = &com_ctx->rx.hdr->slots[index].status;
-                sc_tt_track(&ac->tt, status->timestamp_us);
-
+                
                 if (ac->log_flags & LOG_FLAG_BUS_STATE) {
                     fprintf(stdout, "rx lost=%u tx dropped=%u rx errors=%u tx errors=%u bus=", status->rx_lost, status->tx_dropped, status->rx_errors, status->tx_errors);
                     switch (status->bus_status) {
@@ -152,19 +151,17 @@ void process_rx(app_ctx* ac)
             } break;
             case SC_CAN_DATA_TYPE_RX: {
                 auto* rx = &com_ctx->rx.hdr->slots[index].rx;
-                auto ts_us = sc_tt_track(&ac->tt, rx->timestamp_us);
 
                 if (ac->log_flags & LOG_FLAG_RX_DT) {
                     int64_t dt_us = 0;
                     if (com_ctx->rx_last_ts) {
-                        dt_us = ts_us - com_ctx->rx_last_ts;
+                        dt_us = rx->timestamp_us - com_ctx->rx_last_ts;
                         if (dt_us < 0) {
                             fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
                         }
                     }
-                    else {
-                        com_ctx->rx_last_ts = ts_us;
-                    }
+
+                    com_ctx->rx_last_ts = rx->timestamp_us;
 
                     fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
                 }
@@ -208,14 +205,13 @@ void process_rx(app_ctx* ac)
             } break;
             case SC_CAN_DATA_TYPE_TXR: {
                 auto* txr = &com_ctx->rx.hdr->slots[index].txr;
-                auto ts_us = sc_tt_track(&ac->tt, txr->timestamp_us);
-
+                
                 if (ac->log_flags & LOG_FLAG_TXR) {
                     if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
-                        fprintf(stdout, "tracked message %#08x was dropped @ %08x\n", txr->track_id, txr->timestamp_us);
+                        fprintf(stdout, "tracked message %#08x was dropped @ %016llx\n", txr->track_id, txr->timestamp_us);
                     }
                     else {
-                        fprintf(stdout, "tracked message %#08x was sent @ %08x\n", txr->track_id, txr->timestamp_us);
+                        fprintf(stdout, "tracked message %#08x was sent @ %016llx\n", txr->track_id, txr->timestamp_us);
                     }
                 }
             } break;
@@ -242,9 +238,10 @@ int run(app_ctx* ac)
     memset(&data_hw_constraints, 0, sizeof(data_hw_constraints));
 
     if (ac->config) {
-        hr = dev->HasConfigurationAccess(&config_access);
+        unsigned long timeout_ms = 0;
+        hr = dev->AcquireConfigurationAccess(&config_access, &timeout_ms);
         if (FAILED(hr)) {
-            fprintf(stderr, "ERROR: failed query config access (hr=%lx)\n", hr);
+            fprintf(stderr, "ERROR: failed acquire config access (hr=%lx)\n", hr);
             return map_hr_to_error(hr);
         }
 
@@ -357,6 +354,10 @@ int run(app_ctx* ac)
     bool was_full = false;
 
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+
+    // throw out any messages that might have been
+    // queued while not active
+    com_ctx->rx.hdr->get_index = com_ctx->rx.hdr->put_index;
 
     while (1) {
 
@@ -557,17 +558,12 @@ extern "C" int run_shared(struct app_ctx* ac)
 
         fprintf(stdout, "%u " SC_NAME " devices found\n", (unsigned)dev_count);
 
-        fprintf(stdout, "Attempt to open device with%s configuration access...", ac->config ? "" : "out");
-
         ISuperCANDevicePtr device_ptr;
-        hr = sc->DeviceOpen(0, ac->config, (ISuperCANDevice**)&device_ptr);
+        hr = sc->DeviceOpen(0, (ISuperCANDevice**)&device_ptr);
         if (FAILED(hr)) {
-            fprintf(stdout, "FAILURE\n");
             fprintf(stderr, "ERROR: failed to open device index=0 (hr=%lx)\n", hr);
             return map_hr_to_error(hr);
         }
-
-        fprintf(stdout, "SUCCESS\n");
 
         // release SuperCAN to verify the device keeps the COM server loaded
         sc.Release();

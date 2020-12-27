@@ -30,7 +30,6 @@
 #include <Windows.h>
 #include "supercan_winapi.h"
 #include "supercan_dll.h"
-#include "supercan_misc.h"
 #include "can_bit_timing.h"
 
 #include <stdint.h>
@@ -64,17 +63,8 @@ struct tx_job {
     uint8_t data[64];
 };
 
-
-
-
-
-
-
 struct app_ctx {
     struct can_bit_timing_constraints_real nominal_user_constraints, data_user_constraints;
-    //struct can_bit_timing_settings nominal_settings, data_settings;
-    //struct can_state can_state;
-    struct sc_dev_time_tracker tt; 
     struct tx_job tx_jobs[8];
     unsigned log_flags;
     unsigned tx_job_count;
@@ -83,8 +73,6 @@ struct app_ctx {
     HANDLE shutdown_event;
     void* priv;
 };
-
-
 
 static inline uint8_t dlc_to_len(uint8_t dlc)
 {
