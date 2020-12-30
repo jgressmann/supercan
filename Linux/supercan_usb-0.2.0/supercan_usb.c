@@ -501,13 +501,10 @@ static int sc_usb_process_can_status(struct sc_usb_priv *usb_priv, struct sc_msg
 		if (net_ratelimit())
 			netdev_err(netdev, "txr desync\n");
 	} else if (status->bus_status == SC_CAN_STATUS_BUS_OFF) {
-		++can_stats->bus_off;
 		next_state = CAN_STATE_BUS_OFF;
 	} else if (status->bus_status == SC_CAN_STATUS_ERROR_PASSIVE) {
-		++can_stats->error_passive;
 		next_state = CAN_STATE_ERROR_PASSIVE;
 	} else if (status->bus_status == SC_CAN_STATUS_ERROR_WARNING) {
-		++can_stats->error_warning;
 		next_state = CAN_STATE_ERROR_WARNING;
 	} else
 		next_state = CAN_STATE_ERROR_ACTIVE;
