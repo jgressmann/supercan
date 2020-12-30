@@ -118,6 +118,7 @@ struct sc_usb_priv {
 	u32 can_clock_hz;
 	u32 ctrlmode_static;
 	u32 ctrlmode_supported;
+	u32 tx_can_buffer[24];
 	u16 feat_perm;
 	u16 feat_conf;
 	u16 cmd_buffer_size;
@@ -134,7 +135,7 @@ struct sc_usb_priv {
 	u8 tx_echo_skb_available_count;
 	u8 prev_rx_fifo_size;
 	u8 prev_tx_fifo_size;
-	u8 tx_can_buffer[96];
+
 };
 
 
