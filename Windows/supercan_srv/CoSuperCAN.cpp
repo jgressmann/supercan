@@ -210,7 +210,6 @@ private:
 		std::atomic<uint32_t> com_dev_generation;
 		std::atomic<uint32_t> rx_sc_dev_generation;
 		std::atomic<uint32_t> tx_sc_dev_generation;
-		//std::atomic<bool> com_dev_present;
 	};
 
 private:
@@ -329,12 +328,13 @@ ScDev::ScDev()
 	m_ConfigurationAccessIndex = MAX_COM_DEVICES_PER_SC_DEVICE;
 	ZeroMemory(m_ComDeviceData, sizeof(m_ComDeviceData));
 	ZeroMemory(m_ComDeviceDataPrivate, sizeof(m_ComDeviceDataPrivate));
+	DWORD r = GetTickCount() ^ GetCurrentProcessId();
 	for (size_t i = 0; i < _countof(m_ComDeviceData); ++i) {
 		auto* data = &m_ComDeviceData[i];
-		_snwprintf_s(data->rx.mem_name, _countof(data->rx.mem_name), _TRUNCATE, L"Local\\sc_dev%zu-rx-mem", i);
-		_snwprintf_s(data->rx.ev_name, _countof(data->rx.ev_name), _TRUNCATE, L"Local\\sc_dev%zu-rx-ev", i);
-		_snwprintf_s(data->tx.mem_name, _countof(data->tx.mem_name), _TRUNCATE, L"Local\\sc_dev%zu-tx-mem", i);
-		_snwprintf_s(data->tx.ev_name, _countof(data->tx.ev_name), _TRUNCATE, L"Local\\sc_dev%zu-tx-ev", i);
+		_snwprintf_s(data->rx.mem_name, _countof(data->rx.mem_name), _TRUNCATE, L"Local\\sc-i%08x-dev%zu-rx-mem", r, i);
+		_snwprintf_s(data->rx.ev_name, _countof(data->rx.ev_name), _TRUNCATE, L"Local\\sc-i%08x-dev%zu-rx-ev", r, i);
+		_snwprintf_s(data->tx.mem_name, _countof(data->tx.mem_name), _TRUNCATE, L"Local\\sc-i%08x-dev%zu-tx-mem", r, i);
+		_snwprintf_s(data->tx.ev_name, _countof(data->tx.ev_name), _TRUNCATE, L"Local\\sc-i%08x-dev%zu-tx-ev", r, i);
 		data->rx.elements = 1u<<16;
 		data->tx.elements = 1u<<16;
 	}
