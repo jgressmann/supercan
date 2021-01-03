@@ -51,6 +51,7 @@ OBJECT_ENTRY_AUTO(CLSID_CSuperCAN, CSuperCAN)
 #include <cstdio>
 #include <atomic>
 
+
 #define CMD_TIMEOUT_MS 1000
 #define MAX_COM_DEVICES_PER_SC_DEVICE_BITS 3
 #define MAX_COM_DEVICES_PER_SC_DEVICE (1u<<MAX_COM_DEVICES_PER_SC_DEVICE_BITS)
@@ -64,6 +65,7 @@ OBJECT_ENTRY_AUTO(CLSID_CSuperCAN, CSuperCAN)
 		OutputDebugStringA(buf); \
 	} while (0)
 
+#define LOG_DEBUG(...) LOG2("DEBUG: ", __VA_ARGS__)
 #define LOG_INFO(...) LOG2("INFO: ", __VA_ARGS__)
 #define LOG_WARN(...) LOG2("WARN: ", __VA_ARGS__)
 #define LOG_ERROR(...) LOG2("ERROR: ", __VA_ARGS__)
@@ -436,7 +438,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 
 		auto index = m_TxrMap[txr->track_id].index.load(std::memory_order_acquire);
 		if (index < MAX_COM_DEVICES_PER_SC_DEVICE) {
-			auto com_dev_gen_tx = m_TxrMap[txr->track_id].com_dev_generation.load(std::memory_order_acquire);
+			auto txr_sc_dev_gen = m_TxrMap[txr->track_id].com_dev_generation.load(std::memory_order_acquire);
 			auto track_id = m_TxrMap[txr->track_id].track_id.load(std::memory_order_acquire);
 			
 			m_TxrMap[txr->track_id].index.store(MAX_COM_DEVICES_PER_SC_DEVICE, std::memory_order_release);
@@ -444,19 +446,29 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 
 			auto* data = &m_ComDeviceData[index];
 			auto* priv = &m_ComDeviceDataPrivate[index];
-			auto com_dev_gen_rx = priv->com_dev_generation.load(std::memory_order_acquire);
-			auto rx_sc_dev_gen = priv->rx_sc_dev_generation.load(std::memory_order_acquire);
+			auto tx_sc_dev_gen = priv->tx_sc_dev_generation.load(std::memory_order_acquire);
+			
+			if (tx_sc_dev_gen != txr_sc_dev_gen) {
+				break;
+			}
 
-			if (com_dev_gen_rx == com_dev_gen_tx && com_dev_gen_rx == rx_sc_dev_gen) {
+			auto sc_dev_gen = priv->rx_sc_dev_generation.load(std::memory_order_acquire);
+			auto com_dev_gen = priv->com_dev_generation.load(std::memory_order_acquire);
+
+
+			if (com_dev_gen == sc_dev_gen) {
 				auto gi = priv->rx.hdr->get_index;
 				auto pi = priv->rx.hdr->put_index;
 				auto used = pi - gi;
 				if (pi != priv->rx.index || used > data->rx.elements) {
 					// rogue client
+					LOG_DEBUG("rogue client messed up get=/put indices shared gi=%lu shared pi=%lu used=%lu priv gi=%lu\n",
+						gi, pi, used, priv->rx.index);
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
 					//++priv->rx.hdr->txr_lost;
-					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->rx_lost);
+					InterlockedIncrement64((volatile LONG64*)&priv->tx.hdr->lost);
+					InterlockedIncrement64((volatile LONG64*)&priv->tx.hdr->lost);
 					SetEvent(priv->rx.ev);
 				}
 				else {
@@ -471,12 +483,18 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 
 					priv->rx.hdr->put_index = priv->rx.index;
 
+					//std::atomic_thread_fence(std::memory_order_release);
+
 					SetEvent(priv->rx.ev);
 				}
+			}
+			else {
+				LOG_DEBUG("TXR COM/SC device mismatch com=%lu sc=%lu\n", com_dev_gen, sc_dev_gen);
 			}
 		}
 		else {
 			// rogue txr message?
+			LOG_WARN("rogue txr message for device index %u)\n", index);
 		}
 	} break;
 	case SC_MSG_CAN_RX: {
@@ -499,7 +517,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					// rogue client
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->rx_lost);
+					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->lost);
 					//++priv->rx.hdr->rx_lost;
 					SetEvent(priv->rx.ev);
 				}
@@ -519,6 +537,8 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					++priv->rx.index;
 
 					priv->rx.hdr->put_index = priv->rx.index;
+
+					//std::atomic_thread_fence(std::memory_order_release);
 
 					SetEvent(priv->rx.ev);
 				}
@@ -549,7 +569,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					// rogue client
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->rx_lost);
+					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->lost);
 					//++priv->rx.hdr->rx_lost;
 					SetEvent(priv->rx.ev);
 				}
@@ -600,7 +620,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					// rogue client
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->rx_lost);
+					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->lost);
 					//++priv->rx.hdr->rx_lost;
 					SetEvent(priv->rx.ev);
 				}
@@ -651,7 +671,7 @@ void ScDev::ResetComDeviceStateTx(sc_com_dev_index_t index, uint32_t generation)
 void ScDev::ResetComDeviceStateRx(sc_com_dev_index_t index, uint32_t generation)
 {
 	auto* priv = &m_ComDeviceDataPrivate[index];
-	InterlockedExchange64((volatile LONG64*)&priv->rx.hdr->rx_lost, 0);
+	InterlockedExchange64((volatile LONG64*)&priv->rx.hdr->lost, 0);
 	//InterlockedExchange64((volatile LONG64*)&priv->rx.hdr->txr_lost, 0);
 	priv->rx_sc_dev_generation.store(generation, std::memory_order_release);
 }
@@ -749,7 +769,7 @@ int ScDev::Map()
 
 		priv->rx.hdr->get_index = 0;
 		priv->rx.hdr->put_index = 0;
-		priv->rx.hdr->rx_lost = 0;
+		priv->rx.hdr->lost = 0;
 		//priv->rx.hdr->txr_lost = 0;
 		priv->rx.hdr->error = 0;
 
@@ -782,7 +802,7 @@ int ScDev::Map()
 
 		priv->tx.hdr->get_index = 0;
 		priv->tx.hdr->put_index = 0;
-		priv->tx.hdr->rx_lost = 0;
+		priv->tx.hdr->lost = 0;
 		//priv->tx.hdr->txr_lost = 0;
 		priv->tx.hdr->error = 0;
 
@@ -1175,7 +1195,7 @@ void ScDev::TxMain()
 		wait_timeout_ms = INFINITE;
 
 		for (size_t xi = 0; xi < _countof(m_ComDeviceData); ++xi, ++start_index) {
-			auto index = start_index % MAX_COM_DEVICES_PER_SC_DEVICE;
+			auto const index = start_index % MAX_COM_DEVICES_PER_SC_DEVICE;
 			auto* data = &m_ComDeviceData[index];
 			auto* priv = &m_ComDeviceDataPrivate[index];
 
@@ -1224,7 +1244,7 @@ void ScDev::TxMain()
 								
 							// find free txr slot
 							for (size_t j = 0; j < _countof(m_TxrMap); ++j) {
-								if (MAX_COM_DEVICES_PER_SC_DEVICE == m_TxrMap[j].index.load(std::memory_order_relaxed)) {
+								if (MAX_COM_DEVICES_PER_SC_DEVICE == m_TxrMap[j].index.load(std::memory_order_acquire)) {
 									txr_slot = j;
 									break;
 								}
@@ -1243,6 +1263,7 @@ void ScDev::TxMain()
 								done = true;
 								m_TxrMap[txr_slot].index.store(MAX_COM_DEVICES_PER_SC_DEVICE, std::memory_order_release);
 								ReleaseSemaphore(m_TxFifoAvailable, 1, nullptr);
+								SetDeviceError(error);
 								break;
 							}
 

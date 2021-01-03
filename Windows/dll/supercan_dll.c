@@ -1335,7 +1335,19 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
 {
     int error = SC_DLL_ERROR_NONE;
     DWORD dw = 0;
-    unsigned usb_data_size = chunky_writer_finalize(&stream->w);
+    DWORD usb_data_size = chunky_writer_finalize(&stream->w);
+    unsigned prev_index = (stream->tx_index + 1) & 0x1;
+
+    dw = WaitForSingleObject(stream->tx_ovs[prev_index].hEvent, INFINITE);
+    if (WAIT_OBJECT_0 == dw) {
+        ResetEvent(stream->tx_ovs[stream->tx_index].hEvent);
+    }
+    else {
+        dw = GetLastError();
+        HRESULT hr = HRESULT_FROM_WIN32(dw);
+        error = HrToError(hr);
+        return error;
+    }
 
     if (WinUsb_WritePipe(
         stream->dev->usb_handle,
@@ -1355,10 +1367,12 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
     }
 
     // swap tx buffers
-    stream->tx_index = (stream->tx_index + 1) & 0x1;
+    stream->tx_index = prev_index;
+    chunky_writer_set(&stream->w, &stream->tx_buffers[stream->tx_index * stream->buffer_size], (uint16_t)stream->buffer_size);
 
+    /*
     // wait for other event before we use the buffer
-    /*DWORD transferred = 0;
+    DWORD transferred = 0;
     if (!WinUsb_GetOverlappedResult(
         stream->dev->usb_handle,
         &stream->tx_ovs[stream->tx_index],
@@ -1368,7 +1382,13 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
         HRESULT hr = HRESULT_FROM_WIN32(e);
         error = HrToError(hr);
         return error;
-    }*/
+    }
+
+    ResetEvent(stream->tx_ovs[stream->tx_index].hEvent);
+    chunky_writer_set(&stream->w, &stream->tx_buffers[stream->tx_index * stream->buffer_size], (uint16_t)stream->buffer_size);
+    */
+
+    /*
     dw = WaitForSingleObject(stream->tx_ovs[stream->tx_index].hEvent, INFINITE);
     if (WAIT_OBJECT_0 == dw) {
         ResetEvent(stream->tx_ovs[stream->tx_index].hEvent);
@@ -1380,6 +1400,7 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
         error = HrToError(hr);
         return error;
     }
+    */
 
     return error;
 }
@@ -1436,11 +1457,7 @@ SC_DLL_API int sc_can_stream_tx(
 
     if (chunky_writer_any(&stream->w)) {
         error = sc_can_stream_tx_send_buffer(stream);
-        if (error) {
-            return error;
-        }
     }
-
 
     return error;
 }

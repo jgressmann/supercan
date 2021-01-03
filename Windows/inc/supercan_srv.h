@@ -114,7 +114,8 @@ typedef union sc_can_mm_slot {
 } sc_can_mm_slot_t;
 
 struct sc_can_mm_header {
-    volatile uint64_t rx_lost;      // messages lost due to full rx ring
+    volatile uint64_t lost;         // RX ring: total messages lost due to full rx ring
+                                    // TX ring: txr messages lost due to full rx ring
     volatile uint32_t get_index;    // not an index, need to be %'d
     volatile uint32_t put_index;    // not an index, need to be %'d
     volatile int32_t error;         // device error

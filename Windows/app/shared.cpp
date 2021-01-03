@@ -108,9 +108,14 @@ void process_rx(app_ctx* ac)
 {
     com_dev_ctx* com_ctx = static_cast<com_dev_ctx*>(ac->priv);
 
-    auto rx_ring_lost = InterlockedExchange64((volatile LONG64*)&com_ctx->rx.hdr->rx_lost, 0);
+    auto rx_ring_lost = InterlockedExchange64((volatile LONG64*)&com_ctx->rx.hdr->lost, 0);
     if (rx_ring_lost) {
         fprintf(stderr, "ERROR: RX %llu messages lost\n", rx_ring_lost);
+    }
+
+    auto tx_ring_lost = InterlockedExchange64((volatile LONG64*)&com_ctx->tx.hdr->lost, 0);
+    if (tx_ring_lost) {
+        fprintf(stderr, "ERROR: TXR %llu messages lost\n", tx_ring_lost);
     }
 
     auto gi = com_ctx->rx.hdr->get_index;
