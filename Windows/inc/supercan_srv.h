@@ -50,6 +50,8 @@ enum sc_can_data_type {
     SC_CAN_DATA_TYPE_ERROR,
 };
 
+
+
 struct sc_mm_header {
     uint8_t type;
 };
@@ -113,12 +115,28 @@ typedef union sc_can_mm_slot {
     struct sc_mm_can_error error;
 } sc_can_mm_slot_t;
 
+enum sc_mm_flags {
+    /** An error has occurred (see sc_can_mm_header::error) 
+      *
+      * This flag is sticky and will remain until the device is 
+      * is taken off the bus.
+      */
+    SC_MM_FLAG_ERROR = 0x1,
+    
+    /** The device has been taken on the bus
+      * 
+      * NOTE: this flag remains set until the device is explicitly taken off the bus.
+      */
+    SC_MM_FLAG_BUS_ON = 0x2,
+};
+
 struct sc_can_mm_header {
     volatile uint64_t lost;         // RX ring: total messages lost due to full rx ring
                                     // TX ring: txr messages lost due to full rx ring
     volatile uint32_t get_index;    // not an index, need to be %'d
     volatile uint32_t put_index;    // not an index, need to be %'d
     volatile int32_t error;         // device error
+    volatile uint32_t flags;        // flags
     sc_can_mm_slot_t slots[0];
 };
 

@@ -231,6 +231,7 @@ private:
 	sc_com_dev_index_t m_ConfigurationAccessIndex;
 	com_device_txr_data m_TxrMap[256];
 	DWORD m_ConfigurationAccessClaimed;
+	bool m_Mapped;
 };
 
 using ScDevPtr = std::shared_ptr<ScDev>;
@@ -343,6 +344,7 @@ ScDev::ScDev()
 	m_TxFifoAvailable = nullptr;
 	m_ConfigurationAccessClaimed = 0;
 	ZeroMemory(&m_TimeTracker, sizeof(m_TimeTracker));
+	m_Mapped = false;
 }
 
 bool ScDev::VerifyConfigurationAccess(sc_com_dev_index_t index) const
@@ -696,12 +698,15 @@ void ScDev::ResetComDeviceStateRx(sc_com_dev_index_t index, uint32_t generation)
 	auto* priv = &m_ComDeviceDataPrivate[index];
 	InterlockedExchange64((volatile LONG64*)&priv->rx.hdr->lost, 0);
 	//InterlockedExchange64((volatile LONG64*)&priv->rx.hdr->txr_lost, 0);
+	//priv->rx.hdr->put_index = priv->rx.index;
+	//priv->rx.hdr->get_index = priv->rx.index;
 	priv->rx_sc_dev_generation.store(generation, std::memory_order_release);
 }
 
 
 void ScDev::Uninit()
 {
+
 	SetBusOff();
 
 	sc_cmd_ctx_uninit(&m_CmdCtx);
@@ -719,6 +724,8 @@ void ScDev::Uninit()
 
 void ScDev::Unmap()
 {
+	m_Mapped = false;
+
 	for (size_t i = 0; i < _countof(m_ComDeviceData); ++i) {
 		auto* data = &m_ComDeviceData[i];
 		auto* priv = &m_ComDeviceDataPrivate[i];
@@ -793,7 +800,7 @@ int ScDev::Map()
 		priv->rx.hdr->get_index = 0;
 		priv->rx.hdr->put_index = 0;
 		priv->rx.hdr->lost = 0;
-		//priv->rx.hdr->txr_lost = 0;
+		priv->rx.hdr->flags = 0;
 		priv->rx.hdr->error = 0;
 
 		bytes = data->tx.elements * sizeof(sc_can_mm_slot_t) + sizeof(sc_can_mm_header);
@@ -826,7 +833,7 @@ int ScDev::Map()
 		priv->tx.hdr->get_index = 0;
 		priv->tx.hdr->put_index = 0;
 		priv->tx.hdr->lost = 0;
-		//priv->tx.hdr->txr_lost = 0;
+		priv->tx.hdr->flags = 0;
 		priv->tx.hdr->error = 0;
 
 		// events
@@ -842,6 +849,8 @@ int ScDev::Map()
 			goto error_exit;
 		}
 	}
+
+	m_Mapped = true;
 
 error_success:
 	return error;
@@ -997,12 +1006,28 @@ void ScDev::SetBusOff()
 	}
 
 	memset(&m_TimeTracker, 0, sizeof(m_TimeTracker));
+
+	if (m_Mapped) {
+		for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
+			m_ComDeviceDataPrivate[i].rx.hdr->flags = 0;
+			m_ComDeviceDataPrivate[i].tx.hdr->flags = 0;
+
+			SetEvent(m_ComDeviceDataPrivate[i].rx.ev);
+		}
+	}
 }
 
 int ScDev::SetBusOn()
 {
 	int error = SC_DLL_ERROR_NONE;
 	DWORD thread_id = 0;
+
+	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
+		m_ComDeviceDataPrivate[i].rx.hdr->error = 0;
+		m_ComDeviceDataPrivate[i].tx.hdr->error = 0;
+
+		SetEvent(m_ComDeviceDataPrivate[i].rx.ev);
+	}
 
 	sc_tt_init(&m_TimeTracker);
 
@@ -1069,6 +1094,13 @@ int ScDev::SetBusOn()
 	if (e->error) {
 		error = map_device_error(e->error);
 		goto error_exit;
+	}
+
+	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
+		InterlockedOr((volatile LONG*)&m_ComDeviceDataPrivate[i].rx.hdr->flags, SC_MM_FLAG_BUS_ON);
+		InterlockedOr((volatile LONG*)&m_ComDeviceDataPrivate[i].tx.hdr->flags, SC_MM_FLAG_BUS_ON);
+
+		SetEvent(m_ComDeviceDataPrivate[i].rx.ev);
 	}
 
 success_exit:
@@ -1337,10 +1369,13 @@ void ScDev::TxMain()
 
 void ScDev::SetDeviceError(int error) 
 {
-	for (size_t i = 0; i < _countof(m_ComDeviceData); ++i) {
-		auto* priv = &m_ComDeviceDataPrivate[i];
-		priv->rx.hdr->error = error;
-		priv->tx.hdr->error = error;
+	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
+		m_ComDeviceDataPrivate[i].rx.hdr->error = error;
+		m_ComDeviceDataPrivate[i].tx.hdr->error = error;
+		InterlockedOr((volatile LONG*)&m_ComDeviceDataPrivate[i].rx.hdr->flags, SC_MM_FLAG_ERROR);
+		InterlockedOr((volatile LONG*)&m_ComDeviceDataPrivate[i].tx.hdr->flags, SC_MM_FLAG_ERROR);
+
+		SetEvent(m_ComDeviceDataPrivate[i].rx.ev);
 	}
 }
 
