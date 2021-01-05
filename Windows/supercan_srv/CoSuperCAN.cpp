@@ -698,8 +698,8 @@ void ScDev::ResetComDeviceStateRx(sc_com_dev_index_t index, uint32_t generation)
 	auto* priv = &m_ComDeviceDataPrivate[index];
 	InterlockedExchange64((volatile LONG64*)&priv->rx.hdr->lost, 0);
 	//InterlockedExchange64((volatile LONG64*)&priv->rx.hdr->txr_lost, 0);
-	//priv->rx.hdr->put_index = priv->rx.index;
-	//priv->rx.hdr->get_index = priv->rx.index;
+	priv->rx.hdr->put_index = priv->rx.index;
+	priv->rx.hdr->get_index = priv->rx.index;
 	priv->rx_sc_dev_generation.store(generation, std::memory_order_release);
 }
 
