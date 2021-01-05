@@ -157,7 +157,7 @@ public:
 	int Init(std::wstring&& name);
 	void Uninit();
 	int AddComDevice(XSuperCANDevice* device);
-	void RemoveComDevice(size_t index);
+	void RemoveComDevice(sc_com_dev_index_t index);
 	int Cmd(sc_com_dev_index_t index, uint16_t bytes_in, uint16_t* bytes_out);
 	bool AcquireConfigurationAccess(sc_com_dev_index_t index, unsigned long* timeout_ms);
 	void ReleaseConfigurationAccess(sc_com_dev_index_t index);
@@ -188,6 +188,7 @@ private:
 	void SetDeviceError(int error);
 	int SetBusOn();
 	void SetBusOff();
+	bool IsOnBus() const { return m_Shutdown != nullptr; }
 	bool VerifyConfigurationAccess(sc_com_dev_index_t index) const;
 
 
@@ -227,7 +228,6 @@ private:
 	CRITICAL_SECTION m_Lock;
 	com_device_data m_ComDeviceData[MAX_COM_DEVICES_PER_SC_DEVICE];
 	com_device_data_private m_ComDeviceDataPrivate[MAX_COM_DEVICES_PER_SC_DEVICE];
-	sc_com_dev_index_t m_ComDeviceCount;
 	sc_com_dev_index_t m_ConfigurationAccessIndex;
 	com_device_txr_data m_TxrMap[256];
 	DWORD m_ConfigurationAccessClaimed;
@@ -326,7 +326,6 @@ ScDev::ScDev()
 	m_TxThread = nullptr;
 	InitializeCriticalSection(&m_Lock);
 	
-	m_ComDeviceCount = 0;
 	m_ConfigurationAccessIndex = MAX_COM_DEVICES_PER_SC_DEVICE;
 	ZeroMemory(m_ComDeviceData, sizeof(m_ComDeviceData));
 	ZeroMemory(m_ComDeviceDataPrivate, sizeof(m_ComDeviceDataPrivate));
@@ -395,13 +394,35 @@ bool ScDev::AcquireConfigurationAccess(
 	Guard g(m_Lock);
 
 	*timeout_ms = CONFIG_ACCESS_TIMEOUT_MS;
+
 	DWORD now = GetTickCount();
+
+	// Special case: reclaim configuration access after having
+	// claimed it last. This is to go off bus in a multi-client 
+	// scenario.
+	if (m_ConfigurationAccessIndex == index) {
+		m_ConfigurationAccessClaimed = now;
+		return true;
+	}
+	
 	DWORD elapsed = now - m_ConfigurationAccessClaimed;
 
-	if (m_ConfigurationAccessIndex == index 
-		|| m_ConfigurationAccessIndex == MAX_COM_DEVICES_PER_SC_DEVICE
-		|| elapsed > CONFIG_ACCESS_TIMEOUT_MS
-		) {
+	size_t clients = 0;
+
+	for (size_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
+		clients += m_ComDeviceDataPrivate[i].com_device != nullptr;
+	}
+
+	// Don't allow configuration access to some other client in a 
+	// multi-client scenario after the bus was configured and enabled.
+	if (clients > 1 && IsOnBus()) {
+		return false;
+	}
+
+	// Allow configuration access if no client has it (first come, 
+	// first serve) or the previous access is expired.
+	if (m_ConfigurationAccessIndex == MAX_COM_DEVICES_PER_SC_DEVICE
+		|| elapsed > CONFIG_ACCESS_TIMEOUT_MS) {
 		m_ConfigurationAccessIndex = index;
 		m_ConfigurationAccessClaimed = now;
 		return true;
@@ -417,7 +438,9 @@ void ScDev::ReleaseConfigurationAccess(sc_com_dev_index_t index)
 	Guard g(m_Lock);
 
 	if (index == m_ConfigurationAccessIndex) {
-		m_ConfigurationAccessIndex = MAX_COM_DEVICES_PER_SC_DEVICE;
+		// Just reset timeout, keep marker in case we 
+		// want to later on reclaim to go off bus.
+		m_ConfigurationAccessClaimed = 0;
 	}
 }
 
@@ -1079,28 +1102,35 @@ int ScDev::AddComDevice(XSuperCANDevice* device)
 
 	Guard g(m_Lock);
 
-	if (MAX_COM_DEVICES_PER_SC_DEVICE == m_ComDeviceCount) {
+	sc_com_dev_index_t i = 0;
+
+	for (i = 0; i < _countof(m_ComDeviceData); ++i) {
+		if (!m_ComDeviceDataPrivate[i].com_device) {
+			break;
+		}
+	}
+
+	if (i == _countof(m_ComDeviceData)) {
 		return SC_DLL_ERROR_OUT_OF_MEM;
 	}
 
 	device->Init(
 		shared_from_this(), 
-		m_ComDeviceCount, 
-		&m_ComDeviceData[m_ComDeviceCount]);
-	m_ComDeviceDataPrivate[m_ComDeviceCount].com_device = device;
-	++m_ComDeviceDataPrivate[m_ComDeviceCount].com_dev_generation;
+		i, 
+		&m_ComDeviceData[i]);
+
+	m_ComDeviceDataPrivate[i].com_device = device;
+	++m_ComDeviceDataPrivate[i].com_dev_generation;
 	
 
 	// Pulse event so the thread wakes up to ackknowledge
 	// the new generation
-	SetEvent(m_ComDeviceDataPrivate[m_ComDeviceCount].tx.ev);
+	SetEvent(m_ComDeviceDataPrivate[i].tx.ev);
 
-	++m_ComDeviceCount;
-	
 	return SC_DLL_ERROR_NONE;
 }
 
-void ScDev::RemoveComDevice(size_t index)
+void ScDev::RemoveComDevice(sc_com_dev_index_t index)
 {
 	assert(index < _countof(m_ComDeviceData));
 
@@ -1110,7 +1140,6 @@ void ScDev::RemoveComDevice(size_t index)
 		m_ConfigurationAccessIndex = MAX_COM_DEVICES_PER_SC_DEVICE;
 	}
 
-	--m_ComDeviceCount;
 	m_ComDeviceDataPrivate[index].com_device = nullptr;
 	++m_ComDeviceDataPrivate[index].com_dev_generation;
 	// Pulse event so the thread wakes up to ackknowledge
