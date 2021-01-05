@@ -455,6 +455,26 @@ int run(app_ctx* ac)
         }
     }
 
+    if (ac->config) {
+        unsigned long timeout_ms = 0;
+        hr = dev->AcquireConfigurationAccess(&config_access, &timeout_ms);
+        if (FAILED(hr)) {
+            fprintf(stderr, "ERROR: failed acquire config access (hr=%lx)\n", hr);
+            return map_hr_to_error(hr);
+        }
+
+        if (!config_access) {
+            fprintf(stderr, "ERROR: failed to get configuration access\n");
+            return SC_DLL_ERROR_ACCESS_DENIED;
+        }
+
+        hr = dev->SetBus(0);
+        if (FAILED(hr)) {
+            fprintf(stderr, "ERROR: failed to go off bus (hr=%lx)\n", hr);
+            return map_hr_to_error(hr);
+        }
+    }
+
     return error;
 }
 
