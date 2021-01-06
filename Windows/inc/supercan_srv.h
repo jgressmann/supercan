@@ -137,6 +137,7 @@ struct sc_can_mm_header {
     volatile uint32_t put_index;    // not an index, need to be %'d
     volatile int32_t error;         // device error
     volatile uint32_t flags;        // flags
+    volatile uint32_t reserved[10]; // reserved for now
     sc_can_mm_slot_t slots[0];
 };
 
