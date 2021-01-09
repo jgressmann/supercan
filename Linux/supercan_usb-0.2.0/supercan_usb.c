@@ -485,7 +485,7 @@ static int sc_usb_process_can_status(struct sc_usb_priv *usb_priv, struct sc_msg
 
 	if (unlikely(rx_lost)) {
 		if (net_ratelimit())
-			netdev_dbg(netdev, "rx lost %u frames\n", rx_lost);
+			netdev_dbg(netdev, "rx lost %u frames in device\n", rx_lost);
 		net_stats->rx_over_errors += rx_lost;
 		f.can_id |= CAN_ERR_CRTL;
 		f.data[1] |= CAN_ERR_CRTL_RX_OVERFLOW;
@@ -493,7 +493,7 @@ static int sc_usb_process_can_status(struct sc_usb_priv *usb_priv, struct sc_msg
 
 	if (unlikely(tx_dropped)) {
 		if (net_ratelimit())
-			netdev_dbg(netdev, "tx dropped %u frames\n", tx_dropped);
+			netdev_dbg(netdev, "tx dropped %u frames in device\n", tx_dropped);
 		net_stats->tx_dropped += tx_dropped;
 		f.can_id |= CAN_ERR_CRTL;
 		f.data[1] |= CAN_ERR_CRTL_TX_OVERFLOW;
