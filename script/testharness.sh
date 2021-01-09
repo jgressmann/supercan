@@ -109,7 +109,7 @@ pack_results()
 
 	echo
 	echo INFO: creating archive $tar_file
-	tar -C "$tmp_dir" -c . | pixz -9 >"$tmp_dir/$tar_file"
+	tar -C "$tmp_dir" -c . | pixz -0 >"$tmp_dir/$tar_file"
 
 	if [ -n "$SUDO_UID" ]; then
 		chown -R $SUDO_UID:$SUDO_GID $tmp_dir
