@@ -357,6 +357,13 @@ static int sc_usb_netdev_close(struct net_device *netdev)
 
 	usb_priv->tx_urb_available_count = usb_priv->tx_urb_count;
 
+	for (i = 0; i < net_priv->can.echo_skb_max; ++i) {
+		can_free_echo_skb(netdev, i);
+		usb_priv->tx_echo_skb_available_ptr[i] = i;
+	}
+
+	usb_priv->tx_echo_skb_available_count = net_priv->can.echo_skb_max;
+
 	spin_unlock_irqrestore(&usb_priv->tx_lock, flags);
 
 
@@ -376,7 +383,6 @@ static int sc_usb_netdev_close(struct net_device *netdev)
 	netdev_dbg(netdev, "close candev\n");
 	(void)close_candev(netdev);
 
-	usb_priv->tx_echo_skb_available_count = net_priv->can.echo_skb_max;
 	net_priv->can.state = CAN_STATE_STOPPED; // mark as down else last CAN state
 
 	return 0;
