@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: (GPL-2.0 or MIT)
 
 /*
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  */
 
 #pragma GCC diagnostic push
@@ -1774,6 +1774,12 @@ static int sc_usb_probe_dev(struct sc_usb_priv *usb_priv)
 	char serial_str[1 + sizeof(device_info->sn_bytes)*2];
 	char name_str[1 + sizeof(device_info->name_bytes)];
 	unsigned int i = 0;
+	const unsigned int can_fd_msg_transfer_size = round_up(
+		CANFD_MAX_DLEN + max_t(
+			unsigned int,
+			sizeof(struct sc_msg_can_rx),
+			sizeof(struct sc_msg_can_tx)),
+		SC_MIN_SUPPORTED_TRANSFER_SIZE);
 	int rc = 0;
 	int actual_len = 0;
 
@@ -1846,7 +1852,7 @@ static int sc_usb_probe_dev(struct sc_usb_priv *usb_priv)
 	dev_info(
 		&usb_priv->intf->dev,
 		"device proto version %u, %s endian, cmd buffer of %u bytes\n",
-		device_hello->proto_version, device_hello->byte_order == SC_BYTE_ORDER_LE ? "little" : "big",
+		device_hello->proto_version, device_hello->byte_order == SC_BYTE_ORDER_LE ? "little" : "BIG",
 		usb_priv->cmd_buffer_size);
 
 	if (device_hello->byte_order == SC_NATIVE_BYTE_ORDER) {
@@ -1934,13 +1940,20 @@ static int sc_usb_probe_dev(struct sc_usb_priv *usb_priv)
 	usb_priv->static_rx_fifo_size = min_t(u8, can_info->rx_fifo_size, SC_MAX_RX_URBS);
 	usb_priv->msg_buffer_size = usb_priv->host_to_dev16(can_info->msg_buffer_size);
 
-	if (usb_priv->msg_buffer_size < round_up(
-			CAN_MAX_DLEN + max(sizeof(struct sc_msg_can_rx), sizeof(struct sc_msg_can_tx)), SC_MSG_CAN_LEN_MULTIPLE)) {
+
+
+	dev_info(&usb_priv->intf->dev, "device has CAN msg buffer of %u bytes\n", usb_priv->msg_buffer_size);
+
+	if ((usb_priv->feat_perm & SC_FEATURE_FLAG_FDF) &&
+		usb_priv->msg_buffer_size < can_fd_msg_transfer_size) {
+
+		dev_err(
+			&usb_priv->intf->dev,
+			"device has CAN-FD permanently enabled but its message buffer is "
+			"too small for chunked transfer of %u bytes\n", can_fd_msg_transfer_size);
 		rc = -ENODEV;
 		goto cleanup;
 	}
-
-	dev_info(&usb_priv->intf->dev, "device has CAN msg buffer of %u bytes\n", usb_priv->msg_buffer_size);
 
 
 	// nominal bitrate
@@ -1969,8 +1982,15 @@ static int sc_usb_probe_dev(struct sc_usb_priv *usb_priv)
 	usb_priv->ctrlmode_static |= CAN_CTRLMODE_BERR_REPORTING;
 
 	if (usb_priv->feat_conf & SC_FEATURE_FLAG_FDF) {
-		dev_info(&usb_priv->intf->dev, "device supports CAN-FD\n");
-		usb_priv->ctrlmode_supported |= CAN_CTRLMODE_FD;
+		if (usb_priv->msg_buffer_size < can_fd_msg_transfer_size) {
+			dev_warn(
+				&usb_priv->intf->dev,
+				"device supports CAN-FD but its message buffer is too small for chunked "
+				"transfer of %u bytes. CAN-FD will not be available.\n", can_fd_msg_transfer_size);
+		} else {
+			dev_info(&usb_priv->intf->dev, "device supports CAN-FD\n");
+			usb_priv->ctrlmode_supported |= CAN_CTRLMODE_FD;
+		}
 	}
 
 	if (usb_priv->feat_conf & SC_FEATURE_FLAG_MON_MODE) {
