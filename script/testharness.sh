@@ -143,11 +143,11 @@ if [ $init -ne 0 ];then
 fi
 
 
-max_frames=$((seconds*1000))
+max_frames=$((seconds*10000))
 errors=0
 
 #-I 42 -L 8 -D i -g 1 -b -n $max_frames
-single_sender_can_gen_flags="-e -I r -L r -D r -g 1 -b -n $max_frames"
+single_sender_can_gen_flags="-e -I r -L r -D r -g 0 -p 1 -b -n $max_frames"
 
 same_messages()
 {
