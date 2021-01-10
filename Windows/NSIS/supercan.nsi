@@ -15,7 +15,7 @@
 !define INSTALLER_NAME "${SC_NAME}"
 !define INSTALLER_MAJOR 0
 !define INSTALLER_MINOR 2
-!define INSTALLER_PATCH 1
+!define INSTALLER_PATCH 2
 !define APP_INSTALL_PATH "Software\Microsoft\Windows\CurrentVersion\Uninstall\${SC_GUID}"
 
 
@@ -192,12 +192,12 @@ LangString sec_dev_name ${LANG_ENGLISH} "Program Development Support"
 LangString sec_dev_name ${LANG_GERMAN} "Unterstützung für Anwendungsentwicklung"
 
 LangString desc_sec_base ${LANG_ENGLISH} "Installs components for shared access (multiple processes) to SuperCAN devices."
-LangString desc_sec_base ${LANG_GERMAN} "Installiert Komponenten für den Zugriff auf SuperCAN Geräte aus verschiednen Anwendungen heraus."
+LangString desc_sec_base ${LANG_GERMAN} "Installiert Komponenten für den Zugriff auf SuperCAN Geräte aus verschiedenen Anwendungen heraus."
 LangString desc_sec_dev ${LANG_ENGLISH} "Installs header and libraries for application development."
-LangString desc_sec_dev ${LANG_GERMAN} "Installiert Header and Bibiotheken für die Anwendungsentwicklung."
+LangString desc_sec_dev ${LANG_GERMAN} "Installiert Header and Bibliotheken für die Anwendungsentwicklung."
 
 LangString mb_query_continue_installation ${LANG_ENGLISH} "${SC_NAME} still seems to be installed.$\n$\nContinue with installation?"
-LangString mb_query_continue_installation ${LANG_GERMAN} "${SC_NAME} scheint not installiert zu sein.$\n$\nMit dieser Installation fortfahren?"
+LangString mb_query_continue_installation ${LANG_GERMAN} "${SC_NAME} scheint nicht installiert zu sein.$\n$\nMit dieser Installation fortfahren?"
 
 
 
