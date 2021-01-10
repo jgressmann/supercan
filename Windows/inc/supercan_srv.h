@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,10 @@
 
 #define SC_FACILITY 0x0200
 #define SC_HRESULT_FROM_ERROR(x) MAKE_HRESULT(1, SC_FACILITY, (int8_t)x)
+
+#define SC_SRV_VERSION_MAJOR 0
+#define SC_SRV_VERSION_MINOR 3
+#define SC_SRV_VERSION_PATCH 0
 
 #ifdef __cplusplus
 extern "C" {
