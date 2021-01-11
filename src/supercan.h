@@ -107,6 +107,7 @@ extern "C" {
 #define SC_FEATURE_FLAG_FLT             0x0008 ///< Device supports rx message filters
 #define SC_FEATURE_FLAG_TXR             0x0010 ///< Device supports CAN frame transmission receipts.
 #define SC_FEATURE_FLAG_GEN             0x0020 ///< Device supports tx message generators
+#define SC_FEATURE_FLAG_TXP             0x0040 ///< Device supports a transmit pause of 2 bit times prior to next frame transmission
 #define SC_FEATURE_FLAG_MON_MODE        0x0100 ///< Device supports monitoring mode.
 #define SC_FEATURE_FLAG_RES_MODE        0x0200 ///< Device supports restricted mode.
 #define SC_FEATURE_FLAG_EXT_LOOP_MODE   0x0400 ///< Device supports external loopback mode. Transmitted messges are treated as received messages.
