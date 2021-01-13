@@ -13,9 +13,6 @@
 !define SC_GUID "{8688E45F-740D-4B9D-B876-9650E29F2AD7}"
 !define LICENSE_FILE_PATH ..\..\LICENSE
 !define INSTALLER_NAME "${SC_NAME}"
-!define INSTALLER_MAJOR 0
-!define INSTALLER_MINOR 2
-!define INSTALLER_PATCH 2
 !define APP_INSTALL_PATH "Software\Microsoft\Windows\CurrentVersion\Uninstall\${SC_GUID}"
 
 
@@ -30,6 +27,15 @@
 !ifndef SC_VERSION_PATCH
   !define SC_VERSION_PATCH 0
 !endif
+
+!ifndef SC_VERSION_BUILD
+  !define SC_VERSION_BUILD 0
+!endif
+
+!define INSTALLER_MAJOR 1
+!define INSTALLER_MINOR 0
+!define INSTALLER_PATCH 0
+!define INSTALLER_BUILD ${SC_VERSION_BUILD}
 
 
 
@@ -111,9 +117,43 @@ RequestExecutionLevel admin
 InstType "$(it_min)" it_min
 InstType "$(it_max)" it_max
 
+!define VcRuntimeInstall "!insertmacro _VcRuntimeInstall"
+!macro _VcRuntimeInstall arch
+	File "$%VCToolsRedistDir%\vc_redist.${arch}.exe"
+	ExecWait '"$TEMP\vc_redist.${arch}.exe" /quiet' $0
+	Delete "$TEMP\vc_redist.${arch}.exe"	
+	${If} $0 <> 0
+		MessageBox MB_ICONQUESTION|MB_YESNO "$(mb_query_continue_after_vc_redist_failed)" IDYES next_${arch} IDNO exit_abort_${arch}
+	exit_abort_${arch}:
+		Abort
+	next_${arch}:
+		IntOp $0 0 + 0
+	${Else}
+		DetailPrint "$(info_vc_redist_installed) (${arch})"
+	${EndIf}
+!macroend
+
 
 Section "$(sec_base_name)" sec_base
 	SectionInstType ${it_min} ${it_max} RO
+
+	SetOutPath "$TEMP"
+	${VcRuntimeInstall} x86
+	${VcRuntimeInstall} x64
+	; File "$%VCToolsRedistDir%\vc_redist.x86.exe"
+	; ExecWait '"$TEMP\vc_redist.x86.exe" /quiet' $0
+	; Delete "$TEMP\vc_redist.x86.exe"	
+	; ${If} $0 <> 0
+	; 	MessageBox MB_ICONQUESTION|MB_YESNO "$(mb_query_continue_after_vc_redist_failed)" IDYES next IDNO exit_abort
+	; exit_abort:
+	; 	Abort
+	; next:
+	; 	IntOp $0 0 + 0
+	; ${Else}
+	; 	DetailPrint "Microsoft Visual C++ Redistributable (x86) installiert."
+	; ${EndIf}
+
+	;File "$%VCToolsRedistDir%\vc_redist.x64.exe"
 
 	SetOutPath "$INSTDIR"
 	File ${LICENSE_FILE_PATH}
@@ -185,6 +225,10 @@ LangString it_min ${LANG_ENGLISH} "Minimal Install"
 LangString it_min ${LANG_GERMAN} "Minimale Installation"
 LangString it_max ${LANG_ENGLISH} "Full Install"
 LangString it_max ${LANG_GERMAN} "Vollständige Installation"
+LangString vc_redist ${LANG_ENGLISH} "Microsoft Visual C++ Redistributable"
+LangString vc_redist ${LANG_GERMAN} "Microsoft Visual C++ Redistributable"
+
+
 
 LangString sec_base_name ${LANG_ENGLISH} "Drivers"
 LangString sec_base_name ${LANG_GERMAN} "Treiber"
@@ -198,7 +242,11 @@ LangString desc_sec_dev ${LANG_GERMAN} "Installiert Header and Bibliotheken für
 
 LangString mb_query_continue_installation ${LANG_ENGLISH} "${SC_NAME} still seems to be installed.$\n$\nContinue with installation?"
 LangString mb_query_continue_installation ${LANG_GERMAN} "${SC_NAME} scheint nicht installiert zu sein.$\n$\nMit dieser Installation fortfahren?"
+LangString mb_query_continue_after_vc_redist_failed ${LANG_ENGLISH} "$(vc_redist) failed to install.$\n$\nContinue with ${SC_NAME} installation?"
+LangString mb_query_continue_after_vc_redist_failed ${LANG_GERMAN} "Die Installation des $(vc_redist) ist fehlgeschlagen.$\n$\nMit der Installation von ${SC_NAME} fortfahren?"
 
+LangString info_vc_redist_installed ${LANG_ENGLISH} "$(vc_redist) installed successfully."
+LangString info_vc_redist_installed ${LANG_GERMAN} "$(vc_redist) erfolgreich installiert."
 
 
 ;Assign language strings to sections
@@ -233,17 +281,17 @@ Section "Uninstall"
 
 SectionEnd
 
-VIProductVersion ${INSTALLER_MAJOR}.${INSTALLER_MINOR}.${INSTALLER_PATCH}.0
-VIFileVersion ${INSTALLER_MAJOR}.${INSTALLER_MINOR}.${INSTALLER_PATCH}.0
+VIProductVersion ${SC_VERSION_MAJOR}.${SC_VERSION_MINOR}.${SC_VERSION_PATCH}.${SC_VERSION_BUILD}
+VIFileVersion ${INSTALLER_MAJOR}.${INSTALLER_MINOR}.${INSTALLER_PATCH}.${INSTALLER_BUILD}
 
 VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductName" "${INSTALLER_NAME}"
 ;VIAddVersionKey /LANG=${LANG_ENGLISH} "Comments" "A test comment"
 ;VIAddVersionKey /LANG=${LANG_ENGLISH} "CompanyName" "Fake company"
 ;VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalTrademarks" "Test Application is a trademark of Fake company"
-VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "Copyright (C) 2020, Jean Gressmann. All rights reserved."
+VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "Copyright (c) 2020-2021, Jean Gressmann. All rights reserved."
 VIAddVersionKey /LANG=${LANG_ENGLISH} "FileDescription" "${INSTALLER_NAME}"
-VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductVersion" "${INSTALLER_MAJOR}.${INSTALLER_MINOR}.${INSTALLER_PATCH}.0"
-VIAddVersionKey /LANG=${LANG_ENGLISH} "FileVersion" "${INSTALLER_MAJOR}.${INSTALLER_MINOR}.${INSTALLER_PATCH}.0"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductVersion" "${SC_VERSION_MAJOR}.${SC_VERSION_MINOR}.${SC_VERSION_PATCH}.${SC_VERSION_BUILD}"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "FileVersion" "${INSTALLER_MAJOR}.${INSTALLER_MINOR}.${INSTALLER_PATCH}.${INSTALLER_BUILD}"
 
 ;https://nsis.sourceforge.io/Trim_quotes
 Function TrimQuotes
