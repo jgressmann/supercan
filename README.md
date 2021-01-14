@@ -38,7 +38,7 @@ Ensure you have `dfu-util` available on your system. Windows users can [download
 ### Linux
 
 ```
-sudo dfu-util -R -D supercan.dfu
+sudo dfu-util -d 1d50:5035,:5036 -R -D supercan.dfu
 ```
 
 ### Windows

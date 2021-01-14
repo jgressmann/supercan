@@ -23,7 +23,7 @@ Below you'll find the steps that worked for me on my Windows 10 (x64) machine. Y
 
 	Note that I have copied dfu-util and the firmware into `C:\dfu`
 
-	`dfu-util -R -D supercan.dfu`
+	`dfu-util -d 1d50:5035,:5036 -R -D supercan.dfu`
 
 	![dfu-util: flash cmd](doc/cmd-dfu-util-flash.png)
 
