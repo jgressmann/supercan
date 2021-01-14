@@ -321,6 +321,7 @@ int run_single(struct app_ctx* ac)
     fprintf(stdout, "cmd epp %#02x, can epp %#02x\n", dev->cmd_epp, dev->can_epp);
     error = sc_cmd_ctx_init(&cmd_ctx, dev);
     if (error) {
+        fprintf(stderr, "failed to initialize command context: %s (%d)\n", sc_strerror(error), error);
         goto Exit;
     }
 
@@ -333,11 +334,12 @@ int run_single(struct app_ctx* ac)
         uint16_t rep_len;
         error = sc_cmd_ctx_run(&cmd_ctx, req->len, &rep_len, CMD_TIMEOUT_MS);
         if (error) {
+            fprintf(stderr, "failed to get device info: %s (%d)\n", sc_strerror(error), error);
             goto Exit;
         }
 
         if (rep_len < sizeof(dev_info)) {
-            fprintf(stderr, "failed to get device info\n");
+            fprintf(stderr, "failed to get device info (short reponse)\n");
             error = -1;
             goto Exit;
         }
@@ -371,11 +373,12 @@ int run_single(struct app_ctx* ac)
         uint16_t rep_len;
         error = sc_cmd_ctx_run(&cmd_ctx, req->len, &rep_len, CMD_TIMEOUT_MS);
         if (error) {
+            fprintf(stderr, "failed to get CAN info: %s (%d)\n", sc_strerror(error), error);
             goto Exit;
         }
 
         if (rep_len < sizeof(can_info)) {
-            fprintf(stderr, "failed to get can info\n");
+            fprintf(stderr, "failed to get can info (short reponse)\n");
             error = -1;
             goto Exit;
         }
@@ -513,12 +516,13 @@ int run_single(struct app_ctx* ac)
         uint16_t rep_len;
         error = sc_cmd_ctx_run(&cmd_ctx, (uint16_t)(cmd_tx_ptr - cmd_ctx.tx_buffer), &rep_len, CMD_TIMEOUT_MS);
         if (error) {
+            fprintf(stderr, "failed to configure device: %s (%d)\n", sc_strerror(error), error);
             goto Exit;
         }
 
 
         if (rep_len < cmd_count * sizeof(struct sc_msg_error)) {
-            fprintf(stderr, "failed to setup device\n");
+            fprintf(stderr, "failed to setup device  (short reponse)\n");
             error = -1;
             goto Exit;
         }
@@ -536,6 +540,7 @@ int run_single(struct app_ctx* ac)
 
     error = sc_can_stream_init(dev, can_info.msg_buffer_size, ac, process_can, -1, &stream);
     if (error) {
+        fprintf(stderr, "failed to initialize CAN stream: %s (%d)\n", sc_strerror(error), error);
         goto Exit;
     }
 
@@ -548,7 +553,7 @@ int run_single(struct app_ctx* ac)
     while (1) {
         error = sc_can_stream_rx(stream, timeout_ms);
         if (error) {
-            if (SC_DLL_ERROR_USER_HANDLE_SIGNALED) {
+            if (SC_DLL_ERROR_USER_HANDLE_SIGNALED == error) {
                 break;
             }
 

@@ -51,8 +51,8 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,3,6,0
- PRODUCTVERSION 1,3,6,0
+ FILEVERSION 1,3,7,0
+ PRODUCTVERSION 1,3,7,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -67,12 +67,12 @@ BEGIN
     BEGIN
         BLOCK "000004b0"
         BEGIN
-            VALUE "FileVersion", "1.3.6.0"
+            VALUE "FileVersion", "1.3.7.0"
             VALUE "InternalName", "supercan_app.exe"
             VALUE "LegalCopyright", "Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>"
             VALUE "OriginalFilename", "supercan_app.exe"
             VALUE "ProductName", "SuperCAN demo application"
-            VALUE "ProductVersion", "1.3.6.0"
+            VALUE "ProductVersion", "1.3.7.0"
         END
     END
     BLOCK "VarFileInfo"
