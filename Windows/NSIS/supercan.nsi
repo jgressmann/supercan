@@ -57,6 +57,8 @@
 		"${value}"
 !macroend
 
+Var Reboot
+
 SetCompressor /SOLID lzma
 ;[/SOLID] [/FINAL] zlib|bzip2|lzma
 
@@ -120,17 +122,29 @@ InstType "$(it_max)" it_max
 !define VcRuntimeInstall "!insertmacro _VcRuntimeInstall"
 !macro _VcRuntimeInstall arch
 	File "$%VCToolsRedistDir%\vc_redist.${arch}.exe"
-	ExecWait '"$TEMP\vc_redist.${arch}.exe" /quiet' $0
+	
+	StrCpy $1 "$\"$TEMP\vc_redist.${arch}.exe$\" /install /passive /norestart"	
+	IfSilent +1 +2
+		StrCpy $1 "$1 /quiet"
+
+	ExecWait "$1" $0
 	Delete "$TEMP\vc_redist.${arch}.exe"	
 	${If} $0 <> 0
-		MessageBox MB_ICONQUESTION|MB_YESNO "$(mb_query_continue_after_vc_redist_failed)" IDYES next_${arch} IDNO exit_abort_${arch}
-	exit_abort_${arch}:
-		Abort
-	next_${arch}:
-		IntOp $0 0 + 0
-	${Else}
-		DetailPrint "$(info_vc_redist_installed) (${arch})"
+		StrCpy $2 "exit code $0"
+		DetailPrint $2
+		${If} $0 == 3010 ; restart required
+			IntOp $Reboot $Reboot | 1
+		${Else}
+			MessageBox MB_ICONQUESTION|MB_YESNO "$(mb_query_continue_after_vc_redist_failed)" /SD IDNO IDYES next_${arch} ;IDNO exit_abort_${arch}
+;exit_abort_${arch}:
+			;DetailPrint "Abort"
+			Abort
+		${EndIf}
 	${EndIf}
+
+next_${arch}:
+	DetailPrint "$(info_vc_redist_installed) (${arch})"
+	
 !macroend
 
 
@@ -140,20 +154,6 @@ Section "$(sec_base_name)" sec_base
 	SetOutPath "$TEMP"
 	${VcRuntimeInstall} x86
 	${VcRuntimeInstall} x64
-	; File "$%VCToolsRedistDir%\vc_redist.x86.exe"
-	; ExecWait '"$TEMP\vc_redist.x86.exe" /quiet' $0
-	; Delete "$TEMP\vc_redist.x86.exe"	
-	; ${If} $0 <> 0
-	; 	MessageBox MB_ICONQUESTION|MB_YESNO "$(mb_query_continue_after_vc_redist_failed)" IDYES next IDNO exit_abort
-	; exit_abort:
-	; 	Abort
-	; next:
-	; 	IntOp $0 0 + 0
-	; ${Else}
-	; 	DetailPrint "Microsoft Visual C++ Redistributable (x86) installiert."
-	; ${EndIf}
-
-	;File "$%VCToolsRedistDir%\vc_redist.x64.exe"
 
 	SetOutPath "$INSTDIR"
 	File ${LICENSE_FILE_PATH}
@@ -248,6 +248,8 @@ LangString mb_query_continue_after_vc_redist_failed ${LANG_GERMAN} "Die Installa
 LangString info_vc_redist_installed ${LANG_ENGLISH} "$(vc_redist) installed successfully."
 LangString info_vc_redist_installed ${LANG_GERMAN} "$(vc_redist) erfolgreich installiert."
 
+LangString mb_install_requires_reboot ${LANG_ENGLISH} "${SC_NAME} installed successfully.$\nPlease reboot your machine to complete the process."
+LangString mb_install_requires_reboot ${LANG_GERMAN} "${SC_NAME} installiert.$\nBitte starten Sie Ihren Rechner neu um den Prozess abzuschliessen."
 
 ;Assign language strings to sections
 
@@ -317,6 +319,8 @@ FunctionEnd
 !define TrimQuotes `!insertmacro _TrimQuotes`
 
 Function .onInit
+	IntOp $Reboot $Reboot ^ $Reboot
+	
 	ReadRegStr $0 HKLM "${APP_INSTALL_PATH}" "UninstallString"
 	ReadRegStr $1 HKLM "${APP_INSTALL_PATH}" "InstallLocation"
 	${TrimQuotes} $0 $0
@@ -327,7 +331,7 @@ Function .onInit
 		;MessageBox MB_OK "runinng uninstall $0"
     	ExecWait '"$0" /S' $2
 		${If} $2 <> 0
-			MessageBox MB_ICONQUESTION|MB_YESNO "$(mb_query_continue_installation)" IDYES next IDNO exit_abort
+			MessageBox MB_ICONQUESTION|MB_YESNO "$(mb_query_continue_installation)" /SD IDYES IDYES next IDNO exit_abort
 		${EndIf}
 next:	
 		; the installer can't delete itself when invoked like this
@@ -360,4 +364,13 @@ next:
 	Return
 exit_abort:
 	Abort	
+FunctionEnd
+
+Function .onInstSuccess
+	IfSilent out
+	${If} $Reboot & 1
+		MessageBox MB_OK "$(mb_install_requires_reboot)"
+	${EndIf}
+out:
+	Return	
 FunctionEnd
