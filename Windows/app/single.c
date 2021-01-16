@@ -442,11 +442,6 @@ int run_single(struct app_ctx* ac)
         }
     }
 
-    msg_tx_buffer = malloc(256); // TX BUFFER WARNING
-    if (!msg_tx_buffer) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Exit;
-    }
 
     // setup device
     {
@@ -542,6 +537,12 @@ int run_single(struct app_ctx* ac)
 
     stream->user_handle = ac->shutdown_event;
 
+    msg_tx_buffer = malloc(can_info.msg_buffer_size);
+    if (!msg_tx_buffer) {
+        error = SC_DLL_ERROR_OUT_OF_MEM;
+        goto Exit;
+    }
+
     DWORD timeout_ms = 0;
 
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
@@ -562,6 +563,12 @@ int run_single(struct app_ctx* ac)
         if (ac->tx_job_count) {
             timeout_ms = 0xffffffff;
             ULONGLONG now = GetTickCount64();
+            
+            error = sc_can_stream_tx_batch_begin(stream);
+            if (error) {
+                fprintf(stderr, "sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
+                goto Exit;
+            }
 
             for (size_t i = 0; i < ac->tx_job_count; ++i) {
                 struct tx_job* job = &ac->tx_jobs[i];
@@ -570,7 +577,7 @@ int run_single(struct app_ctx* ac)
                     job->last_tx_ts_ms = now;
 
                     struct sc_msg_can_tx* tx = (struct sc_msg_can_tx*)msg_tx_buffer;
-                    uint8_t bytes = sizeof(*tx);
+                    uint16_t bytes = sizeof(*tx);
                     if (job->flags & SC_CAN_FRAME_FLAG_RTR) {
 
                     }
@@ -584,17 +591,40 @@ int run_single(struct app_ctx* ac)
                     }
 
                     tx->id = SC_MSG_CAN_TX;
-                    tx->len = bytes;
+                    tx->len = (uint8_t)bytes;
                     tx->can_id = dev->dev_to_host32(job->can_id);
                     tx->dlc = job->dlc;
                     tx->flags = job->flags;
                     tx->track_id = track_id++;
 
+                    while (1) {
+                        size_t added = 0;
+                        error = sc_can_stream_tx_batch_add(
+                            stream,
+                            &msg_tx_buffer,
+                            &bytes,
+                            1,
+                            &added);
 
-                    error = sc_can_stream_tx(stream, msg_tx_buffer, bytes);
-                    if (error) {
-                        if (SC_DLL_ERROR_AGAIN != error) {
+                        if (error) {
                             fprintf(stderr, "sc_can_stream_tx failed: %s (%d)\n", sc_strerror(error), error);
+                            goto Exit;
+                        }
+
+                        if (added) {
+                            break;
+                        }
+
+                        // full
+                        error = sc_can_stream_tx_batch_end(stream);
+                        if (error) {
+                            fprintf(stderr, "sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
+                            goto Exit;
+                        }
+
+                        error = sc_can_stream_tx_batch_begin(stream);
+                        if (error) {
+                            fprintf(stderr, "sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
                             goto Exit;
                         }
                     }
@@ -603,6 +633,12 @@ int run_single(struct app_ctx* ac)
                         timeout_ms = job->interval_ms;
                     }
                 }
+            }
+
+            error = sc_can_stream_tx_batch_end(stream);
+            if (error) {
+                fprintf(stderr, "sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
+                goto Exit;
             }
         }
         else {

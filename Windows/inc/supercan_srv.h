@@ -34,7 +34,7 @@
 #define SC_HRESULT_FROM_ERROR(x) MAKE_HRESULT(1, SC_FACILITY, (int8_t)x)
 
 #define SC_SRV_VERSION_MAJOR 0
-#define SC_SRV_VERSION_MINOR 3
+#define SC_SRV_VERSION_MINOR 4
 #define SC_SRV_VERSION_PATCH 0
 
 #ifdef __cplusplus

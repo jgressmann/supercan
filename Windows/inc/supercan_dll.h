@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,8 +49,8 @@ extern "C" {
 #endif
 
 #define SC_DLL_VERSION_MAJOR 0
-#define SC_DLL_VERSION_MINOR 3
-#define SC_DLL_VERSION_PATCH 1
+#define SC_DLL_VERSION_MINOR 4
+#define SC_DLL_VERSION_PATCH 0
 
 
 
@@ -74,6 +74,7 @@ extern "C" {
 #define SC_DLL_ERROR_BUFFER_TOO_SMALL       17  ///< buffer too small
 #define SC_DLL_ERROR_USER_HANDLE_SIGNALED   18  ///< user provided handle was signaled
 #define SC_DLL_ERROR_ACCESS_DENIED          19  ///< access denied
+#define SC_DLL_ERROR_INVALID_OPERATION      20  ///< operation not possible in current state
 
 
 typedef uint16_t(*sc_dev_to_host16)(uint16_t value);
@@ -201,7 +202,9 @@ SC_DLL_API int sc_cmd_ctx_run(
 
 
 typedef struct sc_can_stream {
-    HANDLE user_handle;    ///< optional user handle to wait on in sc_can_stream_rx
+    HANDLE user_handle;     ///< optional user handle to wait on in sc_can_stream_rx
+    uint16_t tx_capacity;   ///< capacity of transmit buffer
+    uint16_t reserved;
 } sc_can_stream_t;
 
 typedef int (*sc_can_stream_rx_callback)(void* ctx, void const* ptr, uint16_t bytes);
@@ -235,6 +238,42 @@ SC_DLL_API int sc_can_stream_init(
     sc_can_stream_t** stream);
 
 
+/** Starts a new batched transmit
+ *
+ * \param stream    CAN stream
+ *
+ * \returns error code
+ */
+SC_DLL_API int sc_can_stream_tx_batch_begin(sc_can_stream_t* stream);
+
+/** Adds buffers to the current transmit batch
+ *
+ * \param stream    CAN stream
+ * \param buffers   Array of buffers
+ * \param sizes     Array of sizes (one for each buffer)
+ * \param count     Number of buffers/sizes in the array
+ * \param added     Output number of buffers added
+ *
+ * \returns error code 
+ */
+SC_DLL_API int sc_can_stream_tx_batch_add(
+    sc_can_stream_t* stream,
+    uint8_t const** buffers,
+    uint16_t const* sizes,
+    size_t count,
+    size_t* added);
+
+/** Finishes the current batch
+ *
+ * Is is legal to end an empty batch in which case
+ * no transmit will be started.
+ * 
+ * \param stream    CAN stream
+ *
+ * \returns error code
+ */
+SC_DLL_API int sc_can_stream_tx_batch_end(sc_can_stream_t* stream);
+
 /** Transmit a frame
  *
  * \param stream    CAN stream
@@ -245,8 +284,8 @@ SC_DLL_API int sc_can_stream_init(
  */
 SC_DLL_API int sc_can_stream_tx(
     sc_can_stream_t* stream,
-    void const* ptr,
-    size_t bytes);
+    uint8_t const* ptr,
+    uint16_t bytes);
 
 /** Receives messages
  *

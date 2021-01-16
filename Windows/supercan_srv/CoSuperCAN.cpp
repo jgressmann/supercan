@@ -1231,11 +1231,11 @@ void ScDev::TxMain()
 
 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
-	DWORD wait_timeout_ms = INFINITE;
 	sc_com_dev_index_t start_index = 0;
+	auto batch_started = false;
 
-	for (bool done = false; !done; ) {
-		auto r = WaitForMultipleObjects(static_cast<DWORD>(_countof(handles)), handles, FALSE, wait_timeout_ms);
+	for (;;) {
+		auto r = WaitForMultipleObjects(static_cast<DWORD>(_countof(handles)), handles, FALSE, INFINITE);
 		if (r >= WAIT_OBJECT_0 && r < WAIT_OBJECT_0 + _countof(handles)) {
 			auto index = r - WAIT_OBJECT_0;
 			auto handle = handles[index];
@@ -1253,7 +1253,17 @@ void ScDev::TxMain()
 			break;
 		}
 
-		wait_timeout_ms = INFINITE;
+		if (!batch_started) {
+			auto error = sc_can_stream_tx_batch_begin(m_Stream);
+			if (error) {
+				SetDeviceError(error);
+				return;
+			}
+
+			batch_started = true;
+		}
+
+		auto finish_batch = true;
 
 		for (size_t xi = 0; xi < _countof(m_ComDeviceData); ++xi, ++start_index) {
 			auto const index = start_index % MAX_COM_DEVICES_PER_SC_DEVICE;
@@ -1285,7 +1295,7 @@ void ScDev::TxMain()
 						// wait with a timeout to prevent spinning
 						r = WaitForSingleObject(m_TxFifoAvailable, 1);
 						if (WAIT_OBJECT_0 == r) {
-							uint8_t len = sizeof(*tx);
+							uint16_t len = sizeof(*tx);
 							uint8_t dlc = slot->tx.dlc & 0xf;
 							if (!(slot->tx.flags & SC_CAN_FRAME_FLAG_RTR)) {
 								len += dlc_to_len(dlc);
@@ -1298,7 +1308,7 @@ void ScDev::TxMain()
 
 							tx->can_id = m_Device->dev_to_host32(slot->tx.can_id);
 							tx->dlc = dlc;
-							tx->len = len;
+							tx->len = static_cast<uint8_t>(len);
 							tx->flags = slot->tx.flags;
 
 							size_t txr_slot = _countof(m_TxrMap);
@@ -1319,13 +1329,38 @@ void ScDev::TxMain()
 
 							tx->track_id = static_cast<uint8_t>(txr_slot);
 
-							auto error = sc_can_stream_tx(m_Stream, tx, tx->len);
-							if (error) {
-								done = true;
-								m_TxrMap[txr_slot].index.store(MAX_COM_DEVICES_PER_SC_DEVICE, std::memory_order_release);
-								ReleaseSemaphore(m_TxFifoAvailable, 1, nullptr);
-								SetDeviceError(error);
-								break;
+							for (;;) {
+								uint8_t const* buffer = reinterpret_cast<uint8_t*>(tx);
+								size_t added = 0;
+								auto error = sc_can_stream_tx_batch_add(
+									m_Stream,
+									&buffer,
+									&len,
+									1,
+									&added);
+
+								if (error) {
+									LOG_ERROR("sc_can_stream_tx_batch_add failed: %s (%d)\n", sc_strerror(error), error);
+									SetDeviceError(error);
+									return;
+								}
+
+								if (added) {
+									break;
+								}
+
+								error = sc_can_stream_tx_batch_end(m_Stream);
+								if (error) {
+									LOG_ERROR("sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
+									SetDeviceError(error);
+									return;
+								}
+
+								error = sc_can_stream_tx_batch_begin(m_Stream);
+								if (error) {
+									LOG_ERROR("sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
+									return;
+								}
 							}
 
 							++priv->tx.index;
@@ -1334,6 +1369,7 @@ void ScDev::TxMain()
 
 							if (used > 1) {
 								SetEvent(priv->tx.ev);
+								finish_batch = false;
 							}
 						}
 						else if (WAIT_TIMEOUT == r) {
@@ -1341,8 +1377,7 @@ void ScDev::TxMain()
 						}
 						else {
 							SetDeviceError(map_win_error(GetLastError()));
-							done = true;
-							break;
+							return;
 						}
 					}
 					else {
@@ -1356,6 +1391,7 @@ void ScDev::TxMain()
 
 						if (used > 1) {
 							SetEvent(priv->tx.ev);
+							finish_batch = false;
 						}
 					}
 				}
@@ -1363,6 +1399,17 @@ void ScDev::TxMain()
 			else {
 				ResetComDeviceStateTx(index, com_dev_gen);
 			}
+		}
+
+		if (finish_batch) {
+			auto error = sc_can_stream_tx_batch_end(m_Stream);
+			if (error) {
+				LOG_ERROR("sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
+				SetDeviceError(error);
+				return;
+			}
+
+			batch_started = false;
 		}
 	}
 }

@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -127,6 +127,7 @@ struct sc_stream {
     size_t buffer_size;
     uint16_t rx_reassembly_count;
     uint16_t rx_reassembly_capacity;
+    uint16_t tx_size;
     uint8_t rx_count;
     uint8_t rx_submit_count;
     uint8_t rx_park_count;
@@ -857,6 +858,10 @@ SC_DLL_API char const* sc_strerror(int error)
         return "buffer too small";
     case SC_DLL_ERROR_USER_HANDLE_SIGNALED:
         return "user provided handle was signaled";
+    case SC_DLL_ERROR_ACCESS_DENIED:
+        return "access denied";
+    case SC_DLL_ERROR_INVALID_OPERATION:
+        return "invalid operation";
     default:
         return "sc_strerror not implemented";
     }
@@ -1065,6 +1070,7 @@ SC_DLL_API int sc_can_stream_init(
 
     stream->rx_submit_count = stream->rx_count;
     chunky_writer_set(&stream->w, &stream->tx_buffers[stream->tx_index * stream->buffer_size], (uint16_t)stream->buffer_size);
+    stream->exposed.tx_capacity = chunky_writer_available(&stream->w);
 
     *_stream = (sc_can_stream_t*)stream;
 Exit:
@@ -1405,59 +1411,101 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
     return error;
 }
 
-SC_DLL_API int sc_can_stream_tx(
-    sc_can_stream_t* _stream,
-    void const* _ptr,
-    size_t bytes)
+
+SC_DLL_API int sc_can_stream_tx_batch_begin(sc_can_stream_t* _stream)
 {
     struct sc_stream* stream = (struct sc_stream*)_stream;
-    uint8_t const* ptr = _ptr;
-    uint8_t const* end = ptr + bytes;
-    int error = SC_DLL_ERROR_NONE;
-    DWORD result = 0;
-
-    if (!stream || !ptr || !bytes) {
+    
+    if (!stream) {
         return SC_DLL_ERROR_INVALID_PARAM;
     }
 
-    while (ptr + SC_MSG_HEADER_LEN <= end) {
-        struct sc_msg_header const* msg = (struct sc_msg_header const*)ptr;
+    if (stream->tx_size) {
+        return SC_DLL_ERROR_INVALID_OPERATION;
+    }
 
-        if (!msg->id || !msg->len) {
+    return SC_DLL_ERROR_NONE;
+}
+
+SC_DLL_API int sc_can_stream_tx_batch_add(
+    sc_can_stream_t* _stream,
+    uint8_t const** buffers,
+    uint16_t const* sizes,
+    size_t count,
+    size_t* added)
+{
+    struct sc_stream* stream = (struct sc_stream*)_stream;
+    size_t buffers_to_add = 0;
+    uint16_t bytes = 0;
+
+    if (!stream || !buffers || !added) {
+        return SC_DLL_ERROR_INVALID_PARAM;
+    }
+
+    bytes = stream->tx_size;    
+
+    for (; buffers_to_add < count; ++buffers_to_add) {
+        uint16_t new_bytes = bytes + sizes[buffers_to_add];
+        if (new_bytes > stream->exposed.tx_capacity) {
             break;
         }
 
-        if (msg->len < SC_MSG_HEADER_LEN) {
-            return SC_DLL_ERROR_PROTO_VIOLATION;
-        }
-
-        if (ptr + msg->len > end) {
-            return SC_DLL_ERROR_INVALID_PARAM;
-        }
-
-        unsigned message_bytes = msg->len;
-
-        for (;;) {
-            unsigned w = chunky_writer_write(&stream->w, ptr, message_bytes);
-
-            ptr += w;
-            message_bytes -= w;
-
-            if (message_bytes) { // chunk full
-                error = sc_can_stream_tx_send_buffer(stream);
-                if (error) {
-                    return error;
-                }
-            }
-            else {
-                break;
-            }
-        }
+        bytes = new_bytes;
     }
+
+    for (size_t i = 0; i < buffers_to_add; ++i) {
+        size_t w = chunky_writer_write(&stream->w, buffers[i], sizes[i]);
+        assert(w == sizes[i]);
+        stream->tx_size += sizes[i];
+    }
+
+    *added = buffers_to_add;
+
+    return SC_DLL_ERROR_NONE;
+}
+
+SC_DLL_API int sc_can_stream_tx_batch_end(sc_can_stream_t* _stream)
+{
+    struct sc_stream* stream = (struct sc_stream*)_stream;
+
+    if (!stream) {
+        return SC_DLL_ERROR_INVALID_PARAM;
+    }
+
+    stream->tx_size = 0;
 
     if (chunky_writer_any(&stream->w)) {
-        error = sc_can_stream_tx_send_buffer(stream);
+        return sc_can_stream_tx_send_buffer(stream);
     }
+
+    return SC_DLL_ERROR_NONE;
+}
+
+SC_DLL_API int sc_can_stream_tx(
+    sc_can_stream_t* stream,
+    uint8_t const* ptr,
+    uint16_t bytes)
+{
+    size_t added = 0;
+    int error = 0;
+
+
+    error = sc_can_stream_tx_batch_begin(stream);
+
+    if (error) {
+        return error;
+    }
+
+    error = sc_can_stream_tx_batch_add(stream, &ptr, &bytes, 1, &added);
+    if (error) {
+        return error;
+    }
+
+    if (!added) {
+        return SC_DLL_ERROR_UNKNOWN;
+    }
+
+    error = sc_can_stream_tx_batch_end(stream);
 
     return error;
 }
