@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -588,8 +588,13 @@ extern "C" int run_shared(struct app_ctx* ac)
 
         fprintf(stdout, "%u " SC_NAME " devices found\n", (unsigned)dev_count);
 
+        if (ac->device_index >= dev_count) {
+            fprintf(stdout, "Requested device index %u out of range\n", ac->device_index);
+            return SC_DLL_ERROR_INVALID_PARAM;
+        }
+
         ISuperCANDevicePtr device_ptr;
-        hr = sc->DeviceOpen(0, (ISuperCANDevice**)&device_ptr);
+        hr = sc->DeviceOpen(ac->device_index, (ISuperCANDevice**)&device_ptr);
         if (FAILED(hr)) {
             fprintf(stderr, "ERROR: failed to open device index=0 (hr=%lx)\n", hr);
             return map_hr_to_error(hr);

@@ -46,6 +46,7 @@ static void usage(FILE* stream)
     fprintf(stream, "supercan_app [options]\n");
     fprintf(stream, "\n");
     fprintf(stream, "-h, --help, /?     print this help\n");
+    fprintf(stream, "-i, --index        device index, defaults to first device (index=0)\n");
     fprintf(stream, "--nbitrate INT     nominal bitrate\n");
     fprintf(stream, "--dbitrate INT     data bitrate (CAN-FD)\n");
     fprintf(stream, "--nswj INT         nominal SJW (defaults to 1)\n");
@@ -274,6 +275,24 @@ int main(int argc, char** argv)
             }
             else {
                 fprintf(stderr, "ERROR %s expects a boolean argument\n", argv[i]);
+                error = SC_DLL_ERROR_INVALID_PARAM;
+                goto Exit;
+            }
+        }
+        else if (0 == strcmp("-i", argv[i]) || 0 == strcmp("--index", argv[i])) {
+            if (i + 1 < argc) {
+                char* end = NULL;
+                ac.device_index = (uint32_t)strtoul(argv[i + 1], &end, 10);
+                if (!end || end == argv[i + 1]) {
+                    fprintf(stderr, "ERROR failed to convert '%s' to integer\n", argv[i + 1]);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                i += 2;
+            }
+            else {
+                fprintf(stderr, "ERROR %s expects a positive integer argument\n", argv[i]);
                 error = SC_DLL_ERROR_INVALID_PARAM;
                 goto Exit;
             }

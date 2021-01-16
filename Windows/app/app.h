@@ -68,6 +68,7 @@ struct app_ctx {
     struct tx_job tx_jobs[8];
     unsigned log_flags;
     unsigned tx_job_count;
+    unsigned device_index;
     bool fdf;
     bool config;
     HANDLE shutdown_event;
