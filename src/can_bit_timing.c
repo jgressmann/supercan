@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -147,7 +147,7 @@ cbt_run(
 	assert(hw->brp_min >= 1);
 	assert(user->sjw == CAN_SJW_TSEG2 || (user->sjw >= 1 && (uint32_t)user->sjw < hw->sjw_max));
 
-	for (brp = hw->brp_min; brp < hw->brp_max; brp += hw->brp_step) {
+	for (brp = hw->brp_min; brp <= hw->brp_max; brp += hw->brp_step) {
 		const uint32_t can_hz = hw->clock_hz / brp;
 		const uint32_t tqs = can_hz / user->bitrate;
 		uint32_t tseg2 = 0;
@@ -221,9 +221,9 @@ cbt_run(
 
 int
 cbt_fixed(
-		struct can_bit_timing_hw_contraints const *hw,
-		struct can_bit_timing_constraints_fixed const *user,
-		struct can_bit_timing_settings *settings)
+	struct can_bit_timing_hw_contraints const *hw,
+	struct can_bit_timing_constraints_fixed const *user,
+	struct can_bit_timing_settings *settings)
 {
 	int error = CAN_BTRE_NONE;
 
@@ -246,9 +246,9 @@ cbt_fixed(
 
 int
 cbt_real(
-		struct can_bit_timing_hw_contraints const *hw,
-		struct can_bit_timing_constraints_real const *user,
-		struct can_bit_timing_settings *settings)
+	struct can_bit_timing_hw_contraints const *hw,
+	struct can_bit_timing_constraints_real const *user,
+	struct can_bit_timing_settings *settings)
 {
 	struct can_bit_timing_constraints_fixed f;
 
@@ -264,6 +264,279 @@ cbt_real(
 	f.bitrate = user->bitrate;
 	f.min_tqs = user->min_tqs;
 	f.sample_point = (uint16_t)(user->sample_point * CAN_SAMPLE_POINT_SCALE);
+
 	return cbt_fixed(hw, &f, settings);
 }
 
+static inline void cbt_init_default_fixed(
+	struct can_bit_timing_constraints_fixed *user,
+	uint32_t threshold_low,
+	uint32_t threshold_high,
+	uint32_t low,
+	uint32_t high)
+{
+	// https://www.can-cia.org/fileadmin/resources/documents/proceedings/2003_koppe.pdf
+	user->min_tqs = 0;
+	user->sjw = CAN_SJW_TSEG2;
+
+	if (user->bitrate <= threshold_low) {
+		user->sample_point = low;
+	} else if (user->bitrate >= threshold_high) {
+		user->sample_point = high;
+	} else {
+		user->sample_point = (int32_t)low + (((int32_t)(user->bitrate - threshold_low) * (int32_t)(high-low)) / (int32_t)(threshold_high - threshold_low));
+	}
+}
+
+static inline void cbt_init_default_real(
+	struct can_bit_timing_constraints_real *user,
+	uint32_t threshold_low,
+	uint32_t threshold_high,
+	float low,
+	float high)
+{
+	// https://www.can-cia.org/fileadmin/resources/documents/proceedings/2003_koppe.pdf
+	user->min_tqs = 0;
+	user->sjw = CAN_SJW_TSEG2;
+
+	if (user->bitrate <= threshold_low) {
+		user->sample_point = low;
+	} else if (user->bitrate >= threshold_high) {
+		user->sample_point = high;
+	} else {
+		user->sample_point = low + (((user->bitrate - threshold_low) * (high-low)) / (threshold_high - threshold_low));
+	}
+}
+
+
+void cia_classic_cbt_init_default_fixed(
+	struct can_bit_timing_constraints_fixed *user)
+{
+	cbt_init_default_fixed(user, 500000, 1000000, 896, 768);
+}
+
+void cia_classic_cbt_init_default_real(
+	struct can_bit_timing_constraints_real *user)
+{
+	cbt_init_default_real(user, 500000, 1000000, .875f, .75f);
+}
+
+void cia_fd_cbt_init_default_fixed(
+	struct can_bit_timing_constraints_fixed *user_nominal,
+	struct can_bit_timing_constraints_fixed *user_data)
+{
+	cbt_init_default_fixed(user_nominal, 500000, 1000000, 896, 768);
+	cbt_init_default_fixed(user_data, 5000000, 5000000, 768, 717);
+}
+
+void cia_fd_cbt_init_default_real(
+	struct can_bit_timing_constraints_real *user_nominal,
+	struct can_bit_timing_constraints_real *user_data)
+{
+	cbt_init_default_real(user_nominal, 500000, 1000000, .875f, .75f);
+	cbt_init_default_real(user_data, 5000000, 5000000, .75f, .7f);
+}
+
+int
+cia_classic_cbt_fixed(
+	struct can_bit_timing_hw_contraints const *hw,
+	struct can_bit_timing_constraints_fixed const *user,
+	struct can_bit_timing_settings *settings)
+{
+	struct can_bit_timing_hw_contraints hw2;
+	struct can_bit_timing_constraints_fixed user2;
+	int error = CAN_BTRE_NONE;
+	uint32_t brp = 0;
+
+	error = cbt_validate_hw_constraints(hw);
+	if (error) {
+		return error;
+	}
+
+	error = cbt_validate_user_constraints(hw, user);
+	if (error) {
+		return error;
+	}
+
+	if (!settings) {
+		return CAN_BTRE_PARAM;
+	}
+
+	hw2 = *hw;
+	user2 = *user;
+	user2.sjw = CAN_SJW_TSEG2; // R5: SJW as large as possible
+
+	// R3
+	for (brp = hw->brp_min; brp <= hw->brp_max; brp += hw->brp_step) {
+		hw2.brp_min = brp;
+		hw2.brp_max = brp;
+
+		error = cbt_run(&hw2, &user2, settings);
+		switch (error) {
+		case CAN_BTRE_NONE:
+			break;
+		case CAN_BTRE_NO_SOLUTION:
+			continue;
+		default:
+			return error;
+		}
+	}
+
+	return CAN_BTRE_NO_SOLUTION;
+}
+
+int
+cia_classic_cbt_real(
+	struct can_bit_timing_hw_contraints const *hw,
+	struct can_bit_timing_constraints_real const *user,
+	struct can_bit_timing_settings *settings)
+{
+	struct can_bit_timing_constraints_fixed f;
+
+	if (!user) {
+		return CAN_BTRE_PARAM;
+	}
+
+	if (user->sample_point < 0 || user->sample_point > 1) {
+		return CAN_BTRE_RANGE;
+	}
+
+	f.sjw = CAN_SJW_TSEG2;
+	f.bitrate = user->bitrate;
+	f.min_tqs = user->min_tqs;
+	f.sample_point = (uint16_t)(user->sample_point * CAN_SAMPLE_POINT_SCALE);
+	return cbt_fixed(hw, &f, settings);
+}
+
+int
+cia_fd_cbt_fixed(
+	struct can_bit_timing_hw_contraints const *hw_nominal,
+	struct can_bit_timing_hw_contraints const *hw_data,
+	struct can_bit_timing_constraints_fixed const *user_nominal,
+	struct can_bit_timing_constraints_fixed const *user_data,
+	struct can_bit_timing_settings *settings_nominal,
+	struct can_bit_timing_settings *settings_data)
+{
+	struct can_bit_timing_hw_contraints hw_n, hw_d;
+	struct can_bit_timing_constraints_fixed user_n, user_d;
+	int error = CAN_BTRE_NONE;
+	int error_n = CAN_BTRE_NONE;
+	int error_d = CAN_BTRE_NONE;
+	uint32_t brp_n = 0;
+
+	error = cbt_validate_hw_constraints(hw_nominal);
+	if (error) {
+		return error;
+	}
+
+	error = cbt_validate_user_constraints(hw_nominal, user_nominal);
+	if (error) {
+		return error;
+	}
+
+	if (!settings_nominal) {
+		return CAN_BTRE_PARAM;
+	}
+
+	error = cbt_validate_hw_constraints(hw_data);
+	if (error) {
+		return error;
+	}
+
+	error = cbt_validate_user_constraints(hw_data, user_data);
+	if (error) {
+		return error;
+	}
+
+	if (!settings_data) {
+		return CAN_BTRE_PARAM;
+	}
+
+	hw_n = *hw_nominal;
+	user_n = *user_nominal;
+	user_n.sjw = CAN_SJW_TSEG2; // R5: SJW as large as possible
+
+	hw_d = *hw_data;
+	user_d = *user_data;
+	user_d.sjw = CAN_SJW_TSEG2; // R5: SJW as large as possible
+
+	// R3
+	for (brp_n = hw_nominal->brp_min; brp_n <= hw_nominal->brp_max; brp_n += hw_nominal->brp_step) {
+		hw_n.brp_min = brp_n;
+		hw_n.brp_max = brp_n;
+
+		error_n = cbt_run(&hw_n, &user_n, settings_nominal);
+		switch (error_n) {
+		case CAN_BTRE_NONE:
+			break;
+		case CAN_BTRE_NO_SOLUTION:
+			continue;
+		default:
+			return error_n;
+		}
+
+		// R1
+		if (brp_n >= hw_data->brp_min && brp_n <= hw_data->brp_max) {
+			hw_d.brp_min = brp_n;
+			hw_d.brp_max = brp_n;
+
+			error_d = cbt_run(&hw_d, &user_d, settings_data);
+			switch (error_d) {
+			case CAN_BTRE_NONE:
+				return CAN_BTRE_NONE;
+			case CAN_BTRE_NO_SOLUTION:
+				continue;
+			default:
+				return error_d;
+			}
+		}
+	}
+
+	return CAN_BTRE_NO_SOLUTION;
+}
+
+int
+cia_fd_cbt_real(
+	struct can_bit_timing_hw_contraints const *hw_nominal,
+	struct can_bit_timing_hw_contraints const *hw_data,
+	struct can_bit_timing_constraints_real const *user_nominal,
+	struct can_bit_timing_constraints_real const *user_data,
+	struct can_bit_timing_settings *settings_nominal,
+	struct can_bit_timing_settings *settings_data)
+{
+	struct can_bit_timing_constraints_fixed fn, fd;
+
+	if (!user_nominal) {
+		return CAN_BTRE_PARAM;
+	}
+
+	if (user_nominal->sample_point < 0 || user_nominal->sample_point > 1) {
+		return CAN_BTRE_RANGE;
+	}
+
+	if (!user_data) {
+		return CAN_BTRE_PARAM;
+	}
+
+	if (user_data->sample_point < 0 || user_data->sample_point > 1) {
+		return CAN_BTRE_RANGE;
+	}
+
+	fn.sjw = user_nominal->sjw;
+	fn.bitrate = user_nominal->bitrate;
+	fn.min_tqs = user_nominal->min_tqs;
+	fn.sample_point = (uint16_t)(user_nominal->sample_point * CAN_SAMPLE_POINT_SCALE);
+
+	fd.sjw = user_data->sjw;
+	fd.bitrate = user_data->bitrate;
+	fd.min_tqs = user_data->min_tqs;
+	fd.sample_point = (uint16_t)(user_data->sample_point * CAN_SAMPLE_POINT_SCALE);
+
+	return cia_fd_cbt_fixed(
+		hw_nominal,
+		hw_data,
+		&fn,
+		&fd,
+		settings_nominal,
+		settings_data);
+}
