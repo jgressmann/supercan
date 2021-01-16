@@ -421,10 +421,16 @@ int run_single(struct app_ctx* ac)
         data_hw_constraints.tseg2_min = can_info.dtbt_tseg2_min;
         data_hw_constraints.tseg2_max = can_info.dtbt_tseg2_max;
 
-        error = cbt_real(&nominal_hw_constraints, &ac->nominal_user_constraints, &nominal_settings);
+        error = cia_fd_cbt_real(
+            &nominal_hw_constraints, 
+            &data_hw_constraints,
+            &ac->nominal_user_constraints, 
+            &ac->data_user_constraints,
+            &nominal_settings,
+            &data_settings);
         switch (error) {
         case CAN_BTRE_NO_SOLUTION:
-            fprintf(stderr, "The chosen nominal bitrate/sjw cannot be configured on the device.\n");
+            fprintf(stderr, "The chosen nominal/data bitrate/sjw cannot be configured on the device.\n");
             error = -1;
             goto Exit;
         case CAN_BTRE_NONE:
@@ -433,22 +439,6 @@ int run_single(struct app_ctx* ac)
             fprintf(stderr, "Ooops.\n");
             error = -1;
             goto Exit;
-        }
-
-        if (ac->fdf) {
-            error = cbt_real(&data_hw_constraints, &ac->data_user_constraints, &data_settings);
-            switch (error) {
-            case CAN_BTRE_NO_SOLUTION:
-                fprintf(stderr, "The chosen data bitrate/sjw cannot be configured on the device.\n");
-                error = -1;
-                goto Exit;
-            case CAN_BTRE_NONE:
-                break;
-            default:
-                fprintf(stderr, "Ooops.\n");
-                error = -1;
-                goto Exit;
-            }
         }
     }
 

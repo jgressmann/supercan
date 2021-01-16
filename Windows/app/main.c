@@ -218,11 +218,11 @@ int main(int argc, char** argv)
 
     ac.nominal_user_constraints.bitrate = 500000;
     ac.nominal_user_constraints.min_tqs = 0;
-    ac.nominal_user_constraints.sample_point = 0.75f;
+    ac.nominal_user_constraints.sample_point = 0.875f;
     ac.nominal_user_constraints.sjw = 1;
     ac.data_user_constraints.bitrate = 500000;
     ac.data_user_constraints.min_tqs = 0;
-    ac.data_user_constraints.sample_point = 0.75f;
+    ac.data_user_constraints.sample_point = 0.875f;
     ac.data_user_constraints.sjw = 1;
     ac.config = true;
 
@@ -442,6 +442,8 @@ int main(int argc, char** argv)
             ++i;
         }
     }
+
+    cia_fd_cbt_init_default_real(&ac.nominal_user_constraints, &ac.data_user_constraints);
 
     s_Shutdown = CreateEventW(NULL, TRUE, FALSE, NULL);
     if (!s_Shutdown) {

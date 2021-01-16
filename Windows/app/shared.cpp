@@ -280,10 +280,26 @@ int run(app_ctx* ac)
         nominal_hw_constraints.tseg2_min = com_ctx->dev_data.nm_min.tseg2;
         nominal_hw_constraints.tseg2_max = com_ctx->dev_data.nm_max.tseg2;
 
-        error = cbt_real(&nominal_hw_constraints, &ac->nominal_user_constraints, &nominal_settings);
+        data_hw_constraints.brp_min = com_ctx->dev_data.dt_min.brp;
+        data_hw_constraints.brp_max = com_ctx->dev_data.dt_max.brp;
+        data_hw_constraints.brp_step = 1;
+        data_hw_constraints.clock_hz = com_ctx->dev_data.can_clock_hz;
+        data_hw_constraints.sjw_max = com_ctx->dev_data.dt_max.sjw;
+        data_hw_constraints.tseg1_min = com_ctx->dev_data.dt_min.tseg1;
+        data_hw_constraints.tseg1_max = com_ctx->dev_data.dt_max.tseg1;
+        data_hw_constraints.tseg2_min = com_ctx->dev_data.dt_min.tseg2;
+        data_hw_constraints.tseg2_max = com_ctx->dev_data.dt_max.tseg2;
+
+        error = cia_fd_cbt_real(
+            &nominal_hw_constraints,
+            &data_hw_constraints,
+            &ac->nominal_user_constraints,
+            &ac->data_user_constraints,
+            &nominal_settings,
+            &data_settings);
         switch (error) {
         case CAN_BTRE_NO_SOLUTION:
-            fprintf(stderr, "ERROR: The chosen nominal bitrate/sjw cannot be configured on the device.\n");
+            fprintf(stderr, "ERROR: The chosen nominal/data bitrate/sjw cannot be configured on the device.\n");
             return SC_DLL_ERROR_INVALID_PARAM;
         case CAN_BTRE_NONE:
             break;
@@ -305,29 +321,6 @@ int run(app_ctx* ac)
         unsigned long features = SC_FEATURE_FLAG_TXR;
         if (ac->fdf) {
             features |= SC_FEATURE_FLAG_FDF;
-
-
-            data_hw_constraints.brp_min = com_ctx->dev_data.dt_min.brp;
-            data_hw_constraints.brp_max = com_ctx->dev_data.dt_max.brp;
-            data_hw_constraints.brp_step = 1;
-            data_hw_constraints.clock_hz = com_ctx->dev_data.can_clock_hz;
-            data_hw_constraints.sjw_max = com_ctx->dev_data.dt_max.sjw;
-            data_hw_constraints.tseg1_min = com_ctx->dev_data.dt_min.tseg1;
-            data_hw_constraints.tseg1_max = com_ctx->dev_data.dt_max.tseg1;
-            data_hw_constraints.tseg2_min = com_ctx->dev_data.dt_min.tseg2;
-            data_hw_constraints.tseg2_max = com_ctx->dev_data.dt_max.tseg2;
-
-            error = cbt_real(&data_hw_constraints, &ac->data_user_constraints, &data_settings);
-            switch (error) {
-            case CAN_BTRE_NO_SOLUTION:
-                fprintf(stderr, "ERROR: The chosen data bitrate/sjw cannot be configured on the device.\n");
-                return SC_DLL_ERROR_INVALID_PARAM;
-            case CAN_BTRE_NONE:
-                break;
-            default:
-                fprintf(stderr, "Ooops.\n");
-                return SC_DLL_ERROR_UNKNOWN;
-            }
 
             params.brp = data_settings.brp;
             params.sjw = data_settings.sjw;
