@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -201,7 +201,6 @@ private:
 	};
 
 	struct com_device_txr_data {
-		std::atomic<uint32_t> track_id;
 		std::atomic<uint32_t> index;
 		std::atomic<uint32_t> com_dev_generation;
 	};
@@ -230,6 +229,7 @@ private:
 	com_device_data_private m_ComDeviceDataPrivate[MAX_COM_DEVICES_PER_SC_DEVICE];
 	sc_com_dev_index_t m_ConfigurationAccessIndex;
 	com_device_txr_data m_TxrMap[256];
+	sc_mm_can_tx m_TxEchoMap[256];
 	DWORD m_ConfigurationAccessClaimed;
 	bool m_Mapped;
 };
@@ -345,6 +345,7 @@ ScDev::ScDev()
 	m_ConfigurationAccessClaimed = 0;
 	ZeroMemory(&m_TimeTracker, sizeof(m_TimeTracker));
 	m_Mapped = false;
+	ZeroMemory(m_TxEchoMap, sizeof(m_TxEchoMap));
 }
 
 bool ScDev::VerifyConfigurationAccess(sc_com_dev_index_t index) const
@@ -461,65 +462,122 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 		txr->timestamp_us = m_Device->dev_to_host32(txr->timestamp_us);
 		auto ts = sc_tt_track(&m_TimeTracker, txr->timestamp_us);
 
-		auto index = m_TxrMap[txr->track_id].index.load(std::memory_order_acquire);
-		if (index < MAX_COM_DEVICES_PER_SC_DEVICE) {
+		auto tx_com_dev_index = m_TxrMap[txr->track_id].index.load(std::memory_order_acquire);
+		if (tx_com_dev_index < MAX_COM_DEVICES_PER_SC_DEVICE) {
 			auto txr_sc_dev_gen = m_TxrMap[txr->track_id].com_dev_generation.load(std::memory_order_acquire);
-			auto track_id = m_TxrMap[txr->track_id].track_id.load(std::memory_order_acquire);
+			//auto track_id = m_TxrMap[txr->track_id].track_id.load(std::memory_order_acquire);
+			auto const* echo = &m_TxEchoMap[txr->track_id];
+			auto data_len = dlc_to_len(echo->dlc);
+
+			//if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
+			//	// put dropped messages only on the interfaces 
+			//	auto* data = &m_ComDeviceData[tx_com_dev_index];
+			//	auto* priv = &m_ComDeviceDataPrivate[tx_com_dev_index];
+			//	auto tx_sc_dev_gen = priv->tx_sc_dev_generation.load(std::memory_order_acquire);
+
+			//	if (tx_sc_dev_gen != txr_sc_dev_gen) {
+			//		break;
+			//	}
+
+			//	auto sc_dev_gen = priv->rx_sc_dev_generation.load(std::memory_order_acquire);
+			//	auto com_dev_gen = priv->com_dev_generation.load(std::memory_order_acquire);
+
+
+			//	if (com_dev_gen == sc_dev_gen) {
+			//		auto gi = priv->rx.hdr->get_index;
+			//		auto pi = priv->rx.hdr->put_index;
+			//		auto used = pi - gi;
+			//		if (pi != priv->rx.index || used > data->rx.elements) {
+			//			// rogue client
+			//			LOG_DEBUG("rogue client messed up get=/put indices shared gi=%lu shared pi=%lu used=%lu priv gi=%lu\n",
+			//				gi, pi, used, priv->rx.index);
+			//		}
+			//		else if (used == data->rx.elements) { // just be safe, could be a rogue client
+			//			//++priv->rx.hdr->txr_lost;
+			//			InterlockedIncrement(&priv->rx.hdr->lost_tx);
+			//			SetEvent(priv->rx.ev);
+			//		}
+			//		else {
+			//			uint32_t index = priv->rx.index % data->rx.elements;
+			//			sc_can_mm_slot_t* slot = &priv->rx.hdr->slots[index];
+			//			slot->tx = *echo;
+			//			
+
+			//			++priv->rx.index;
+
+			//			priv->rx.hdr->put_index = priv->rx.index;
+
+			//			//std::atomic_thread_fence(std::memory_order_release);
+
+			//			SetEvent(priv->rx.ev);
+			//		}
+			//	}
+			//	else {
+			//		LOG_DEBUG("TXR COM/SC device mismatch com=%lu sc=%lu\n", com_dev_gen, sc_dev_gen);
+			//	}
+			//}
+			//else {
+
+			//}
+			
+
+			for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceData); ++i) {
+				auto* data = &m_ComDeviceData[i];
+				auto* priv = &m_ComDeviceDataPrivate[i];
+
+				auto com_dev_gen = priv->com_dev_generation.load(std::memory_order_acquire);
+				auto sc_dev_gen = priv->rx_sc_dev_generation.load(std::memory_order_acquire);
+				if (com_dev_gen == sc_dev_gen) {
+					auto gi = priv->rx.hdr->get_index;
+					auto pi = priv->rx.hdr->put_index;
+					auto used = pi - gi;
+					if (pi != priv->rx.index || used > data->rx.elements) {
+						// rogue client
+					}
+					else if (used == data->rx.elements) { // just be safe, could be a rogue client
+						InterlockedIncrement(&priv->rx.hdr->lost_tx);
+						//++priv->rx.hdr->rx_lost;
+						SetEvent(priv->rx.ev);
+					}
+					else {
+						uint32_t index = priv->rx.index % data->rx.elements;
+						sc_can_mm_slot_t* slot = &priv->rx.hdr->slots[index];
+						slot->tx.type = SC_CAN_DATA_TYPE_TX;
+						slot->tx.can_id = echo->can_id;
+						slot->tx.flags = txr->flags;
+						slot->tx.dlc = echo->dlc;
+						slot->tx.track_id = echo->track_id;
+						slot->tx.timestamp_us = ts;
+						memcpy(slot->tx.data, echo->data, data_len);
+
+						if (tx_com_dev_index == i) {
+							auto tx_sc_dev_gen = priv->tx_sc_dev_generation.load(std::memory_order_acquire);
+							slot->tx.echo = tx_sc_dev_gen != txr_sc_dev_gen;
+						}
+						else {
+							slot->tx.echo = 1;
+						}
+
+						++priv->rx.index;
+
+						priv->rx.hdr->put_index = priv->rx.index;
+
+						//std::atomic_thread_fence(std::memory_order_release);
+
+						SetEvent(priv->rx.ev);
+					}
+				}
+				else {
+					ResetComDeviceStateRx(i, com_dev_gen);
+				}
+			}
 			
 			m_TxrMap[txr->track_id].index.store(MAX_COM_DEVICES_PER_SC_DEVICE, std::memory_order_release);
 			ReleaseSemaphore(m_TxFifoAvailable, 1, nullptr);
-
-			auto* data = &m_ComDeviceData[index];
-			auto* priv = &m_ComDeviceDataPrivate[index];
-			auto tx_sc_dev_gen = priv->tx_sc_dev_generation.load(std::memory_order_acquire);
-			
-			if (tx_sc_dev_gen != txr_sc_dev_gen) {
-				break;
-			}
-
-			auto sc_dev_gen = priv->rx_sc_dev_generation.load(std::memory_order_acquire);
-			auto com_dev_gen = priv->com_dev_generation.load(std::memory_order_acquire);
-
-
-			if (com_dev_gen == sc_dev_gen) {
-				auto gi = priv->rx.hdr->get_index;
-				auto pi = priv->rx.hdr->put_index;
-				auto used = pi - gi;
-				if (pi != priv->rx.index || used > data->rx.elements) {
-					// rogue client
-					LOG_DEBUG("rogue client messed up get=/put indices shared gi=%lu shared pi=%lu used=%lu priv gi=%lu\n",
-						gi, pi, used, priv->rx.index);
-				}
-				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					//++priv->rx.hdr->txr_lost;
-					InterlockedIncrement64((volatile LONG64*)&priv->tx.hdr->lost);
-					InterlockedIncrement64((volatile LONG64*)&priv->tx.hdr->lost);
-					SetEvent(priv->rx.ev);
-				}
-				else {
-					uint32_t index = priv->rx.index % data->rx.elements;
-					sc_can_mm_slot_t* slot = &priv->rx.hdr->slots[index];
-					slot->txr.type = SC_CAN_DATA_TYPE_TXR;
-					slot->txr.flags = txr->flags;
-					slot->txr.track_id = track_id;
-					slot->txr.timestamp_us = ts;
-
-					++priv->rx.index;
-
-					priv->rx.hdr->put_index = priv->rx.index;
-
-					//std::atomic_thread_fence(std::memory_order_release);
-
-					SetEvent(priv->rx.ev);
-				}
-			}
-			else {
-				LOG_DEBUG("TXR COM/SC device mismatch com=%lu sc=%lu\n", com_dev_gen, sc_dev_gen);
-			}
 		}
 		else {
 			// rogue txr message?
-			LOG_WARN("rogue txr message for device index %u)\n", index);
+			LOG_WARN("rogue txr message for device index %u)\n", tx_com_dev_index);
 		}
 	} break;
 	case SC_MSG_CAN_RX: {
@@ -542,7 +600,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					// rogue client
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->lost);
+					InterlockedIncrement(&priv->rx.hdr->lost_rx);
 					//++priv->rx.hdr->rx_lost;
 					SetEvent(priv->rx.ev);
 				}
@@ -594,7 +652,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					// rogue client
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->lost);
+					InterlockedIncrement(&priv->rx.hdr->lost_status);
 					//++priv->rx.hdr->rx_lost;
 					SetEvent(priv->rx.ev);
 				}
@@ -645,7 +703,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					// rogue client
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					InterlockedIncrement64((volatile LONG64*)&priv->rx.hdr->lost);
+					InterlockedIncrement(&priv->rx.hdr->lost_error);
 					//++priv->rx.hdr->rx_lost;
 					SetEvent(priv->rx.ev);
 				}
@@ -696,8 +754,11 @@ void ScDev::ResetComDeviceStateTx(sc_com_dev_index_t index, uint32_t generation)
 void ScDev::ResetComDeviceStateRx(sc_com_dev_index_t index, uint32_t generation)
 {
 	auto* priv = &m_ComDeviceDataPrivate[index];
-	InterlockedExchange64((volatile LONG64*)&priv->rx.hdr->lost, 0);
-	//InterlockedExchange64((volatile LONG64*)&priv->rx.hdr->txr_lost, 0);
+	InterlockedExchange(&priv->rx.hdr->lost_rx, 0);
+	InterlockedExchange(&priv->rx.hdr->lost_tx, 0);
+	InterlockedExchange(&priv->rx.hdr->lost_status, 0);
+	InterlockedExchange(&priv->rx.hdr->lost_error, 0);
+	
 	priv->rx.hdr->put_index = priv->rx.index;
 	priv->rx.hdr->get_index = priv->rx.index;
 	priv->rx_sc_dev_generation.store(generation, std::memory_order_release);
@@ -706,7 +767,6 @@ void ScDev::ResetComDeviceStateRx(sc_com_dev_index_t index, uint32_t generation)
 
 void ScDev::Uninit()
 {
-
 	SetBusOff();
 
 	sc_cmd_ctx_uninit(&m_CmdCtx);
@@ -718,8 +778,6 @@ void ScDev::Uninit()
 	}
 
 	Unmap();
-
-	//m_ConfigurationAccessClaimed = 0;
 }
 
 void ScDev::Unmap()
@@ -797,11 +855,7 @@ int ScDev::Map()
 			goto error_exit;
 		}
 
-		priv->rx.hdr->get_index = 0;
-		priv->rx.hdr->put_index = 0;
-		priv->rx.hdr->lost = 0;
-		priv->rx.hdr->flags = 0;
-		priv->rx.hdr->error = 0;
+		memset(priv->rx.hdr, 0, sizeof(*priv->rx.hdr));
 
 		bytes = data->tx.elements * sizeof(sc_can_mm_slot_t) + sizeof(sc_can_mm_header);
 		priv->tx.file = CreateFileMappingW(
@@ -830,11 +884,7 @@ int ScDev::Map()
 			goto error_exit;
 		}
 
-		priv->tx.hdr->get_index = 0;
-		priv->tx.hdr->put_index = 0;
-		priv->tx.hdr->lost = 0;
-		priv->tx.hdr->flags = 0;
-		priv->tx.hdr->error = 0;
+		memset(priv->tx.hdr, 0, sizeof(*priv->tx.hdr));
 
 		// events
 		priv->rx.ev = CreateEventW(nullptr, FALSE, FALSE, data->rx.ev_name);
@@ -1297,9 +1347,10 @@ void ScDev::TxMain()
 						if (WAIT_OBJECT_0 == r) {
 							uint16_t len = sizeof(*tx);
 							uint8_t dlc = slot->tx.dlc & 0xf;
+							uint8_t data_len = dlc_to_len(dlc);
 							if (!(slot->tx.flags & SC_CAN_FRAME_FLAG_RTR)) {
-								len += dlc_to_len(dlc);
-								memcpy(tx->data, slot->tx.data, dlc_to_len(dlc));
+								len += data_len;
+								memcpy(tx->data, slot->tx.data, data_len);
 							}
 
 							if (len & (SC_MSG_CAN_LEN_MULTIPLE - 1)) {
@@ -1322,8 +1373,13 @@ void ScDev::TxMain()
 							}
 
 							assert(txr_slot != _countof(m_TxrMap));
+							auto* echo = &m_TxEchoMap[txr_slot];
 							
-							m_TxrMap[txr_slot].track_id.store(slot->tx.track_id, std::memory_order_release);
+							echo->dlc = slot->tx.dlc;
+							echo->can_id = slot->tx.can_id;
+							echo->track_id = slot->tx.track_id;
+							memcpy(echo->data, tx->data, data_len);
+							
 							m_TxrMap[txr_slot].index.store(static_cast<uint32_t>(index), std::memory_order_release);
 							m_TxrMap[txr_slot].com_dev_generation.store(com_dev_gen, std::memory_order_release);
 

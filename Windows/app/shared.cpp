@@ -103,20 +103,73 @@ struct com_dev_ctx {
     bool rx_has_fdf_frame;
 };
 
+void log_msg(
+    com_dev_ctx* com_ctx,
+    uint32_t can_id,
+    uint8_t flags, 
+    uint8_t dlc, 
+    uint8_t* data)
+{
+    auto len = dlc_to_len(dlc);
+
+    if (flags & SC_CAN_FRAME_FLAG_EXT) {
+        com_ctx->rx_has_xtd_frame = true;
+    }
+
+    if (flags & SC_CAN_FRAME_FLAG_FDF) {
+        com_ctx->rx_has_fdf_frame = true;
+    }
+
+    if (com_ctx->rx_has_xtd_frame) {
+        fprintf(stdout, "%8X ", can_id);
+    }
+    else {
+        fprintf(stdout, "%3X ", can_id);
+    }
+
+    if (com_ctx->rx_has_fdf_frame) {
+        fprintf(stdout, "[%02u] ", len);
+    }
+    else {
+        fprintf(stdout, "[%u] ", len);
+    }
+
+    if (flags & SC_CAN_FRAME_FLAG_RTR) {
+        fprintf(stdout, "RTR");
+    }
+    else {
+        for (uint8_t i = 0; i < len; ++i) {
+            fprintf(stdout, "%02X ", data[i]);
+        }
+    }
+    fputc('\n', stdout);
+}
+
 
 void process_rx(app_ctx* ac)
 {
     com_dev_ctx* com_ctx = static_cast<com_dev_ctx*>(ac->priv);
 
-    auto rx_ring_lost = InterlockedExchange64((volatile LONG64*)&com_ctx->rx.hdr->lost, 0);
-    if (rx_ring_lost) {
-        fprintf(stderr, "ERROR: RX %llu messages lost\n", rx_ring_lost);
+    auto rx_lost = InterlockedExchange(&com_ctx->rx.hdr->lost_rx, 0);
+    if (rx_lost) {
+        fprintf(stderr, "ERROR: %lu rx messages lost\n", rx_lost);
     }
 
-    auto tx_ring_lost = InterlockedExchange64((volatile LONG64*)&com_ctx->tx.hdr->lost, 0);
-    if (tx_ring_lost) {
-        fprintf(stderr, "ERROR: TXR %llu messages lost\n", tx_ring_lost);
+    auto tx_lost = InterlockedExchange(&com_ctx->rx.hdr->lost_tx, 0);
+    if (tx_lost) {
+        fprintf(stderr, "ERROR: %lu tx messages lost\n", tx_lost);
     }
+
+    auto status_lost = InterlockedExchange(&com_ctx->rx.hdr->lost_status, 0);
+    if (status_lost) {
+        fprintf(stderr, "ERROR: %lu status messages lost\n", status_lost);
+    }
+
+    auto error_lost = InterlockedExchange(&com_ctx->rx.hdr->lost_error, 0);
+    if (error_lost) {
+        fprintf(stderr, "ERROR: ERROR %lu error messages lost\n", error_lost);
+    }
+
 
     auto gi = com_ctx->rx.hdr->get_index;
     auto pi = com_ctx->rx.hdr->put_index;
@@ -177,52 +230,59 @@ void process_rx(app_ctx* ac)
                 }
 
                 if (ac->log_flags & LOG_FLAG_RX_MSG) {
-                    auto len = dlc_to_len(rx->dlc);
+                    fprintf(stdout, "RX ");
+                    log_msg(com_ctx, rx->can_id, rx->flags, rx->dlc, rx->data);
+                }
+            } break;
+            case SC_CAN_DATA_TYPE_TX: {
+                auto* tx = &com_ctx->rx.hdr->slots[index].tx;
 
-                    if (rx->flags & SC_CAN_FRAME_FLAG_EXT) {
-                        com_ctx->rx_has_xtd_frame = true;
-                    }
-
-                    if (rx->flags & SC_CAN_FRAME_FLAG_FDF) {
-                        com_ctx->rx_has_fdf_frame = true;
-                    }
-
-                    if (com_ctx->rx_has_xtd_frame) {
-                        fprintf(stdout, "%8X ", rx->can_id);
+                if (!tx->echo && ac->log_flags & LOG_FLAG_TXR) {
+                    if (tx->flags & SC_CAN_FRAME_FLAG_DRP) {
+                        fprintf(stdout, "TXR %#08x was dropped @ %016llx\n", tx->track_id, tx->timestamp_us);
                     }
                     else {
-                        fprintf(stdout, "%3X ", rx->can_id);
+                        fprintf(stdout, "TXR %#08x was sent @ %016llx\n", tx->track_id, tx->timestamp_us);
                     }
-
-                    if (com_ctx->rx_has_fdf_frame) {
-                        fprintf(stdout, "[%02u] ", len);
-                    }
-                    else {
-                        fprintf(stdout, "[%u] ", len);
-                    }
-
-                    if (rx->flags & SC_CAN_FRAME_FLAG_RTR) {
-                        fprintf(stdout, "RTR");
-                    }
-                    else {
-                        for (uint8_t i = 0; i < len; ++i) {
-                            fprintf(stdout, "%02X ", rx->data[i]);
-                        }
-                    }
-                    fputc('\n', stdout);
                 }
 
+                if (ac->log_flags & LOG_FLAG_TX_MSG) {
+                    fprintf(stdout, "TX ");
+                    log_msg(com_ctx, tx->can_id, tx->flags, tx->dlc, tx->data);
+                }
             } break;
-            case SC_CAN_DATA_TYPE_TXR: {
-                auto* txr = &com_ctx->rx.hdr->slots[index].txr;
-                
-                if (ac->log_flags & LOG_FLAG_TXR) {
-                    if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
-                        fprintf(stdout, "tracked message %#08x was dropped @ %016llx\n", txr->track_id, txr->timestamp_us);
+            case SC_CAN_DATA_TYPE_ERROR: {
+                auto* error = &com_ctx->rx.hdr->slots[index].error;
+
+                if (SC_CAN_ERROR_NONE != error->error) {
+                    fprintf(
+                        stdout, "CAN ERROR %s %s ",
+                        (error->flags & SC_CAN_ERROR_FLAG_RXTX_TX) ? "tx" : "rx",
+                        (error->flags & SC_CAN_ERROR_FLAG_NMDT_DT) ? "data" : "arbitration");
+                    switch (error->error) {
+                    case SC_CAN_ERROR_STUFF:
+                        fprintf(stdout, "stuff ");
+                        break;
+                    case SC_CAN_ERROR_FORM:
+                        fprintf(stdout, "form ");
+                        break;
+                    case SC_CAN_ERROR_ACK:
+                        fprintf(stdout, "ack ");
+                        break;
+                    case SC_CAN_ERROR_BIT1:
+                        fprintf(stdout, "bit1 ");
+                        break;
+                    case SC_CAN_ERROR_BIT0:
+                        fprintf(stdout, "bit0 ");
+                        break;
+                    case SC_CAN_ERROR_CRC:
+                        fprintf(stdout, "crc ");
+                        break;
+                    default:
+                        fprintf(stdout, "<unknown> ");
+                        break;
                     }
-                    else {
-                        fprintf(stdout, "tracked message %#08x was sent @ %016llx\n", txr->track_id, txr->timestamp_us);
-                    }
+                    fprintf(stdout, "error\n");
                 }
             } break;
             }
