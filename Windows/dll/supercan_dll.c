@@ -52,12 +52,6 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 #include <supercan_winapi.h>
 #include <stdio.h>
 
-#define TOE_RB_VALUE_TYPE uint8_t
-#define TOE_RB_PREFIX rb_u8
-#include "ring_buffer.h"
-#undef TOE_RB_VALUE_TYPE
-#undef TOE_RB_PREFIX
-
 
 #define CHUNKY_CHUNK_SIZE_TYPE uint16_t
 #define CHUNKY_BUFFER_SIZE_TYPE unsigned
@@ -117,17 +111,16 @@ struct sc_stream {
     PUCHAR rx_buffers;
     PUCHAR tx_buffers;
     OVERLAPPED* rx_ovs;
-    uint8_t* rx_submit_queue_mem;
     uint8_t* rx_reassembly_buffer;
     OVERLAPPED tx_ovs[2];
     chunky_reader r;
     chunky_writer w;
-    rb_u8_buf rx_submit_queue;
     size_t buffer_size;
     uint16_t rx_reassembly_count;
     uint16_t rx_reassembly_capacity;
     uint16_t tx_size;
     uint8_t rx_count;
+    uint8_t rx_next;
     uint8_t tx_index;
 };
 
@@ -965,7 +958,6 @@ SC_DLL_API int sc_can_stream_init(
     stream->ctx = ctx;
     stream->rx_callback = callback;
     stream->buffer_size = buffer_size;
-    stream->rx_count = 0;
     stream->rx_reassembly_capacity = 256;
     chunky_reader_init(&stream->r, dev, &dev_swap16);
     chunky_writer_init(&stream->w, dev->epp_size, dev, &dev_swap16);
@@ -988,12 +980,6 @@ SC_DLL_API int sc_can_stream_init(
         goto Error;
     }
 
-    stream->rx_submit_queue_mem = calloc(rreqs, sizeof(*stream->rx_submit_queue_mem));
-    if (!stream->rx_submit_queue_mem) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Error;
-    }
-
     stream->rx_reassembly_buffer = calloc(stream->rx_reassembly_capacity, sizeof(*stream->rx_reassembly_buffer));
     if (!stream->rx_reassembly_buffer) {
         error = SC_DLL_ERROR_OUT_OF_MEM;
@@ -1011,8 +997,6 @@ SC_DLL_API int sc_can_stream_init(
 
         stream->tx_ovs[i].hEvent = h;
     }
-
-    toe_rb_init(&stream->rx_submit_queue, stream->rx_submit_queue_mem, rreqs);
 
     // create and submit all IN tokens
     for (size_t i = 0; i < (size_t)rreqs; ++i) {
@@ -1048,7 +1032,6 @@ SC_DLL_API int sc_can_stream_init(
             goto Error;
         }
 
-        rb_u8_push_back_value(&stream->rx_submit_queue, (uint8_t)i);
         ++stream->rx_count;
     }
 
@@ -1100,16 +1083,15 @@ static int sc_process_rx_buffer(
 }
 
 static inline int sc_rx_submit(
-    struct sc_stream* stream,
-    uint8_t index)
+    struct sc_stream* stream)
 {
     if (!WinUsb_ReadPipe(
         stream->dev->usb_handle,
         stream->dev->exposed.can_epp | 0x80,
-        stream->rx_buffers + (size_t)index * stream->buffer_size,
+        stream->rx_buffers + (size_t)stream->rx_next * stream->buffer_size,
         (ULONG)stream->buffer_size,
         NULL,
-        &stream->rx_ovs[index])) {
+        &stream->rx_ovs[stream->rx_next])) {
         DWORD e = GetLastError();
         if (ERROR_IO_PENDING != e) {
             HRESULT hr = HRESULT_FROM_WIN32(e);
@@ -1120,8 +1102,7 @@ static inline int sc_rx_submit(
         return SC_DLL_ERROR_UNKNOWN;
     }
 
-    assert(toe_rb_left(&stream->rx_submit_queue));
-    rb_u8_push_back_value(&stream->rx_submit_queue, index);
+    stream->rx_next = (stream->rx_next + 1) % stream->rx_count;
 
     return SC_DLL_ERROR_NONE;
 }
@@ -1193,10 +1174,7 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
         return SC_DLL_ERROR_INVALID_PARAM;
     }
 
-    assert(toe_rb_size(&stream->rx_submit_queue));
-
-    
-    uint8_t index = rb_u8_at_value(&stream->rx_submit_queue, 0);
+    uint8_t index = stream->rx_next;
     HANDLE wait_handles[2] = { stream->rx_ovs[index].hEvent, stream->exposed.user_handle };
     DWORD wait_count = 1 + (stream->exposed.user_handle != NULL);
         
@@ -1207,8 +1185,6 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
         if (1 == handle_index) {
             return SC_DLL_ERROR_USER_HANDLE_SIGNALED;
         }
-            
-        rb_u8_pop_front(&stream->rx_submit_queue);
 
         DWORD transferred = 0;
         if (!WinUsb_GetOverlappedResult(
@@ -1236,7 +1212,7 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
             }
         }
 
-        error = sc_rx_submit(stream, index);
+        error = sc_rx_submit(stream);
         if (error) {
             return error;
         }
