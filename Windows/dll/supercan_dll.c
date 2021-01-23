@@ -52,6 +52,12 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 #include <supercan_winapi.h>
 #include <stdio.h>
 
+#define TOE_RB_VALUE_TYPE uint8_t
+#define TOE_RB_PREFIX rb_u8
+#include "ring_buffer.h"
+#undef TOE_RB_VALUE_TYPE
+#undef TOE_RB_PREFIX
+
 
 #define CHUNKY_CHUNK_SIZE_TYPE uint16_t
 #define CHUNKY_BUFFER_SIZE_TYPE unsigned
@@ -63,8 +69,8 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 
 // I am going to assume Windows on ARM is little endian
 #define NATIVE_BYTE_ORDER SC_BYTE_ORDER_LE
-#define SC_CAN_STREAM_MAX_RX_WAIT_HANDLES 63
-
+#define SC_CAN_STREAM_MAX_RX_WAIT_HANDLES 64
+#define SC_CAN_STREAM_DEFAULT_RX_WAIT_HANDLES 32
 
 static struct sc_data {
     wchar_t *dev_list;
@@ -103,12 +109,6 @@ struct sc_dev_ex {
     WINUSB_INTERFACE_HANDLE usb_handle;
 };
 
-struct sc_buffer_seq {
-    uint16_t seq_no;
-    uint8_t index;
-    uint8_t seq_count;
-};
-
 struct sc_stream {
     sc_can_stream_t exposed;
     struct sc_dev_ex* dev;
@@ -116,21 +116,18 @@ struct sc_stream {
     sc_can_stream_rx_callback rx_callback;
     PUCHAR rx_buffers;
     PUCHAR tx_buffers;
-    HANDLE *wait_handles;
     OVERLAPPED* rx_ovs;
-    uint8_t* rx_map;
+    uint8_t* rx_submit_queue_mem;
     uint8_t* rx_reassembly_buffer;
-    struct sc_buffer_seq* rx_parked;
     OVERLAPPED tx_ovs[2];
     chunky_reader r;
     chunky_writer w;
+    rb_u8_buf rx_submit_queue;
     size_t buffer_size;
     uint16_t rx_reassembly_count;
     uint16_t rx_reassembly_capacity;
     uint16_t tx_size;
     uint8_t rx_count;
-    uint8_t rx_submit_count;
-    uint8_t rx_park_count;
     uint8_t tx_index;
 };
 
@@ -928,10 +925,7 @@ SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t* _stream)
 
         free(stream->rx_buffers);
         free(stream->tx_buffers);
-        free(stream->wait_handles);
-        free(stream->rx_map);
         free(stream->rx_reassembly_buffer);
-        free(stream->rx_parked);
         free(stream);
     }
 }
@@ -953,7 +947,7 @@ SC_DLL_API int sc_can_stream_init(
     }
 
     if (rreqs <= 0) {
-        rreqs = SC_CAN_STREAM_MAX_RX_WAIT_HANDLES;
+        rreqs = SC_CAN_STREAM_DEFAULT_RX_WAIT_HANDLES;
     }
 
     if (rreqs > SC_CAN_STREAM_MAX_RX_WAIT_HANDLES) {
@@ -971,7 +965,7 @@ SC_DLL_API int sc_can_stream_init(
     stream->ctx = ctx;
     stream->rx_callback = callback;
     stream->buffer_size = buffer_size;
-    stream->rx_count = rreqs;
+    stream->rx_count = 0;
     stream->rx_reassembly_capacity = 256;
     chunky_reader_init(&stream->r, dev, &dev_swap16);
     chunky_writer_init(&stream->w, dev->epp_size, dev, &dev_swap16);
@@ -994,14 +988,8 @@ SC_DLL_API int sc_can_stream_init(
         goto Error;
     }
 
-    stream->rx_map = calloc(rreqs, sizeof(*stream->rx_map));
-    if (!stream->rx_map) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Error;
-    }
-
-    stream->wait_handles = calloc(SC_CAN_STREAM_MAX_RX_WAIT_HANDLES+1, sizeof(*stream->wait_handles)); // to have space for the user handle
-    if (!stream->wait_handles) {
+    stream->rx_submit_queue_mem = calloc(rreqs, sizeof(*stream->rx_submit_queue_mem));
+    if (!stream->rx_submit_queue_mem) {
         error = SC_DLL_ERROR_OUT_OF_MEM;
         goto Error;
     }
@@ -1012,27 +1000,7 @@ SC_DLL_API int sc_can_stream_init(
         goto Error;
     }
 
-    stream->rx_parked = calloc(stream->rx_count, sizeof(*stream->rx_parked));
-    if (!stream->rx_parked) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Error;
-    }
-
-    for (unsigned i = 0; i < (unsigned)rreqs; ++i) {
-        HANDLE h = CreateEventW(NULL, FALSE, FALSE, NULL);
-        if (!h) {
-            DWORD e = GetLastError();
-            HRESULT hr = HRESULT_FROM_WIN32(e);
-            error = HrToError(hr);
-            goto Error;
-        }
-
-        stream->rx_ovs[i].hEvent = h;
-        stream->wait_handles[i] = h;
-        stream->rx_map[i] = i;
-    }
-
-    for (size_t i = 0; i < _countof(stream->tx_ovs); ++i) {
+   for (size_t i = 0; i < _countof(stream->tx_ovs); ++i) {
         HANDLE h = CreateEventW(NULL, TRUE, TRUE, NULL);
         if (!h) {
             DWORD e = GetLastError();
@@ -1044,8 +1012,21 @@ SC_DLL_API int sc_can_stream_init(
         stream->tx_ovs[i].hEvent = h;
     }
 
-    // submit all reads tokens
+    toe_rb_init(&stream->rx_submit_queue, stream->rx_submit_queue_mem, rreqs);
+
+    // create and submit all IN tokens
     for (size_t i = 0; i < (size_t)rreqs; ++i) {
+
+        HANDLE h = CreateEventW(NULL, FALSE, FALSE, NULL);
+        if (!h) {
+            DWORD e = GetLastError();
+            HRESULT hr = HRESULT_FROM_WIN32(e);
+            error = HrToError(hr);
+            goto Error;
+        }
+
+        stream->rx_ovs[i].hEvent = h;
+
         if (!WinUsb_ReadPipe(
             stream->dev->usb_handle,
             stream->dev->exposed.can_epp | 0x80,
@@ -1066,9 +1047,11 @@ SC_DLL_API int sc_can_stream_init(
             error = SC_DLL_ERROR_UNKNOWN;
             goto Error;
         }
+
+        rb_u8_push_back_value(&stream->rx_submit_queue, (uint8_t)i);
+        ++stream->rx_count;
     }
 
-    stream->rx_submit_count = stream->rx_count;
     chunky_writer_set(&stream->w, &stream->tx_buffers[stream->tx_index * stream->buffer_size], (uint16_t)stream->buffer_size);
     stream->exposed.tx_capacity = chunky_writer_available(&stream->w);
 
@@ -1137,9 +1120,8 @@ static inline int sc_rx_submit(
         return SC_DLL_ERROR_UNKNOWN;
     }
 
-    stream->rx_map[stream->rx_submit_count] = index;
-    stream->wait_handles[stream->rx_submit_count] = stream->rx_ovs[index].hEvent;
-    ++stream->rx_submit_count;
+    assert(toe_rb_left(&stream->rx_submit_queue));
+    rb_u8_push_back_value(&stream->rx_submit_queue, index);
 
     return SC_DLL_ERROR_NONE;
 }
@@ -1211,76 +1193,36 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
         return SC_DLL_ERROR_INVALID_PARAM;
     }
 
-    for (bool done = false; !done; ) {
-        done = true;
+    assert(toe_rb_size(&stream->rx_submit_queue));
 
-        uint16_t target_seq_no = stream->r.seq_no + 1;
-        for (unsigned i = 0; i < stream->rx_park_count; ++i) {
-            struct sc_buffer_seq const* e = &stream->rx_parked[i];
-            if (target_seq_no != e->seq_no) {
-                continue;
-            }
-
-            uint8_t index = e->index;
-            uint8_t seq_count = e->seq_count;
-            stream->rx_parked[i] = stream->rx_parked[stream->rx_park_count - 1];
-            --stream->rx_park_count;
-            //fprintf(stderr, "restore seq=%u count=%u index=%u\n", target_seq_no, seq_count, (unsigned)index);
-
-            int error = sc_process_chunks(stream, index, seq_count);
-            if (error) {
-                return error;
-            }
-
-            error = sc_rx_submit(stream, index);
-            if (error) {
-                return error;
-            }
-
-            done = false;
-        }
-    }
-
-    if (stream->rx_submit_count) {
-        DWORD wait_count = stream->rx_submit_count;
-        if (stream->exposed.user_handle) {
-            stream->wait_handles[wait_count++] = stream->exposed.user_handle;
-        }
+    
+    uint8_t index = rb_u8_at_value(&stream->rx_submit_queue, 0);
+    HANDLE wait_handles[2] = { stream->rx_ovs[index].hEvent, stream->exposed.user_handle };
+    DWORD wait_count = 1 + (stream->exposed.user_handle != NULL);
         
-        DWORD result = WaitForMultipleObjects(wait_count, stream->wait_handles, FALSE, timeout_ms);
+    DWORD result = WaitForMultipleObjects(wait_count, wait_handles, FALSE, timeout_ms);
 
-        if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + wait_count) {
-            DWORD handle_index = result - WAIT_OBJECT_0;
-            if (handle_index >= stream->rx_submit_count) {
-                return SC_DLL_ERROR_USER_HANDLE_SIGNALED;
-            }
+    if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + wait_count) {
+        DWORD handle_index = result - WAIT_OBJECT_0;
+        if (1 == handle_index) {
+            return SC_DLL_ERROR_USER_HANDLE_SIGNALED;
+        }
+            
+        rb_u8_pop_front(&stream->rx_submit_queue);
 
-            uint8_t submit_index = (uint8_t)handle_index;
-            uint8_t index = stream->rx_map[submit_index];
-            assert(index < stream->rx_count);
-            uint8_t replacement = stream->rx_map[stream->rx_submit_count - 1];
-            assert(replacement < stream->rx_count);
-            stream->rx_map[submit_index] = replacement;
-            stream->wait_handles[submit_index] = stream->rx_ovs[replacement].hEvent;
-            --stream->rx_submit_count;
+        DWORD transferred = 0;
+        if (!WinUsb_GetOverlappedResult(
+            stream->dev->usb_handle,
+            &stream->rx_ovs[index],
+            &transferred,
+            FALSE)) {
+            DWORD e = GetLastError();
+            HRESULT hr = HRESULT_FROM_WIN32(e);
+            error = HrToError(hr);
+            return error;
+        }
 
-
-            DWORD transferred = 0;
-            if (!WinUsb_GetOverlappedResult(
-                stream->dev->usb_handle,
-                &stream->rx_ovs[index],
-                &transferred,
-                FALSE)) {
-                DWORD e = GetLastError();
-                HRESULT hr = HRESULT_FROM_WIN32(e);
-                error = HrToError(hr);
-                return error;
-            }
-
-            if (0 == transferred) {
-                goto resubmit;
-            }
-
+        if (transferred) {
             uint16_t seq_count = (uint16_t)(transferred / stream->dev->exposed.epp_size);
             if (!seq_count || (DWORD)seq_count * stream->dev->exposed.epp_size != transferred) {
                 return SC_DLL_ERROR_PROTO_VIOLATION;
@@ -1288,50 +1230,25 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
 
             assert(seq_count < 256);
 
-            // process buffer
-            uint8_t *base_ptr = stream->rx_buffers + stream->buffer_size * index;
-            uint16_t buffer_seq_no;
-            uint16_t target_seq_no = stream->r.seq_no + 1; // must be in type to lap
-            {
-                struct chunky_chunk_hdr* hdr = (struct chunky_chunk_hdr*)base_ptr;
-                buffer_seq_no = stream->dev->exposed.dev_to_host16(hdr->seq_no);
-            }
-
-            if (target_seq_no != buffer_seq_no) {
-                if (stream->rx_park_count == stream->rx_count) {
-                    return SC_DLL_ERROR_UNKNOWN;
-                }
-
-
-                struct sc_buffer_seq* e = &stream->rx_parked[stream->rx_park_count++];
-                e->index = index;
-                e->seq_no = buffer_seq_no;
-                e->seq_count = (uint8_t)seq_count;
-
-                //fprintf(stderr, "park seq=%u count=%u index=%u\n", (unsigned)buffer_seq_no, seq_count, (unsigned)index);
-            }
-            else {
-                error = sc_process_chunks(stream, index, (uint8_t)seq_count);
-                if (error) {
-                    return error;
-                }
-
-            resubmit:
-                error = sc_rx_submit(stream, index);
-                if (error) {
-                    return error;
-                }
+            error = sc_process_chunks(stream, index, (uint8_t)seq_count);
+            if (error) {
+                return error;
             }
         }
-        else if (WAIT_TIMEOUT == result) {
-            // nothing to do
-            return SC_DLL_ERROR_TIMEOUT;
-        }
-        else {
-            HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
-            error = HrToError(hr);
+
+        error = sc_rx_submit(stream, index);
+        if (error) {
             return error;
         }
+    }
+    else if (WAIT_TIMEOUT == result) {
+        // nothing to do
+        return SC_DLL_ERROR_TIMEOUT;
+    }
+    else {
+        HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+        error = HrToError(hr);
+        return error;
     }
 
     return SC_DLL_ERROR_NONE;
