@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -70,6 +70,7 @@ static void usage(FILE* stream)
     fprintf(stream, "       fd      FD frame format (bool)\n");
     fprintf(stream, "       brs     FD bit rate switching (bool)\n");
     fprintf(stream, "       esi     FD error state indicator (bool)\n");
+    fprintf(stream, "       ext     extended format (29 bit identifier) (bool)\n");
     fprintf(stream, "--shared BOOL  share device access (enabled by default)\n");
     fprintf(stream, "--single       request exclusive device access\n");
     fprintf(stream, "--config BOOL  request config level access (defaults to on)\n");
@@ -129,7 +130,8 @@ static void parse_tx_job(struct tx_job* job, char* str)
                 job->flags |= SC_CAN_FRAME_FLAG_EXT;
             }
         }
-        else if (0 == _stricmp(key, "ext")) {
+        else if (0 == _stricmp(key, "ext") ||
+                 0 == _stricmp(key, "xtd")) {
             bool flag = !is_false(value);
             if (flag) {
                 job->flags |= SC_CAN_FRAME_FLAG_EXT;
