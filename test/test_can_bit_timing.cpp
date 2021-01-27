@@ -445,8 +445,21 @@ TEST_F (fixture, cbt_computes_sensible_values)
     // data brp=1 sjw=1 tseg1=6 tseg2=3 bitrate=8000000 sp=666/1000
 }
 
+TEST_F (fixture, cbt_computes_leaves_sjw_at_the_user_setting)
+{
+	user_nominal.bitrate = 500000;
+	user_nominal.sample_point = .8f;
+	user_nominal.min_tqs = 0;
 
-TEST_F (fixture, cbt_computes_sets_sjw_to_tseg2)
+	for (int i = 1; i <= hw_nominal.sjw_max; ++i) {
+		user_nominal.sjw = i;
+
+		CHECK_EQUAL(CAN_BTRE_NONE, cbt_real(&hw_nominal, &user_nominal, &settings_nominal));
+		CHECK_EQUAL(i, settings_nominal.sjw);
+	}
+}
+
+TEST_F (fixture, cbt_computes_sets_sjw_to_tseg2_if_requested)
 {
     user_nominal.bitrate = 500000;
     user_nominal.sjw = CAN_SJW_TSEG2;
