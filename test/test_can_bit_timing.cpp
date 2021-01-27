@@ -3,7 +3,6 @@
 #include <cstring>
 #include <cassert>
 
-#include "usnprintf.h"
 #include "can_bit_timing.h"
 
 using namespace std;
