@@ -98,52 +98,7 @@ struct com_dev_ctx {
     SuperCANDeviceData dev_data;
     sc_mm_data rx;
     sc_mm_data tx;
-    uint64_t rx_last_ts;
-    bool rx_has_xtd_frame;
-    bool rx_has_fdf_frame;
 };
-
-void log_msg(
-    com_dev_ctx* com_ctx,
-    uint32_t can_id,
-    uint8_t flags, 
-    uint8_t dlc, 
-    uint8_t* data)
-{
-    auto len = dlc_to_len(dlc);
-
-    if (flags & SC_CAN_FRAME_FLAG_EXT) {
-        com_ctx->rx_has_xtd_frame = true;
-    }
-
-    if (flags & SC_CAN_FRAME_FLAG_FDF) {
-        com_ctx->rx_has_fdf_frame = true;
-    }
-
-    if (com_ctx->rx_has_xtd_frame) {
-        fprintf(stdout, "%8X ", can_id);
-    }
-    else {
-        fprintf(stdout, "%3X ", can_id);
-    }
-
-    if (com_ctx->rx_has_fdf_frame) {
-        fprintf(stdout, "[%02u] ", len);
-    }
-    else {
-        fprintf(stdout, "[%u] ", len);
-    }
-
-    if (flags & SC_CAN_FRAME_FLAG_RTR) {
-        fprintf(stdout, "RTR");
-    }
-    else {
-        for (uint8_t i = 0; i < len; ++i) {
-            fprintf(stdout, "%02X ", data[i]);
-        }
-    }
-    fputc('\n', stdout);
-}
 
 
 void process_rx(app_ctx* ac)
@@ -217,21 +172,21 @@ void process_rx(app_ctx* ac)
 
                 if (ac->log_flags & LOG_FLAG_RX_DT) {
                     int64_t dt_us = 0;
-                    if (com_ctx->rx_last_ts) {
-                        dt_us = rx->timestamp_us - com_ctx->rx_last_ts;
+                    if (ac->rx_last_ts) {
+                        dt_us = rx->timestamp_us - ac->rx_last_ts;
                         if (dt_us < 0) {
                             fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
                         }
                     }
 
-                    com_ctx->rx_last_ts = rx->timestamp_us;
+                    ac->rx_last_ts = rx->timestamp_us;
 
                     fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
                 }
 
                 if (ac->log_flags & LOG_FLAG_RX_MSG) {
                     fprintf(stdout, "RX ");
-                    log_msg(com_ctx, rx->can_id, rx->flags, rx->dlc, rx->data);
+                    log_msg(ac, rx->can_id, rx->flags, rx->dlc, rx->data);
                 }
             } break;
             case SC_CAN_DATA_TYPE_TX: {
@@ -248,7 +203,7 @@ void process_rx(app_ctx* ac)
 
                 if (ac->log_flags & LOG_FLAG_TX_MSG) {
                     fprintf(stdout, "TX ");
-                    log_msg(com_ctx, tx->can_id, tx->flags, tx->dlc, tx->data);
+                    log_msg(ac, tx->can_id, tx->flags, tx->dlc, tx->data);
                 }
             } break;
             case SC_CAN_DATA_TYPE_ERROR: {

@@ -36,9 +36,6 @@
 struct can_state {
     sc_dev_t* dev;
     struct sc_dev_time_tracker tt;
-    uint64_t rx_last_ts;
-    bool rx_has_xtd_frame;
-    bool rx_has_fdf_frame;
 };
 
 
@@ -171,50 +168,21 @@ static bool process_buffer(
 
             if (ac->log_flags & LOG_FLAG_RX_DT) {
                 int64_t dt_us = 0;
-                if (s->rx_last_ts) {
-                    dt_us = ts_us - s->rx_last_ts;
+                if (ac->rx_last_ts) {
+                    dt_us = ts_us - ac->rx_last_ts;
                     if (dt_us < 0) {
                         fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
                     }
                 }
 
-                s->rx_last_ts = ts_us;
+                ac->rx_last_ts = ts_us;
 
                 fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
             }
 
             if (ac->log_flags & LOG_FLAG_RX_MSG) {
-                if (rx->flags & SC_CAN_FRAME_FLAG_EXT) {
-                    s->rx_has_xtd_frame = true;
-                }
-
-                if (rx->flags & SC_CAN_FRAME_FLAG_FDF) {
-                    s->rx_has_fdf_frame = true;
-                }
-
-                if (s->rx_has_xtd_frame) {
-                    fprintf(stdout, "%8X ", can_id);
-                }
-                else {
-                    fprintf(stdout, "%3X ", can_id);
-                }
-
-                if (s->rx_has_fdf_frame) {
-                    fprintf(stdout, "[%02u] ", len);
-                }
-                else {
-                    fprintf(stdout, "[%u] ", len);
-                }
-
-                if (rx->flags & SC_CAN_FRAME_FLAG_RTR) {
-                    fprintf(stdout, "RTR");
-                }
-                else {
-                    for (uint8_t i = 0; i < len; ++i) {
-                        fprintf(stdout, "%02X ", rx->data[i]);
-                    }
-                }
-                fputc('\n', stdout);
+                fprintf(stdout, "RX ");
+                log_msg(ac, can_id, rx->flags, rx->dlc, rx->data);
             }
         } break;
         case SC_MSG_CAN_TXR: {
@@ -612,6 +580,10 @@ int run_single(struct app_ctx* ac)
                         }
 
                         if (added) {
+                            if (ac->log_flags & LOG_FLAG_TX_MSG) {
+                                fprintf(stdout, "TX ");
+                                log_msg(ac, job->can_id, job->flags, job->dlc, job->data);
+                            }
                             break;
                         }
 

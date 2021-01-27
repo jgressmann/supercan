@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -66,13 +66,16 @@ struct tx_job {
 struct app_ctx {
     struct can_bit_timing_constraints_real nominal_user_constraints, data_user_constraints;
     struct tx_job tx_jobs[8];
+    uint64_t rx_last_ts;
+    HANDLE shutdown_event;
+    void* priv;
     unsigned log_flags;
     unsigned tx_job_count;
     unsigned device_index;
+    bool rx_has_xtd_frame;
+    bool rx_has_fdf_frame;
     bool fdf;
     bool config;
-    HANDLE shutdown_event;
-    void* priv;
 };
 
 static inline uint8_t dlc_to_len(uint8_t dlc)
@@ -125,6 +128,13 @@ static inline bool is_false(char const* str)
         0 == _stricmp(str, "no") ||
         0 == _stricmp(str, "off");
 }
+
+void log_msg(
+    struct app_ctx* ctx,
+    uint32_t can_id,
+    uint8_t flags,
+    uint8_t dlc,
+    uint8_t const* data);
 
 #ifdef __cplusplus
 } // extern "C"
