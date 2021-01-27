@@ -3,7 +3,6 @@
 #include <cstring>
 #include <cassert>
 
-#include "usnprintf.h"
 #include "can_bit_timing.h"
 
 using namespace std;
@@ -247,7 +246,23 @@ TEST_F (fixture, cbt_computes_sensible_values)
 }
 
 
-TEST_F (fixture, cbt_computes_sets_sjw_to_tseg2)
+TEST_F (fixture, cbt_computes_leaves_sjw_at_the_user_setting)
+{
+	set_m_can_nominal_at_80_mhz();
+
+	user.bitrate = 500000;
+	user.sample_point = .8f;
+	user.min_tqs = 0;
+
+	for (int i = 1; i <= hw.sjw_max; ++i) {
+		user.sjw = i;
+
+		CHECK_EQUAL(CAN_BTRE_NONE, cbt_real(&hw, &user, &settings));
+		CHECK_EQUAL(i, settings.sjw);
+	}
+}
+
+TEST_F (fixture, cbt_computes_sets_sjw_to_tseg2_if_requested)
 {
 	set_m_can_nominal_at_80_mhz();
 
