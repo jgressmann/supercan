@@ -34,7 +34,7 @@
 
 !define INSTALLER_MAJOR 1
 !define INSTALLER_MINOR 0
-!define INSTALLER_PATCH 0
+!define INSTALLER_PATCH 1
 !define INSTALLER_BUILD ${SC_VERSION_BUILD}
 
 
@@ -255,8 +255,8 @@ LangString mb_install_requires_reboot ${LANG_GERMAN} "${SC_NAME} installiert.$\n
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
 
-	!insertmacro MUI_DESCRIPTION_TEXT sec_base "$(desc_sec_base)"
-	!insertmacro MUI_DESCRIPTION_TEXT sec_dev "$(desc_sec_dev)"
+	!insertmacro MUI_DESCRIPTION_TEXT ${sec_base} "$(desc_sec_base)"
+	!insertmacro MUI_DESCRIPTION_TEXT ${sec_dev} "$(desc_sec_dev)"
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
