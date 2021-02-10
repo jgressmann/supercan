@@ -137,8 +137,8 @@ private:
 
 
 struct sc_mm_data {
-	wchar_t mem_name[32];
-	wchar_t ev_name[32];
+	wchar_t mem_name[64];
+	wchar_t ev_name[64];
 	
 	uint32_t elements;
 };
@@ -330,13 +330,35 @@ ScDev::ScDev()
 	m_ConfigurationAccessIndex = MAX_COM_DEVICES_PER_SC_DEVICE;
 	ZeroMemory(m_ComDeviceData, sizeof(m_ComDeviceData));
 	ZeroMemory(m_ComDeviceDataPrivate, sizeof(m_ComDeviceDataPrivate));
-	DWORD r = GetTickCount() ^ GetCurrentProcessId();
+	
+	/* Create a unique id for this device.
+	 * We could, of course, also use Windows USB device name
+	 * passed in Init. However, that has the downside of having
+	 * to deal with a dynamically sized string.
+	 */
+	wchar_t guid_str[48];
+	GUID guid;
+
+	ZeroMemory(&guid, sizeof(guid));
+	auto hr = CoCreateGuid(&guid);
+	assert(SUCCEEDED(hr));
+	(void)hr;
+
+	_snwprintf_s(
+		guid_str, 
+		_countof(guid_str), 
+		_TRUNCATE, 
+		L"%08x-%04x-%04x-%02x%02x%02x%02x%02x%02x%02x%02x", 
+		guid.Data1, guid.Data2, guid.Data3,
+		guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
+		guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
+
 	for (size_t i = 0; i < _countof(m_ComDeviceData); ++i) {
 		auto* data = &m_ComDeviceData[i];
-		_snwprintf_s(data->rx.mem_name, _countof(data->rx.mem_name), _TRUNCATE, L"Local\\sc-i%08x-dev%zu-rx-mem", r, i);
-		_snwprintf_s(data->rx.ev_name, _countof(data->rx.ev_name), _TRUNCATE, L"Local\\sc-i%08x-dev%zu-rx-ev", r, i);
-		_snwprintf_s(data->tx.mem_name, _countof(data->tx.mem_name), _TRUNCATE, L"Local\\sc-i%08x-dev%zu-tx-mem", r, i);
-		_snwprintf_s(data->tx.ev_name, _countof(data->tx.ev_name), _TRUNCATE, L"Local\\sc-i%08x-dev%zu-tx-ev", r, i);
+		_snwprintf_s(data->rx.mem_name, _countof(data->rx.mem_name), _TRUNCATE, L"Local\\sc-i%s-com%zu-rx-mem", guid_str, i);
+		_snwprintf_s(data->rx.ev_name, _countof(data->rx.ev_name), _TRUNCATE, L"Local\\sc-i%s-com%zu-rx-ev", guid_str, i);
+		_snwprintf_s(data->tx.mem_name, _countof(data->tx.mem_name), _TRUNCATE, L"Local\\sc-i%s-com%zu-tx-mem", guid_str, i);
+		_snwprintf_s(data->tx.ev_name, _countof(data->tx.ev_name), _TRUNCATE, L"Local\\sc-i%s-com%zu-tx-ev", guid_str, i);
 		data->rx.elements = 1u<<16;
 		data->tx.elements = 1u<<16;
 	}
