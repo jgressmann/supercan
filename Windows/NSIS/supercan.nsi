@@ -227,7 +227,7 @@ Section "$(sec_base_name)" sec_base
 	${WriteAppInstallKeyStr} "Publisher" "Jean Gressmann"
 	${WriteAppInstallKeyStr} "URLUpdateInfo" "https://github.com/jgressmann/supercan"
 	${WriteAppInstallKeyStr} "URLInfoAbout" "https://github.com/jgressmann/supercan"
-	${WriteAppInstallKeyStr} "DisplayVersion" "${SC_VERSION_MAJOR}.${SC_VERSION_MINOR}.${SC_VERSION_PATCH}"
+	${WriteAppInstallKeyStr} "DisplayVersion" "${SC_VERSION_MAJOR}.${SC_VERSION_MINOR}.${SC_VERSION_PATCH}.${SC_VERSION_BUILD}"
 	${WriteAppInstallKeyDWORD} "VersionMajor" "${SC_VERSION_MAJOR}"
 	${WriteAppInstallKeyDWORD} "VersionMinor" "${SC_VERSION_MINOR}"
 	${WriteAppInstallKeyDWORD} "NoModify" "1"
