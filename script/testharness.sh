@@ -105,11 +105,11 @@ error_cleanup()
 
 pack_results()
 {
-	local tar_file=testresult-${date_str}.tar.xz
+	local tar_file=testresult-${date_str}.tar.zst
 
 	echo
 	echo INFO: creating archive $tar_file
-	tar -C "$tmp_dir" -c . | pixz -9 >"$tmp_dir/$tar_file"
+	tar -C "$tmp_dir" -c . | zstdmt -19 >"$tmp_dir/$tar_file"
 
 	if [ -n "$SUDO_UID" ]; then
 		chown -R $SUDO_UID:$SUDO_GID $tmp_dir
