@@ -1,9 +1,14 @@
 #include <CppUnitLite2.h>
 #include <limits>
 #include <cstring>
+#include <algorithm>
 
 
 #include "usnprintf.h"
+
+#ifndef ARRAY_SIZE
+    #define ARRAY_SIZE(x) (sizeof(x)/sizeof((x)[0]))
+#endif
 
 using namespace std;
 
@@ -20,6 +25,30 @@ TEST (usnprintf_gracefully_handles_small_buffers)
     for (size_t i = 1; i < sizeof(buf); ++i) {
         int chars = usnprintf(buf, i, "%s", "Way too long a string!");
         CHECK_EQUAL((int)i-1, chars);
+    }
+}
+
+TEST (usnprintf_prints_characters)
+{
+    char buf[8];
+
+    for (char c = 'a'; c < 'z'; ++c) {
+        int chars = usnprintf(buf, sizeof(buf), "%c", c);
+        CHECK_EQUAL(1, chars);
+        CHECK_EQUAL(c, buf[0]);
+    }
+}
+
+TEST (usnprintf_prints_strings)
+{
+    char buf[8];
+    const char str[] = "Hello, World!";
+
+    for (size_t i = 0; i < ARRAY_SIZE(str) - 1; ++i) {
+        int chars = usnprintf(buf, sizeof(buf), "%s", &str[i]);
+        CHECK(chars >= 0);
+        CHECK_EQUAL(min<size_t>(chars, min(ARRAY_SIZE(str)-1-i, ARRAY_SIZE(buf)-1)), (size_t)chars);
+        CHECK_EQUAL(0, strncmp(buf, &str[i], chars));
     }
 }
 
