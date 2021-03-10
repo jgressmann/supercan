@@ -190,7 +190,7 @@ candump -n $max_frames -H -t z -L $can_good >$good_to_test_file_good_path &
 good_to_test_good_pid=$!
 
 # wait a bit, else we may not get first frame
-sleep 2
+sleep 3
 
 cangen $single_sender_can_gen_flags $can_good
 
@@ -252,7 +252,7 @@ candump -n $max_frames -H -t z -L $can_good >$test_to_good_file_good_path &
 test_to_good_good_pid=$!
 
 # wait a bit, else we may not get first frame
-sleep 2
+sleep 3
 
 cangen $single_sender_can_gen_flags $can_test
 
@@ -317,7 +317,7 @@ candump -n $(($max_frames*2)) -H -t z -L $can_good >$both_file_good_path &
 both_good_candump_pid=$!
 
 # wait a bit, else we may not get first frame
-sleep 2
+sleep 3
 
 cangen $both_sender_can_gen_flags -I 1 $can_good &
 both_good_cangen_pid=$!
