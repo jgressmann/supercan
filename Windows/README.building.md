@@ -1,4 +1,4 @@
-# Building on windows
+# Building on Windows
 
 I suppose if you had WSL installed, you would have already followed the Linux instructions :).
 
