@@ -1,4 +1,4 @@
-# Firmware update
+# Firmware Update
 
 Ensure you have [Zadig](https://zadig.akeo.ie/) available as well as [dfu-util](http://dfu-util.sourceforge.net/releases/).
 
