@@ -1,4 +1,4 @@
-!define LIBRARY_X64 1
+﻿!define LIBRARY_X64 1
 
 ;--------------------------------
 !include "MUI2.nsh"
@@ -122,13 +122,13 @@ InstType "$(it_max)" it_max
 !define VcRuntimeInstall "!insertmacro _VcRuntimeInstall"
 !macro _VcRuntimeInstall arch
 	File "$%VCToolsRedistDir%\vc_redist.${arch}.exe"
-	
-	StrCpy $1 "$\"$TEMP\vc_redist.${arch}.exe$\" /install /passive /norestart"	
+
+	StrCpy $1 "$\"$TEMP\vc_redist.${arch}.exe$\" /install /passive /norestart"
 	IfSilent +1 +2
 		StrCpy $1 "$1 /quiet"
 
 	ExecWait "$1" $0
-	Delete "$TEMP\vc_redist.${arch}.exe"	
+	Delete "$TEMP\vc_redist.${arch}.exe"
 	${If} $0 <> 0
 		StrCpy $2 "exit code $0"
 		DetailPrint $2
@@ -144,7 +144,7 @@ InstType "$(it_max)" it_max
 
 next_${arch}:
 	DetailPrint "$(info_vc_redist_installed) (${arch})"
-	
+
 !macroend
 
 
@@ -160,10 +160,10 @@ Section "$(sec_base_name)" sec_base
 
 	SetOutPath "$INSTDIR\bin"
 	File ..\Win32\Release\supercan32.dll
-	File ..\Win32\Release\supercan_app32.exe 
+	File ..\Win32\Release\supercan_app32.exe
 	File ..\x64\Release\supercan64.dll
-	File ..\x64\Release\supercan_app64.exe 
-	
+	File ..\x64\Release\supercan_app64.exe
+
 	!insertmacro InstallLib REGEXE NOTSHARED NOREBOOT_PROTECTED ..\x64\Release\supercan_srv64.exe "$INSTDIR\bin\supercan_srv64.exe" "$INSTDIR\tmp"
 
 
@@ -299,18 +299,18 @@ VIAddVersionKey /LANG=${LANG_ENGLISH} "FileVersion" "${INSTALLER_MAJOR}.${INSTAL
 Function TrimQuotes
 Exch $R0
 Push $R1
- 
+
   StrCpy $R1 $R0 1
   StrCmp $R1 `"` 0 +2
     StrCpy $R0 $R0 `` 1
   StrCpy $R1 $R0 1 -1
   StrCmp $R1 `"` 0 +2
     StrCpy $R0 $R0 -1
- 
+
 Pop $R1
 Exch $R0
 FunctionEnd
- 
+
 !macro _TrimQuotes Input Output
   Push `${Input}`
   Call TrimQuotes
@@ -320,20 +320,20 @@ FunctionEnd
 
 Function .onInit
 	IntOp $Reboot $Reboot ^ $Reboot
-	
+
 	ReadRegStr $0 HKLM "${APP_INSTALL_PATH}" "UninstallString"
 	ReadRegStr $1 HKLM "${APP_INSTALL_PATH}" "InstallLocation"
 	${TrimQuotes} $0 $0
 	${TrimQuotes} $1 $1
 	;MessageBox MB_OK "$0"
-	
+
 	${If} $0 != ""
 		;MessageBox MB_OK "runinng uninstall $0"
     	ExecWait '"$0" /S' $2
 		${If} $2 <> 0
 			MessageBox MB_ICONQUESTION|MB_YESNO "$(mb_query_continue_installation)" /SD IDYES IDYES next IDNO exit_abort
 		${EndIf}
-next:	
+next:
 		; the installer can't delete itself when invoked like this
 		;Delete "$0"
 		;RMDir "$1"
@@ -342,18 +342,18 @@ next:
 		; ClearErrors
 
 		;;ExecWait '"$2" /S _?=$3' $1 ; This assumes the existing uninstaller is a NSIS uninstaller, other uninstallers don't support /S nor _?=
-	
+
 		; ;ExecShellWait "" '"$0"'
 		; IfFileExists $0 0 exit_abort
 		; ;ReadRegStr $0 HKLM "${APP_INSTALL_PATH}" "UninstallString"
 		; ;${If} $0 != ""
 		; 	MessageBox MB_OK "still have $0, exit code=$2"
-			
+
 
 			;Goto +1
 		;${EndIf}
 		; ${If} $1 <> 0
-			
+
 		; ${EndIf}
 
 	;${Else}
@@ -363,7 +363,7 @@ next:
 
 	Return
 exit_abort:
-	Abort	
+	Abort
 FunctionEnd
 
 Function .onInstSuccess
@@ -372,5 +372,5 @@ Function .onInstSuccess
 		MessageBox MB_OK "$(mb_install_requires_reboot)"
 	${EndIf}
 out:
-	Return	
+	Return
 FunctionEnd
