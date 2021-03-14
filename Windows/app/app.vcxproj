@@ -164,6 +164,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\can_bit_timing.c" />
+    <ClCompile Include="app.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="shared.cpp" />
     <ClCompile Include="single.c" />

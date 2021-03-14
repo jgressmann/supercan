@@ -34,7 +34,7 @@
 
 !define INSTALLER_MAJOR 1
 !define INSTALLER_MINOR 0
-!define INSTALLER_PATCH 0
+!define INSTALLER_PATCH 2
 !define INSTALLER_BUILD ${SC_VERSION_BUILD}
 
 
@@ -88,20 +88,24 @@ RequestExecutionLevel admin
 ;Interface Settings
 !define MUI_ABORTWARNING
 
-
+  ;Show all languages, despite user's codepage
+  !define MUI_LANGDLL_ALLLANGUAGES
 
 ;--------------------------------
 
 ;Pages
 
+!insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE ${LICENSE_FILE_PATH}
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
 
+!insertmacro MUI_UNPAGE_WELCOME
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
-
+!insertmacro MUI_UNPAGE_FINISH
 
 
 ;--------------------------------
@@ -111,6 +115,54 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "German"
 
 
+
+;--------------------------------
+
+
+;--------------------------------
+;Reserve Files
+  
+  ;If you are using solid compression, files that are required before
+  ;the actual installation should be stored first in the data block,
+  ;because this will make your installer start faster.
+  
+  !insertmacro MUI_RESERVEFILE_LANGDLL
+
+
+
+;Language strings
+LangString xinst_name ${LANG_ENGLISH} "${SC_NAME} Device Driver"
+LangString xinst_name ${LANG_GERMAN} "${SC_NAME} Gerätetreiber"
+
+LangString it_min ${LANG_ENGLISH} "Minimal Install"
+LangString it_min ${LANG_GERMAN} "Minimale Installation"
+LangString it_max ${LANG_ENGLISH} "Full Install"
+LangString it_max ${LANG_GERMAN} "Vollständige Installation"
+LangString vc_redist ${LANG_ENGLISH} "Microsoft Visual C++ Redistributable"
+LangString vc_redist ${LANG_GERMAN} "Microsoft Visual C++ Redistributable"
+
+
+
+LangString sec_base_name ${LANG_ENGLISH} "Drivers"
+LangString sec_base_name ${LANG_GERMAN} "Treiber"
+LangString sec_dev_name ${LANG_ENGLISH} "Program Development Support"
+LangString sec_dev_name ${LANG_GERMAN} "Unterstützung für Anwendungsentwicklung"
+
+LangString desc_sec_base ${LANG_ENGLISH} "Installs components for shared access (multiple processes) to SuperCAN devices."
+LangString desc_sec_base ${LANG_GERMAN} "Installiert Komponenten für den Zugriff auf SuperCAN Geräte aus verschiedenen Anwendungen heraus."
+LangString desc_sec_dev ${LANG_ENGLISH} "Installs header and libraries for application development."
+LangString desc_sec_dev ${LANG_GERMAN} "Installiert Header and Bibliotheken für die Anwendungsentwicklung."
+
+LangString mb_query_continue_installation ${LANG_ENGLISH} "${SC_NAME} still seems to be installed.$\n$\nContinue with installation?"
+LangString mb_query_continue_installation ${LANG_GERMAN} "${SC_NAME} scheint nicht installiert zu sein.$\n$\nMit dieser Installation fortfahren?"
+LangString mb_query_continue_after_vc_redist_failed ${LANG_ENGLISH} "$(vc_redist) failed to install.$\n$\nContinue with ${SC_NAME} installation?"
+LangString mb_query_continue_after_vc_redist_failed ${LANG_GERMAN} "Die Installation des $(vc_redist) ist fehlgeschlagen.$\n$\nMit der Installation von ${SC_NAME} fortfahren?"
+
+LangString info_vc_redist_installed ${LANG_ENGLISH} "$(vc_redist) installed successfully."
+LangString info_vc_redist_installed ${LANG_GERMAN} "$(vc_redist) erfolgreich installiert."
+
+LangString mb_install_requires_reboot ${LANG_ENGLISH} "${SC_NAME} installed successfully.$\nPlease reboot your machine to complete the process."
+LangString mb_install_requires_reboot ${LANG_GERMAN} "${SC_NAME} installiert.$\nBitte starten Sie Ihren Rechner neu um den Prozess abzuschliessen."
 
 ;--------------------------------
 
@@ -175,7 +227,7 @@ Section "$(sec_base_name)" sec_base
 	${WriteAppInstallKeyStr} "Publisher" "Jean Gressmann"
 	${WriteAppInstallKeyStr} "URLUpdateInfo" "https://github.com/jgressmann/supercan"
 	${WriteAppInstallKeyStr} "URLInfoAbout" "https://github.com/jgressmann/supercan"
-	${WriteAppInstallKeyStr} "DisplayVersion" "${SC_VERSION_MAJOR}.${SC_VERSION_MINOR}.${SC_VERSION_PATCH}"
+	${WriteAppInstallKeyStr} "DisplayVersion" "${SC_VERSION_MAJOR}.${SC_VERSION_MINOR}.${SC_VERSION_PATCH}.${SC_VERSION_BUILD}"
 	${WriteAppInstallKeyDWORD} "VersionMajor" "${SC_VERSION_MAJOR}"
 	${WriteAppInstallKeyDWORD} "VersionMinor" "${SC_VERSION_MINOR}"
 	${WriteAppInstallKeyDWORD} "NoModify" "1"
@@ -210,55 +262,6 @@ Section "" sec_hidden
 	${WriteAppInstallKeyDWORD} "EstimatedSize" "$0"
 
 SectionEnd
-
-
-
-;--------------------------------
-
-
-
-;Language strings
-LangString xinst_name ${LANG_ENGLISH} "${SC_NAME} Device Driver"
-LangString xinst_name ${LANG_GERMAN} "${SC_NAME} Gerätetreiber"
-
-LangString it_min ${LANG_ENGLISH} "Minimal Install"
-LangString it_min ${LANG_GERMAN} "Minimale Installation"
-LangString it_max ${LANG_ENGLISH} "Full Install"
-LangString it_max ${LANG_GERMAN} "Vollständige Installation"
-LangString vc_redist ${LANG_ENGLISH} "Microsoft Visual C++ Redistributable"
-LangString vc_redist ${LANG_GERMAN} "Microsoft Visual C++ Redistributable"
-
-
-
-LangString sec_base_name ${LANG_ENGLISH} "Drivers"
-LangString sec_base_name ${LANG_GERMAN} "Treiber"
-LangString sec_dev_name ${LANG_ENGLISH} "Program Development Support"
-LangString sec_dev_name ${LANG_GERMAN} "Unterstützung für Anwendungsentwicklung"
-
-LangString desc_sec_base ${LANG_ENGLISH} "Installs components for shared access (multiple processes) to SuperCAN devices."
-LangString desc_sec_base ${LANG_GERMAN} "Installiert Komponenten für den Zugriff auf SuperCAN Geräte aus verschiedenen Anwendungen heraus."
-LangString desc_sec_dev ${LANG_ENGLISH} "Installs header and libraries for application development."
-LangString desc_sec_dev ${LANG_GERMAN} "Installiert Header and Bibliotheken für die Anwendungsentwicklung."
-
-LangString mb_query_continue_installation ${LANG_ENGLISH} "${SC_NAME} still seems to be installed.$\n$\nContinue with installation?"
-LangString mb_query_continue_installation ${LANG_GERMAN} "${SC_NAME} scheint nicht installiert zu sein.$\n$\nMit dieser Installation fortfahren?"
-LangString mb_query_continue_after_vc_redist_failed ${LANG_ENGLISH} "$(vc_redist) failed to install.$\n$\nContinue with ${SC_NAME} installation?"
-LangString mb_query_continue_after_vc_redist_failed ${LANG_GERMAN} "Die Installation des $(vc_redist) ist fehlgeschlagen.$\n$\nMit der Installation von ${SC_NAME} fortfahren?"
-
-LangString info_vc_redist_installed ${LANG_ENGLISH} "$(vc_redist) installed successfully."
-LangString info_vc_redist_installed ${LANG_GERMAN} "$(vc_redist) erfolgreich installiert."
-
-LangString mb_install_requires_reboot ${LANG_ENGLISH} "${SC_NAME} installed successfully.$\nPlease reboot your machine to complete the process."
-LangString mb_install_requires_reboot ${LANG_GERMAN} "${SC_NAME} installiert.$\nBitte starten Sie Ihren Rechner neu um den Prozess abzuschliessen."
-
-;Assign language strings to sections
-
-!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-
-	!insertmacro MUI_DESCRIPTION_TEXT sec_base "$(desc_sec_base)"
-	!insertmacro MUI_DESCRIPTION_TEXT sec_dev "$(desc_sec_dev)"
-
-!insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 
 
@@ -361,7 +364,10 @@ next:
 		;DetailPrint "no previous installation"
 	${EndIf}
 
+	!insertmacro MUI_LANGDLL_DISPLAY
+
 	Return
+
 exit_abort:
 	Abort
 FunctionEnd
@@ -374,3 +380,24 @@ Function .onInstSuccess
 out:
 	Return
 FunctionEnd
+
+;--------------------------------
+;Uninstaller Functions
+
+Function un.onInit
+
+  !insertmacro MUI_UNGETLANGUAGE
+  
+FunctionEnd
+
+
+;Assign language strings to sections
+
+!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+
+	!insertmacro MUI_DESCRIPTION_TEXT ${sec_base} "$(desc_sec_base)"
+	!insertmacro MUI_DESCRIPTION_TEXT ${sec_dev} "$(desc_sec_dev)"
+
+!insertmacro MUI_FUNCTION_DESCRIPTION_END
+
+
