@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -83,16 +83,79 @@ struct can_bit_timing_constraints_fixed {
 /* fix point math computation of can bit timing */
 int
 cbt_fixed(
-		struct can_bit_timing_hw_contraints const *hw,
-		struct can_bit_timing_constraints_fixed const *user,
-		struct can_bit_timing_settings *settings);
+	struct can_bit_timing_hw_contraints const *hw,
+	struct can_bit_timing_constraints_fixed const *user,
+	struct can_bit_timing_settings *settings);
 
 /* floating point version */
 int
 cbt_real(
-		struct can_bit_timing_hw_contraints const *hw,
-		struct can_bit_timing_constraints_real const *user,
-		struct can_bit_timing_settings *settings);
+	struct can_bit_timing_hw_contraints const *hw,
+	struct can_bit_timing_constraints_real const *user,
+	struct can_bit_timing_settings *settings);
+
+
+
+
+void cia_classic_cbt_init_default_fixed(
+	struct can_bit_timing_constraints_fixed *user);
+
+void cia_classic_cbt_init_default_real(
+	struct can_bit_timing_constraints_real *user);
+
+void cia_fd_cbt_init_default_fixed(
+	struct can_bit_timing_constraints_fixed *user_nominal,
+	struct can_bit_timing_constraints_fixed *user_data);
+
+void cia_fd_cbt_init_default_real(
+	struct can_bit_timing_constraints_real *user_nominal,
+	struct can_bit_timing_constraints_real *user_data);
+
+
+int
+cia_classic_cbt_fixed(
+	struct can_bit_timing_hw_contraints const *hw,
+	struct can_bit_timing_constraints_fixed const *user,
+	struct can_bit_timing_settings *settings);
+
+/* floating point version */
+int
+cia_classic_cbt_real(
+	struct can_bit_timing_hw_contraints const *hw,
+	struct can_bit_timing_constraints_real const *user,
+	struct can_bit_timing_settings *settings);
+
+
+/* Computes CAN-FD bit timing according to CiA recommendations
+ *
+ * https://can-newsletter.org/uploads/media/raw/f6a36d1461371a2f86ef0011a513712c.pdf
+ *
+ * R1: highest clock frequency
+ * R2: same prescaler for arbitration & data
+ * R3: choose the lowest bitrate prescaler (brp) possible
+ * R4: configure all nodes to have the same SP
+ * R5: choose sjw as large as possible
+ * R6: enable transmitter delay compensation for data bitrates >= 1MBit/s
+ */
+int
+cia_fd_cbt_fixed(
+	struct can_bit_timing_hw_contraints const *hw_nominal,
+	struct can_bit_timing_hw_contraints const *hw_data,
+	struct can_bit_timing_constraints_fixed const *user_nominal,
+	struct can_bit_timing_constraints_fixed const *user_data,
+	struct can_bit_timing_settings *settings_nominal,
+	struct can_bit_timing_settings *settings_data);
+
+/* floating point version */
+int
+cia_fd_cbt_real(
+	struct can_bit_timing_hw_contraints const *hw_nominal,
+	struct can_bit_timing_hw_contraints const *hw_data,
+	struct can_bit_timing_constraints_real const *user_nominal,
+	struct can_bit_timing_constraints_real const *user_data,
+	struct can_bit_timing_settings *settings_nominal,
+	struct can_bit_timing_settings *settings_data);
+
 
 
 #ifdef __cplusplus

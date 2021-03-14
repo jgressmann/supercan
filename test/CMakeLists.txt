@@ -4,6 +4,7 @@ project(supercan LANGUAGES C CXX)
 set (CMAKE_C_STANDARD 11)
 set (CMAKE_CXX_STANDARD 14)
 
+enable_testing()
 
 function(SetMaxWarningLevel compilerFlagsVar)
     #message(STATUS "var: ${compilerFlagsVar}")
@@ -53,3 +54,5 @@ include_directories(
 
 add_executable(supercan-test ${TEST_SRC_LIST} ${LIB_SRC_LIST})
 target_link_libraries(supercan-test CppUnitLite2)
+
+add_test(NAME supercan COMMAND supercan-test)

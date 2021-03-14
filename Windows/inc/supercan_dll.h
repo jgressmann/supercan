@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,8 +49,8 @@ extern "C" {
 #endif
 
 #define SC_DLL_VERSION_MAJOR 0
-#define SC_DLL_VERSION_MINOR 2
-#define SC_DLL_VERSION_PATCH 0
+#define SC_DLL_VERSION_MINOR 4
+#define SC_DLL_VERSION_PATCH 2
 
 
 
@@ -70,8 +70,12 @@ extern "C" {
 #define SC_DLL_ERROR_SEQ_VIOLATION          13  ///< jumbled CAN message sequence
 #define SC_DLL_ERROR_REASSEMBLY_SPACE       14  ///< insufficient message reassembly buffer space
 #define SC_DLL_ERROR_TIMEOUT                15  ///< timeout
-#define SC_DLL_ERROR_AGAIN                  16  ///< try again
-#define SC_DLL_ERROR_BUFER_TOO_SMALL        17  ///< buffer too small
+#define SC_DLL_ERROR_AGAIN                  16  ///< try again (later)
+#define SC_DLL_ERROR_BUFFER_TOO_SMALL       17  ///< buffer too small
+#define SC_DLL_ERROR_USER_HANDLE_SIGNALED   18  ///< user provided handle was signaled
+#define SC_DLL_ERROR_ACCESS_DENIED          19  ///< access denied
+#define SC_DLL_ERROR_INVALID_OPERATION      20  ///< operation not possible in current state
+
 
 typedef uint16_t(*sc_dev_to_host16)(uint16_t value);
 typedef uint32_t(*sc_dev_to_host32)(uint32_t value);
@@ -121,7 +125,10 @@ SC_DLL_API int sc_dev_count(uint32_t* count);
 SC_DLL_API int sc_dev_id_unicode(uint32_t index, wchar_t* buf, size_t* len);
 
 /** Open device by index. */
-SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t** dev);
+SC_DLL_API int sc_dev_open_by_index(uint32_t index, sc_dev_t** dev);
+
+/** Open device by identifier. */
+SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** dev);
 
 /** Closes the open device. */
 SC_DLL_API void sc_dev_close(sc_dev_t* dev);
@@ -194,7 +201,12 @@ SC_DLL_API int sc_cmd_ctx_run(
     DWORD timeout_ms);
 
 
-typedef void* sc_can_stream_t;
+typedef struct sc_can_stream {
+    HANDLE user_handle;     ///< optional user handle to wait on in sc_can_stream_rx
+    uint16_t tx_capacity;   ///< capacity of transmit buffer
+    uint16_t reserved;
+} sc_can_stream_t;
+
 typedef int (*sc_can_stream_rx_callback)(void* ctx, void const* ptr, uint16_t bytes);
 
 /** Uninitializes the stream
@@ -202,7 +214,7 @@ typedef int (*sc_can_stream_rx_callback)(void* ctx, void const* ptr, uint16_t by
  * \param stream object to uninitialize, can be NULL
  *
  */
-SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t stream);
+SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t *stream);
 
 /** Initializes the stream
  *
@@ -223,8 +235,44 @@ SC_DLL_API int sc_can_stream_init(
     void *ctx,
     sc_can_stream_rx_callback callback,
     int rreqs,
-    sc_can_stream_t* stream);
+    sc_can_stream_t** stream);
 
+
+/** Starts a new batched transmit
+ *
+ * \param stream    CAN stream
+ *
+ * \returns error code
+ */
+SC_DLL_API int sc_can_stream_tx_batch_begin(sc_can_stream_t* stream);
+
+/** Adds buffers to the current transmit batch
+ *
+ * \param stream    CAN stream
+ * \param buffers   Array of buffers
+ * \param sizes     Array of sizes (one for each buffer)
+ * \param count     Number of buffers/sizes in the array
+ * \param added     Output number of buffers added
+ *
+ * \returns error code 
+ */
+SC_DLL_API int sc_can_stream_tx_batch_add(
+    sc_can_stream_t* stream,
+    uint8_t const** buffers,
+    uint16_t const* sizes,
+    size_t count,
+    size_t* added);
+
+/** Finishes the current batch
+ *
+ * Is is legal to end an empty batch in which case
+ * no transmit will be started.
+ * 
+ * \param stream    CAN stream
+ *
+ * \returns error code
+ */
+SC_DLL_API int sc_can_stream_tx_batch_end(sc_can_stream_t* stream);
 
 /** Transmit a frame
  *
@@ -235,9 +283,9 @@ SC_DLL_API int sc_can_stream_init(
  * \returns error code
  */
 SC_DLL_API int sc_can_stream_tx(
-    sc_can_stream_t stream,
-    void const* ptr,
-    size_t bytes);
+    sc_can_stream_t* stream,
+    uint8_t const* ptr,
+    uint16_t bytes);
 
 /** Receives messages
  *
@@ -247,7 +295,7 @@ SC_DLL_API int sc_can_stream_tx(
  * \param timeout_ms    timeout in milliseconds, argument to WaitForMultipleObjects.
  * \returns error code
  */
-SC_DLL_API int sc_can_stream_rx(sc_can_stream_t stream, DWORD timeout_ms);
+SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* stream, DWORD timeout_ms);
 
 
 #ifdef __cplusplus

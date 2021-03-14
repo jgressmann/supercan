@@ -1,0 +1,27 @@
+HKCR
+{
+	ForceRemove SuperCAN.CSuperCAN.1 = s 'CSuperCAN Class'
+	{
+		CLSID = s '{E6214AB1-56AD-4215-8688-095D3816F260}'
+	}
+	ForceRemove SuperCAN.CSuperCAN = s 'CSuperCAN Class'
+	{
+		CurVer = s 'SuperCAN.CSuperCAN.1'
+	}
+	NoRemove CLSID
+	{
+		ForceRemove {E6214AB1-56AD-4215-8688-095D3816F260} = s 'CSuperCAN Class'
+		{
+			ProgID = s 'SuperCAN.CSuperCAN.1'
+			VersionIndependentProgID = s 'SuperCAN.CSuperCAN'
+			LocalServer32 = s '%MODULE%'
+			{
+				ServerExecutable = s '%MODULE%'
+			}
+			'TypeLib' = s '{fd71338b-9533-4785-8c2f-664ece4bebee}'
+			'Version' = s '1.0'
+			val LocalizedString = s '@%MODULE%,-1'
+			InprocHandler32 = s 'Ole32.dll'
+		}
+	}
+}

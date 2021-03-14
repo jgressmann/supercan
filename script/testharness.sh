@@ -143,11 +143,13 @@ if [ $init -ne 0 ];then
 fi
 
 
-max_frames=$((seconds*1000))
+max_frames=$((seconds*10000))
 errors=0
+startup_wait_s=2
+candump_wait_s=3
 
 #-I 42 -L 8 -D i -g 1 -b -n $max_frames
-single_sender_can_gen_flags="-e -I r -L r -D r -g 1 -b -n $max_frames"
+single_sender_can_gen_flags="-e -I r -L r -D r -g 0 -p 1 -b -n $max_frames"
 
 same_messages()
 {
@@ -190,12 +192,12 @@ candump -n $max_frames -H -t z -L $can_good >$good_to_test_file_good_path &
 good_to_test_good_pid=$!
 
 # wait a bit, else we may not get first frame
-sleep 3
+sleep $startup_wait_s
 
 cangen $single_sender_can_gen_flags $can_good
 
 # brittle!
-sleep 3
+sleep $candump_wait_s
 kill $good_to_test_test_pid $good_to_test_good_pid 2>/dev/null || true
 
 set +e
@@ -252,12 +254,12 @@ candump -n $max_frames -H -t z -L $can_good >$test_to_good_file_good_path &
 test_to_good_good_pid=$!
 
 # wait a bit, else we may not get first frame
-sleep 3
+sleep $startup_wait_s
 
 cangen $single_sender_can_gen_flags $can_test
 
 # brittle!
-sleep 3
+sleep $candump_wait_s
 kill $test_to_good_test_pid $test_to_good_good_pid 2>/dev/null || true
 
 
@@ -317,7 +319,7 @@ candump -n $(($max_frames*2)) -H -t z -L $can_good >$both_file_good_path &
 both_good_candump_pid=$!
 
 # wait a bit, else we may not get first frame
-sleep 3
+sleep $startup_wait_s
 
 cangen $both_sender_can_gen_flags -I 1 $can_good &
 both_good_cangen_pid=$!
@@ -333,7 +335,7 @@ wait $both_good_cangen_pid
 wait $both_test_cangen_pid
 
 # brittle!
-sleep 3
+sleep $candump_wait_s
 kill $both_test_candump_pid $both_good_candump_pid 2>/dev/null || true
 
 cat "$both_file_test_path" | awk '{ print $3; }' | grep "1##" | sed -E 's/0*(1|2)##//g' >"$log_dir/both_test_send_by_good_content.log"

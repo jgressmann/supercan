@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -63,7 +63,8 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 
 // I am going to assume Windows on ARM is little endian
 #define NATIVE_BYTE_ORDER SC_BYTE_ORDER_LE
-
+#define SC_CAN_STREAM_MAX_RX_WAIT_HANDLES 64
+#define SC_CAN_STREAM_DEFAULT_RX_WAIT_HANDLES 32
 
 static struct sc_data {
     wchar_t *dev_list;
@@ -102,32 +103,24 @@ struct sc_dev_ex {
     WINUSB_INTERFACE_HANDLE usb_handle;
 };
 
-struct sc_buffer_seq {
-    uint16_t seq_no;
-    uint8_t index;
-    uint8_t seq_count;
-};
-
 struct sc_stream {
+    sc_can_stream_t exposed;
     struct sc_dev_ex* dev;
     void* ctx;
     sc_can_stream_rx_callback rx_callback;
     PUCHAR rx_buffers;
     PUCHAR tx_buffers;
-    HANDLE *rx_events;
     OVERLAPPED* rx_ovs;
-    uint8_t* rx_map;
     uint8_t* rx_reassembly_buffer;
-    struct sc_buffer_seq* rx_parked;
     OVERLAPPED tx_ovs[2];
     chunky_reader r;
     chunky_writer w;
     size_t buffer_size;
     uint16_t rx_reassembly_count;
     uint16_t rx_reassembly_capacity;
+    uint16_t tx_size;
     uint8_t rx_count;
-    uint8_t rx_submit_count;
-    uint8_t rx_park_count;
+    uint8_t rx_next;
     uint8_t tx_index;
 };
 
@@ -293,7 +286,7 @@ SC_DLL_API int sc_dev_id_unicode(uint32_t index, wchar_t* buf, size_t* len)
         return SC_DLL_ERROR_NONE;
     }
 
-    return SC_DLL_ERROR_BUFER_TOO_SMALL;
+    return SC_DLL_ERROR_BUFFER_TOO_SMALL;
 }
 
 SC_DLL_API void sc_dev_close(sc_dev_t* dev)
@@ -313,7 +306,16 @@ SC_DLL_API void sc_dev_close(sc_dev_t* dev)
     }
 }
 
-SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
+SC_DLL_API int sc_dev_open_by_index(uint32_t index, sc_dev_t** dev)
+{
+    if (!dev || index >= sc_data.dev_count) {
+        return SC_DLL_ERROR_INVALID_PARAM;
+    }
+
+    return sc_dev_open_by_id(&sc_data.dev_list[sc_data.dev_name_indices[index]], dev);
+}
+
+SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
 {
     int error = SC_DLL_ERROR_NONE;
     struct sc_dev_ex *dev = NULL;
@@ -323,10 +325,8 @@ SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
     OVERLAPPED cmd_rx_overlapped = { 0 };
     OVERLAPPED cmd_tx_overlapped = { 0 };
 
-
-    if (!_dev || index >= sc_data.dev_count) {
-        error = SC_DLL_ERROR_INVALID_PARAM;
-        goto Error;
+    if (!_dev || !id) {
+        return SC_DLL_ERROR_INVALID_PARAM;
     }
 
     dev = calloc(1, sizeof(*dev));
@@ -352,7 +352,7 @@ SC_DLL_API int sc_dev_open(uint32_t index, sc_dev_t **_dev)
     }
 
     dev->dev_handle = CreateFile(
-        &sc_data.dev_list[sc_data.dev_name_indices[index]],
+        id,
         GENERIC_WRITE | GENERIC_READ,
         FILE_SHARE_WRITE | FILE_SHARE_READ,
         NULL,
@@ -844,6 +844,14 @@ SC_DLL_API char const* sc_strerror(int error)
         return "timeout";
     case SC_DLL_ERROR_AGAIN:
         return "try again later";
+    case SC_DLL_ERROR_BUFFER_TOO_SMALL:
+        return "buffer too small";
+    case SC_DLL_ERROR_USER_HANDLE_SIGNALED:
+        return "user provided handle was signaled";
+    case SC_DLL_ERROR_ACCESS_DENIED:
+        return "access denied";
+    case SC_DLL_ERROR_INVALID_OPERATION:
+        return "invalid operation";
     default:
         return "sc_strerror not implemented";
     }
@@ -879,9 +887,9 @@ SC_DLL_API int sc_dev_cancel(sc_dev_t *_dev, OVERLAPPED* ov)
     return SC_DLL_ERROR_NONE;
 }
 
-SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t _stream)
+SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t* _stream)
 {
-    struct sc_stream* stream = _stream;
+    struct sc_stream* stream = (struct sc_stream*)_stream;
 
     if (stream) {
         struct sc_dev_ex *dev = (struct sc_dev_ex*)stream->dev;
@@ -910,10 +918,7 @@ SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t _stream)
 
         free(stream->rx_buffers);
         free(stream->tx_buffers);
-        free(stream->rx_events);
-        free(stream->rx_map);
         free(stream->rx_reassembly_buffer);
-        free(stream->rx_parked);
         free(stream);
     }
 }
@@ -924,7 +929,7 @@ SC_DLL_API int sc_can_stream_init(
     void* ctx,
     sc_can_stream_rx_callback callback,
     int rreqs,
-    sc_can_stream_t* _stream)
+    sc_can_stream_t** _stream)
 {
     struct sc_stream* stream = NULL;
     int error = SC_DLL_ERROR_NONE;
@@ -935,10 +940,10 @@ SC_DLL_API int sc_can_stream_init(
     }
 
     if (rreqs <= 0) {
-        rreqs = 4 * (buffer_size < dev->epp_size ? 1 : buffer_size / dev->epp_size);
+        rreqs = SC_CAN_STREAM_DEFAULT_RX_WAIT_HANDLES;
     }
 
-    if (rreqs > 64) {
+    if (rreqs > SC_CAN_STREAM_MAX_RX_WAIT_HANDLES) {
         error = SC_DLL_ERROR_INVALID_PARAM; // WaitForMultipleObjects limit
         goto Exit;
     }
@@ -953,7 +958,6 @@ SC_DLL_API int sc_can_stream_init(
     stream->ctx = ctx;
     stream->rx_callback = callback;
     stream->buffer_size = buffer_size;
-    stream->rx_count = rreqs;
     stream->rx_reassembly_capacity = 256;
     chunky_reader_init(&stream->r, dev, &dev_swap16);
     chunky_writer_init(&stream->w, dev->epp_size, dev, &dev_swap16);
@@ -976,45 +980,13 @@ SC_DLL_API int sc_can_stream_init(
         goto Error;
     }
 
-    stream->rx_map = calloc(rreqs, sizeof(*stream->rx_map));
-    if (!stream->rx_map) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Error;
-    }
-
-    stream->rx_events = calloc(rreqs, sizeof(*stream->rx_events));
-    if (!stream->rx_events) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Error;
-    }
-
     stream->rx_reassembly_buffer = calloc(stream->rx_reassembly_capacity, sizeof(*stream->rx_reassembly_buffer));
     if (!stream->rx_reassembly_buffer) {
         error = SC_DLL_ERROR_OUT_OF_MEM;
         goto Error;
     }
 
-    stream->rx_parked = calloc(stream->rx_count, sizeof(*stream->rx_parked));
-    if (!stream->rx_parked) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Error;
-    }
-
-    for (unsigned i = 0; i < (unsigned)rreqs; ++i) {
-        HANDLE h = CreateEventW(NULL, FALSE, FALSE, NULL);
-        if (!h) {
-            DWORD e = GetLastError();
-            HRESULT hr = HRESULT_FROM_WIN32(e);
-            error = HrToError(hr);
-            goto Error;
-        }
-
-        stream->rx_ovs[i].hEvent = h;
-        stream->rx_events[i] = h;
-        stream->rx_map[i] = i;
-    }
-
-    for (size_t i = 0; i < _countof(stream->tx_ovs); ++i) {
+   for (size_t i = 0; i < _countof(stream->tx_ovs); ++i) {
         HANDLE h = CreateEventW(NULL, TRUE, TRUE, NULL);
         if (!h) {
             DWORD e = GetLastError();
@@ -1026,8 +998,19 @@ SC_DLL_API int sc_can_stream_init(
         stream->tx_ovs[i].hEvent = h;
     }
 
-    // submit all reads tokens
+    // create and submit all IN tokens
     for (size_t i = 0; i < (size_t)rreqs; ++i) {
+
+        HANDLE h = CreateEventW(NULL, FALSE, FALSE, NULL);
+        if (!h) {
+            DWORD e = GetLastError();
+            HRESULT hr = HRESULT_FROM_WIN32(e);
+            error = HrToError(hr);
+            goto Error;
+        }
+
+        stream->rx_ovs[i].hEvent = h;
+
         if (!WinUsb_ReadPipe(
             stream->dev->usb_handle,
             stream->dev->exposed.can_epp | 0x80,
@@ -1048,17 +1031,19 @@ SC_DLL_API int sc_can_stream_init(
             error = SC_DLL_ERROR_UNKNOWN;
             goto Error;
         }
+
+        ++stream->rx_count;
     }
 
-    stream->rx_submit_count = stream->rx_count;
     chunky_writer_set(&stream->w, &stream->tx_buffers[stream->tx_index * stream->buffer_size], (uint16_t)stream->buffer_size);
+    stream->exposed.tx_capacity = chunky_writer_available(&stream->w);
 
-    *_stream = stream;
+    *_stream = (sc_can_stream_t*)stream;
 Exit:
     return error;
 
 Error:
-    sc_can_stream_uninit(stream);
+    sc_can_stream_uninit((sc_can_stream_t*)stream);
     goto Exit;
 }
 
@@ -1098,16 +1083,15 @@ static int sc_process_rx_buffer(
 }
 
 static inline int sc_rx_submit(
-    struct sc_stream* stream,
-    uint8_t index)
+    struct sc_stream* stream)
 {
     if (!WinUsb_ReadPipe(
         stream->dev->usb_handle,
         stream->dev->exposed.can_epp | 0x80,
-        stream->rx_buffers + (size_t)index * stream->buffer_size,
+        stream->rx_buffers + (size_t)stream->rx_next * stream->buffer_size,
         (ULONG)stream->buffer_size,
         NULL,
-        &stream->rx_ovs[index])) {
+        &stream->rx_ovs[stream->rx_next])) {
         DWORD e = GetLastError();
         if (ERROR_IO_PENDING != e) {
             HRESULT hr = HRESULT_FROM_WIN32(e);
@@ -1118,9 +1102,7 @@ static inline int sc_rx_submit(
         return SC_DLL_ERROR_UNKNOWN;
     }
 
-    stream->rx_map[stream->rx_submit_count] = index;
-    stream->rx_events[stream->rx_submit_count] = stream->rx_ovs[index].hEvent;
-    ++stream->rx_submit_count;
+    stream->rx_next = (stream->rx_next + 1) % stream->rx_count;
 
     return SC_DLL_ERROR_NONE;
 }
@@ -1183,75 +1165,40 @@ static int sc_process_chunks(
     return SC_DLL_ERROR_NONE;
 }
 
-SC_DLL_API int sc_can_stream_rx(sc_can_stream_t _stream, DWORD timeout_ms)
+SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
 {
-    struct sc_stream* stream = _stream;
+    struct sc_stream* stream = (struct sc_stream*)_stream;
     int error = SC_DLL_ERROR_NONE;
 
     if (!stream) {
         return SC_DLL_ERROR_INVALID_PARAM;
     }
 
-    for (bool done = false; !done; ) {
-        done = true;
+    uint8_t index = stream->rx_next;
+    HANDLE wait_handles[2] = { stream->rx_ovs[index].hEvent, stream->exposed.user_handle };
+    DWORD wait_count = 1 + (stream->exposed.user_handle != NULL);
+        
+    DWORD result = WaitForMultipleObjects(wait_count, wait_handles, FALSE, timeout_ms);
 
-        uint16_t target_seq_no = stream->r.seq_no + 1;
-        for (unsigned i = 0; i < stream->rx_park_count; ++i) {
-            struct sc_buffer_seq const* e = &stream->rx_parked[i];
-            if (target_seq_no != e->seq_no) {
-                continue;
-            }
-
-            uint8_t index = e->index;
-            uint8_t seq_count = e->seq_count;
-            stream->rx_parked[i] = stream->rx_parked[stream->rx_park_count - 1];
-            --stream->rx_park_count;
-            //fprintf(stderr, "restore seq=%u count=%u index=%u\n", target_seq_no, seq_count, (unsigned)index);
-
-            int error = sc_process_chunks(stream, index, seq_count);
-            if (error) {
-                return error;
-            }
-
-            error = sc_rx_submit(stream, index);
-            if (error) {
-                return error;
-            }
-
-            done = false;
+    if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + wait_count) {
+        DWORD handle_index = result - WAIT_OBJECT_0;
+        if (1 == handle_index) {
+            return SC_DLL_ERROR_USER_HANDLE_SIGNALED;
         }
-    }
 
-    if (stream->rx_submit_count) {
-        DWORD result = WaitForMultipleObjects(stream->rx_submit_count, stream->rx_events, FALSE, timeout_ms);
+        DWORD transferred = 0;
+        if (!WinUsb_GetOverlappedResult(
+            stream->dev->usb_handle,
+            &stream->rx_ovs[index],
+            &transferred,
+            FALSE)) {
+            DWORD e = GetLastError();
+            HRESULT hr = HRESULT_FROM_WIN32(e);
+            error = HrToError(hr);
+            return error;
+        }
 
-        if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + stream->rx_submit_count) {
-            uint8_t submit_index = (uint8_t)(result - WAIT_OBJECT_0);
-            uint8_t index = stream->rx_map[submit_index];
-            assert(index < stream->rx_count);
-            uint8_t replacement = stream->rx_map[stream->rx_submit_count - 1];
-            assert(replacement < stream->rx_count);
-            stream->rx_map[submit_index] = replacement;
-            stream->rx_events[submit_index] = stream->rx_ovs[replacement].hEvent;
-            --stream->rx_submit_count;
-
-
-            DWORD transferred = 0;
-            if (!WinUsb_GetOverlappedResult(
-                stream->dev->usb_handle,
-                &stream->rx_ovs[index],
-                &transferred,
-                FALSE)) {
-                DWORD e = GetLastError();
-                HRESULT hr = HRESULT_FROM_WIN32(e);
-                error = HrToError(hr);
-                return error;
-            }
-
-            if (0 == transferred) {
-                goto resubmit;
-            }
-
+        if (transferred) {
             uint16_t seq_count = (uint16_t)(transferred / stream->dev->exposed.epp_size);
             if (!seq_count || (DWORD)seq_count * stream->dev->exposed.epp_size != transferred) {
                 return SC_DLL_ERROR_PROTO_VIOLATION;
@@ -1259,50 +1206,25 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t _stream, DWORD timeout_ms)
 
             assert(seq_count < 256);
 
-            // process buffer
-            uint8_t *base_ptr = stream->rx_buffers + stream->buffer_size * index;
-            uint16_t buffer_seq_no;
-            uint16_t target_seq_no = stream->r.seq_no + 1; // must be in type to lap
-            {
-                struct chunky_chunk_hdr* hdr = (struct chunky_chunk_hdr*)base_ptr;
-                buffer_seq_no = stream->dev->exposed.dev_to_host16(hdr->seq_no);
-            }
-
-            if (target_seq_no != buffer_seq_no) {
-                if (stream->rx_park_count == stream->rx_count) {
-                    return SC_DLL_ERROR_UNKNOWN;
-                }
-
-
-                struct sc_buffer_seq* e = &stream->rx_parked[stream->rx_park_count++];
-                e->index = index;
-                e->seq_no = buffer_seq_no;
-                e->seq_count = (uint8_t)seq_count;
-
-                //fprintf(stderr, "park seq=%u count=%u index=%u\n", (unsigned)buffer_seq_no, seq_count, (unsigned)index);
-            }
-            else {
-                error = sc_process_chunks(stream, index, (uint8_t)seq_count);
-                if (error) {
-                    return error;
-                }
-
-            resubmit:
-                error = sc_rx_submit(stream, index);
-                if (error) {
-                    return error;
-                }
+            error = sc_process_chunks(stream, index, (uint8_t)seq_count);
+            if (error) {
+                return error;
             }
         }
-        else if (WAIT_TIMEOUT == result) {
-            // nothing to do
-            return SC_DLL_ERROR_TIMEOUT;
-        }
-        else {
-            HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
-            error = HrToError(hr);
+
+        error = sc_rx_submit(stream);
+        if (error) {
             return error;
         }
+    }
+    else if (WAIT_TIMEOUT == result) {
+        // nothing to do
+        return SC_DLL_ERROR_TIMEOUT;
+    }
+    else {
+        HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+        error = HrToError(hr);
+        return error;
     }
 
     return SC_DLL_ERROR_NONE;
@@ -1312,7 +1234,19 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
 {
     int error = SC_DLL_ERROR_NONE;
     DWORD dw = 0;
-    unsigned usb_data_size = chunky_writer_finalize(&stream->w);
+    DWORD usb_data_size = chunky_writer_finalize(&stream->w);
+    unsigned prev_index = (stream->tx_index + 1) & 0x1;
+
+    dw = WaitForSingleObject(stream->tx_ovs[prev_index].hEvent, INFINITE);
+    if (WAIT_OBJECT_0 == dw) {
+        ResetEvent(stream->tx_ovs[stream->tx_index].hEvent);
+    }
+    else {
+        dw = GetLastError();
+        HRESULT hr = HRESULT_FROM_WIN32(dw);
+        error = HrToError(hr);
+        return error;
+    }
 
     if (WinUsb_WritePipe(
         stream->dev->usb_handle,
@@ -1332,10 +1266,12 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
     }
 
     // swap tx buffers
-    stream->tx_index = (stream->tx_index + 1) & 0x1;
+    stream->tx_index = prev_index;
+    chunky_writer_set(&stream->w, &stream->tx_buffers[stream->tx_index * stream->buffer_size], (uint16_t)stream->buffer_size);
 
+    /*
     // wait for other event before we use the buffer
-    /*DWORD transferred = 0;
+    DWORD transferred = 0;
     if (!WinUsb_GetOverlappedResult(
         stream->dev->usb_handle,
         &stream->tx_ovs[stream->tx_index],
@@ -1345,7 +1281,13 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
         HRESULT hr = HRESULT_FROM_WIN32(e);
         error = HrToError(hr);
         return error;
-    }*/
+    }
+
+    ResetEvent(stream->tx_ovs[stream->tx_index].hEvent);
+    chunky_writer_set(&stream->w, &stream->tx_buffers[stream->tx_index * stream->buffer_size], (uint16_t)stream->buffer_size);
+    */
+
+    /*
     dw = WaitForSingleObject(stream->tx_ovs[stream->tx_index].hEvent, INFINITE);
     if (WAIT_OBJECT_0 == dw) {
         ResetEvent(stream->tx_ovs[stream->tx_index].hEvent);
@@ -1357,67 +1299,106 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
         error = HrToError(hr);
         return error;
     }
+    */
 
     return error;
 }
 
-SC_DLL_API int sc_can_stream_tx(
-    sc_can_stream_t _stream,
-    void const* _ptr,
-    size_t bytes)
-{
-    struct sc_stream* stream = _stream;
-    uint8_t const* ptr = _ptr;
-    uint8_t const* end = ptr + bytes;
-    int error = SC_DLL_ERROR_NONE;
-    DWORD result = 0;
 
-    if (!stream || !ptr || !bytes) {
+SC_DLL_API int sc_can_stream_tx_batch_begin(sc_can_stream_t* _stream)
+{
+    struct sc_stream* stream = (struct sc_stream*)_stream;
+    
+    if (!stream) {
         return SC_DLL_ERROR_INVALID_PARAM;
     }
 
-    while (ptr + SC_MSG_HEADER_LEN <= end) {
-        struct sc_msg_header const* msg = (struct sc_msg_header const*)ptr;
+    if (stream->tx_size) {
+        return SC_DLL_ERROR_INVALID_OPERATION;
+    }
 
-        if (!msg->id || !msg->len) {
+    return SC_DLL_ERROR_NONE;
+}
+
+SC_DLL_API int sc_can_stream_tx_batch_add(
+    sc_can_stream_t* _stream,
+    uint8_t const** buffers,
+    uint16_t const* sizes,
+    size_t count,
+    size_t* added)
+{
+    struct sc_stream* stream = (struct sc_stream*)_stream;
+    size_t buffers_to_add = 0;
+    uint16_t bytes = 0;
+
+    if (!stream || !buffers || !added) {
+        return SC_DLL_ERROR_INVALID_PARAM;
+    }
+
+    bytes = stream->tx_size;    
+
+    for (; buffers_to_add < count; ++buffers_to_add) {
+        uint16_t new_bytes = bytes + sizes[buffers_to_add];
+        if (new_bytes > stream->exposed.tx_capacity) {
             break;
         }
 
-        if (msg->len < SC_MSG_HEADER_LEN) {
-            return SC_DLL_ERROR_PROTO_VIOLATION;
-        }
-
-        if (ptr + msg->len > end) {
-            return SC_DLL_ERROR_INVALID_PARAM;
-        }
-
-        unsigned message_bytes = msg->len;
-
-        for (;;) {
-            unsigned w = chunky_writer_write(&stream->w, ptr, message_bytes);
-
-            ptr += w;
-            message_bytes -= w;
-
-            if (message_bytes) { // chunk full
-                error = sc_can_stream_tx_send_buffer(stream);
-                if (error) {
-                    return error;
-                }
-            }
-            else {
-                break;
-            }
-        }
+        bytes = new_bytes;
     }
+
+    for (size_t i = 0; i < buffers_to_add; ++i) {
+        size_t w = chunky_writer_write(&stream->w, buffers[i], sizes[i]);
+        assert(w == sizes[i]);
+        stream->tx_size += sizes[i];
+    }
+
+    *added = buffers_to_add;
+
+    return SC_DLL_ERROR_NONE;
+}
+
+SC_DLL_API int sc_can_stream_tx_batch_end(sc_can_stream_t* _stream)
+{
+    struct sc_stream* stream = (struct sc_stream*)_stream;
+
+    if (!stream) {
+        return SC_DLL_ERROR_INVALID_PARAM;
+    }
+
+    stream->tx_size = 0;
 
     if (chunky_writer_any(&stream->w)) {
-        error = sc_can_stream_tx_send_buffer(stream);
-        if (error) {
-            return error;
-        }
+        return sc_can_stream_tx_send_buffer(stream);
     }
 
+    return SC_DLL_ERROR_NONE;
+}
+
+SC_DLL_API int sc_can_stream_tx(
+    sc_can_stream_t* stream,
+    uint8_t const* ptr,
+    uint16_t bytes)
+{
+    size_t added = 0;
+    int error = 0;
+
+
+    error = sc_can_stream_tx_batch_begin(stream);
+
+    if (error) {
+        return error;
+    }
+
+    error = sc_can_stream_tx_batch_add(stream, &ptr, &bytes, 1, &added);
+    if (error) {
+        return error;
+    }
+
+    if (!added) {
+        return SC_DLL_ERROR_UNKNOWN;
+    }
+
+    error = sc_can_stream_tx_batch_end(stream);
 
     return error;
 }
