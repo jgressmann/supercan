@@ -1272,7 +1272,7 @@ SC_DLL_API int sc_can_stream_tx_batch_add(
     }
 
     for (size_t i = 0; i < buffers_to_add; ++i) {
-        memcpy(&stream->tx_buffers[stream->tx_index * stream->buffer_size], buffers[i], sizes[i]);
+        memcpy(&stream->tx_buffers[stream->tx_index * stream->buffer_size + stream->tx_size], buffers[i], sizes[i]);
         stream->tx_size += sizes[i];
     }
 
