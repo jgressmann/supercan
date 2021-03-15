@@ -44,9 +44,10 @@
 
 #define LOG_FLAG_RX_DT      0x00000001
 #define LOG_FLAG_RX_MSG     0x00000002
-#define LOG_FLAG_BUS_STATE  0x00000004
+#define LOG_FLAG_CAN_STATE  0x00000004
 #define LOG_FLAG_TX_MSG     0x00000008
 #define LOG_FLAG_TXR        0x00000010
+#define LOG_FLAG_USB_STATE  0x00000020
 
 
 #ifdef __cplusplus
@@ -72,10 +73,16 @@ struct app_ctx {
     unsigned log_flags;
     unsigned tx_job_count;
     unsigned device_index;
+    int can_bus_state_last;
+    int can_tx_errors_last;
+    int can_rx_errors_last;
+    int usb_rx_lost;
+    int usb_tx_dropped;
     bool rx_has_xtd_frame;
     bool rx_has_fdf_frame;
     bool fdf;
     bool config;
+    bool log_on_change;
 };
 
 static inline uint8_t dlc_to_len(uint8_t dlc)

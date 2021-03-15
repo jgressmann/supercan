@@ -48,18 +48,11 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 
 #include <assert.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <supercan_dll.h>
 #include <supercan_winapi.h>
 #include <stdio.h>
 
-
-#define CHUNKY_CHUNK_SIZE_TYPE uint16_t
-#define CHUNKY_BUFFER_SIZE_TYPE unsigned
-#define CHUNKY_BYTESWAP
-#include "chunky.h"
-#undef CHUNKY_CHUNK_SIZE_TYPE
-#undef CHUNKY_BUFFER_SIZE_TYPE
-#undef CHUNKY_BYTESWAP
 
 // I am going to assume Windows on ARM is little endian
 #define NATIVE_BYTE_ORDER SC_BYTE_ORDER_LE
@@ -113,8 +106,6 @@ struct sc_stream {
     OVERLAPPED* rx_ovs;
     uint8_t* rx_reassembly_buffer;
     OVERLAPPED tx_ovs[2];
-    chunky_reader r;
-    chunky_writer w;
     size_t buffer_size;
     uint16_t rx_reassembly_count;
     uint16_t rx_reassembly_capacity;
@@ -958,10 +949,8 @@ SC_DLL_API int sc_can_stream_init(
     stream->ctx = ctx;
     stream->rx_callback = callback;
     stream->buffer_size = buffer_size;
-    stream->rx_reassembly_capacity = 256;
-    chunky_reader_init(&stream->r, dev, &dev_swap16);
-    chunky_writer_init(&stream->w, dev->epp_size, dev, &dev_swap16);
-
+    stream->rx_reassembly_capacity = (uint16_t)(2 * buffer_size);
+    
     stream->rx_buffers = calloc(rreqs, stream->buffer_size);
     if (!stream->rx_buffers) {
         error = SC_DLL_ERROR_OUT_OF_MEM;
@@ -1035,8 +1024,7 @@ SC_DLL_API int sc_can_stream_init(
         ++stream->rx_count;
     }
 
-    chunky_writer_set(&stream->w, &stream->tx_buffers[stream->tx_index * stream->buffer_size], (uint16_t)stream->buffer_size);
-    stream->exposed.tx_capacity = chunky_writer_available(&stream->w);
+    stream->exposed.tx_capacity = (uint16_t)stream->buffer_size;
 
     *_stream = (sc_can_stream_t*)stream;
 Exit:
@@ -1107,59 +1095,37 @@ static inline int sc_rx_submit(
     return SC_DLL_ERROR_NONE;
 }
 
-static int sc_process_chunks(
+static int sc_process_messages(
     struct sc_stream* stream,
     unsigned index,
-    unsigned seq_count)
+    DWORD size)
 {
-    uint8_t* base_ptr = stream->rx_buffers + (size_t)stream->buffer_size * index;
+    PUCHAR in_beg = stream->rx_buffers + (size_t)stream->buffer_size * index;
+    PUCHAR in_end = in_beg + size;
 
-    for (unsigned i = 0; i < seq_count; ++i) {
-        PUCHAR in_beg = base_ptr + i * stream->dev->exposed.epp_size;
-        PUCHAR in_end = in_beg + stream->dev->exposed.epp_size;
-        PUCHAR in_ptr = NULL;
-        uint16_t data_size = 0;
-        int error = chunky_reader_chunk_process(&stream->r, in_beg, &in_ptr, &data_size);
-
-        if (CHUNKYE_NONE != error) {
-            //fprintf(stderr, "chunk extraction failed seq=%u count=%u index=%u\n", (unsigned)seq_no, seq_count, (unsigned)index);
-            return SC_DLL_ERROR_SEQ_VIOLATION;
+    if (stream->rx_reassembly_count) {
+        if (stream->rx_reassembly_capacity < (size_t)stream->rx_reassembly_count + size) {
+            return SC_DLL_ERROR_REASSEMBLY_SPACE;
         }
 
-        assert(in_ptr);
-        if (!data_size || data_size >= stream->dev->exposed.epp_size) {
-            return SC_DLL_ERROR_PROTO_VIOLATION;
-        }
+        memcpy(&stream->rx_reassembly_buffer[stream->rx_reassembly_count], in_beg, size);
 
-        in_beg = in_ptr;
-        in_end = in_ptr + data_size;
+        in_beg = stream->rx_reassembly_buffer;
+        in_end = in_beg + size + stream->rx_reassembly_count;
+        stream->rx_reassembly_count = 0;
+    }
+    
+    uint16_t left = 0; 
+    int error = sc_process_rx_buffer(stream, in_beg, (uint16_t)(in_end - in_beg), &left);
+    if (error) {
+        return error;
+    }
 
-        if (stream->rx_reassembly_count) {
-            if (stream->rx_reassembly_capacity < (size_t)stream->rx_reassembly_count + data_size) {
-                return SC_DLL_ERROR_REASSEMBLY_SPACE;
-            }
+    if (left) {
+        //fprintf(stderr, "save %u bytes\n", left);
+        memmove(stream->rx_reassembly_buffer, in_end - left, left);
 
-            memcpy(&stream->rx_reassembly_buffer[stream->rx_reassembly_count], in_ptr, data_size);
-
-            in_beg = stream->rx_reassembly_buffer;
-            in_end = in_beg + data_size + stream->rx_reassembly_count;
-            in_ptr = in_beg;
-
-            stream->rx_reassembly_count = 0;
-        }
-
-        uint16_t left = 0;
-        error = sc_process_rx_buffer(stream, in_ptr, (uint16_t)(in_end - in_ptr), &left);
-        if (error) {
-            return error;
-        }
-
-        if (left) {
-            //fprintf(stderr, "save %u bytes\n", left);
-            memmove(stream->rx_reassembly_buffer, in_end - left, left);
-
-            stream->rx_reassembly_count = left;
-        }
+        stream->rx_reassembly_count = left;
     }
 
     return SC_DLL_ERROR_NONE;
@@ -1199,14 +1165,7 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
         }
 
         if (transferred) {
-            uint16_t seq_count = (uint16_t)(transferred / stream->dev->exposed.epp_size);
-            if (!seq_count || (DWORD)seq_count * stream->dev->exposed.epp_size != transferred) {
-                return SC_DLL_ERROR_PROTO_VIOLATION;
-            }
-
-            assert(seq_count < 256);
-
-            error = sc_process_chunks(stream, index, (uint8_t)seq_count);
+           error = sc_process_messages(stream, index, transferred);
             if (error) {
                 return error;
             }
@@ -1234,7 +1193,6 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
 {
     int error = SC_DLL_ERROR_NONE;
     DWORD dw = 0;
-    DWORD usb_data_size = chunky_writer_finalize(&stream->w);
     unsigned prev_index = (stream->tx_index + 1) & 0x1;
 
     dw = WaitForSingleObject(stream->tx_ovs[prev_index].hEvent, INFINITE);
@@ -1252,7 +1210,7 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
         stream->dev->usb_handle,
         stream->dev->exposed.can_epp,
         &stream->tx_buffers[stream->tx_index * stream->buffer_size],
-        usb_data_size,
+        stream->tx_size,
         NULL,
         &stream->tx_ovs[stream->tx_index])) {
         return SC_DLL_ERROR_UNKNOWN; // shouldn't happen with OVERLAPPED
@@ -1267,39 +1225,6 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
 
     // swap tx buffers
     stream->tx_index = prev_index;
-    chunky_writer_set(&stream->w, &stream->tx_buffers[stream->tx_index * stream->buffer_size], (uint16_t)stream->buffer_size);
-
-    /*
-    // wait for other event before we use the buffer
-    DWORD transferred = 0;
-    if (!WinUsb_GetOverlappedResult(
-        stream->dev->usb_handle,
-        &stream->tx_ovs[stream->tx_index],
-        &transferred,
-        TRUE)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        return error;
-    }
-
-    ResetEvent(stream->tx_ovs[stream->tx_index].hEvent);
-    chunky_writer_set(&stream->w, &stream->tx_buffers[stream->tx_index * stream->buffer_size], (uint16_t)stream->buffer_size);
-    */
-
-    /*
-    dw = WaitForSingleObject(stream->tx_ovs[stream->tx_index].hEvent, INFINITE);
-    if (WAIT_OBJECT_0 == dw) {
-        ResetEvent(stream->tx_ovs[stream->tx_index].hEvent);
-        chunky_writer_set(&stream->w, &stream->tx_buffers[stream->tx_index * stream->buffer_size], (uint16_t)stream->buffer_size);
-    }
-    else {
-        dw = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(dw);
-        error = HrToError(hr);
-        return error;
-    }
-    */
 
     return error;
 }
@@ -1335,7 +1260,7 @@ SC_DLL_API int sc_can_stream_tx_batch_add(
         return SC_DLL_ERROR_INVALID_PARAM;
     }
 
-    bytes = stream->tx_size;    
+    bytes = stream->tx_size;
 
     for (; buffers_to_add < count; ++buffers_to_add) {
         uint16_t new_bytes = bytes + sizes[buffers_to_add];
@@ -1347,8 +1272,7 @@ SC_DLL_API int sc_can_stream_tx_batch_add(
     }
 
     for (size_t i = 0; i < buffers_to_add; ++i) {
-        size_t w = chunky_writer_write(&stream->w, buffers[i], sizes[i]);
-        assert(w == sizes[i]);
+        memcpy(&stream->tx_buffers[stream->tx_index * stream->buffer_size], buffers[i], sizes[i]);
         stream->tx_size += sizes[i];
     }
 
@@ -1365,10 +1289,10 @@ SC_DLL_API int sc_can_stream_tx_batch_end(sc_can_stream_t* _stream)
         return SC_DLL_ERROR_INVALID_PARAM;
     }
 
-    stream->tx_size = 0;
-
-    if (chunky_writer_any(&stream->w)) {
-        return sc_can_stream_tx_send_buffer(stream);
+    if (stream->tx_size) {        
+        int error = sc_can_stream_tx_send_buffer(stream);
+        stream->tx_size = 0;
+        return error;
     }
 
     return SC_DLL_ERROR_NONE;

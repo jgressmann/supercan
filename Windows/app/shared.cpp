@@ -145,7 +145,7 @@ void process_rx(app_ctx* ac)
             case SC_CAN_DATA_TYPE_STATUS: {
                 auto* status = &com_ctx->rx.hdr->slots[index].status;
                 
-                if (ac->log_flags & LOG_FLAG_BUS_STATE) {
+                if (ac->log_flags & LOG_FLAG_CAN_STATE) {
                     fprintf(stdout, "rx lost=%u tx dropped=%u rx errors=%u tx errors=%u bus=", status->rx_lost, status->tx_dropped, status->rx_errors, status->tx_errors);
                     switch (status->bus_status) {
                     case SC_CAN_STATUS_ERROR_ACTIVE:

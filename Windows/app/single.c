@@ -84,26 +84,63 @@ static bool process_buffer(
 
             sc_tt_track(&s->tt, timestamp_us);
 
-            if (ac->log_flags & LOG_FLAG_BUS_STATE) {
-                fprintf(stdout, "rx lost=%u tx dropped=%u rx errors=%u tx errors=%u bus=", rx_lost, tx_dropped, status->rx_errors, status->tx_errors);
-                switch (status->bus_status) {
-                case SC_CAN_STATUS_ERROR_ACTIVE:
-                    fprintf(stdout, "error_active");
-                    break;
-                case SC_CAN_STATUS_ERROR_WARNING:
-                    fprintf(stdout, "error_warning");
-                    break;
-                case SC_CAN_STATUS_ERROR_PASSIVE:
-                    fprintf(stdout, "error_passive");
-                    break;
-                case SC_CAN_STATUS_BUS_OFF:
-                    fprintf(stdout, "off");
-                    break;
-                default:
-                    fprintf(stdout, "unknown");
-                    break;
+            if (ac->log_flags & LOG_FLAG_CAN_STATE) {
+                bool log = false;
+                if (ac->log_on_change) {
+                    log = ac->can_rx_errors_last != status->rx_errors ||
+                        ac->can_tx_errors_last != status->tx_errors ||
+                        ac->can_bus_state_last != status->bus_status;
                 }
-                fprintf(stdout, "\n");
+                else {
+                    log = true;
+                }
+
+                ac->can_rx_errors_last = status->rx_errors;
+                ac->can_tx_errors_last = status->tx_errors;
+                ac->can_bus_state_last = status->bus_status;
+
+                if (log) {
+                    fprintf(stdout, "CAN rx errors=%u tx errors=%u bus=", status->rx_errors, status->tx_errors);
+                    switch (status->bus_status) {
+                    case SC_CAN_STATUS_ERROR_ACTIVE:
+                        fprintf(stdout, "error_active");
+                        break;
+                    case SC_CAN_STATUS_ERROR_WARNING:
+                        fprintf(stdout, "error_warning");
+                        break;
+                    case SC_CAN_STATUS_ERROR_PASSIVE:
+                        fprintf(stdout, "error_passive");
+                        break;
+                    case SC_CAN_STATUS_BUS_OFF:
+                        fprintf(stdout, "off");
+                        break;
+                    default:
+                        fprintf(stdout, "unknown");
+                        break;
+                    }
+                    fprintf(stdout, "\n");
+                }
+            }
+
+            if (ac->log_flags & LOG_FLAG_USB_STATE) {
+                bool log = false;
+                bool irq_queue_full = status->flags & SC_CAN_STATUS_FLAG_IRQ_QUEUE_FULL;
+                bool desync = status->flags & SC_CAN_STATUS_FLAG_TXR_DESYNC;
+                if (ac->log_on_change) {
+                    log = ac->usb_rx_lost != rx_lost || 
+                        ac->usb_tx_dropped != tx_dropped ||
+                        irq_queue_full || desync;
+                }
+                else {
+                    log = true;
+                }
+
+                ac->usb_rx_lost = rx_lost;
+                ac->usb_tx_dropped = tx_dropped;
+
+                if (log) {
+                    fprintf(stdout, "CAN->USB rx lost=%u USB->CAN tx dropped=%u irqf=%u desync=%u\n", rx_lost, tx_dropped, irq_queue_full, desync);
+                }
             }
         } break;
         case SC_MSG_CAN_ERROR: {

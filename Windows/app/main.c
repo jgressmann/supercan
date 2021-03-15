@@ -51,15 +51,19 @@ static void usage(FILE* stream)
     fprintf(stream, "--dbitrate INT     data bitrate (CAN-FD)\n");
     fprintf(stream, "--nswj INT         nominal SJW (defaults to 1)\n");
     fprintf(stream, "--dswj INT         data SJW (defaults to 1)\n");
+    fprintf(stream, "--nsp FLOAT        nominal sample point (defaults to CiA setting)\n");
+    fprintf(stream, "--dsp FLOAT        data sample point (defaults to CiA setting)\n");
     fprintf(stream, "--fd BOOL          enable or disable CAN-FD format (defaults to off)\n");
     fprintf(stream, "--log ITEM         enables logging of ITEM which is one of\n");
     fprintf(stream, "   NONE:       no logging\n");
     fprintf(stream, "   RX_DT:      log rx message timestamp deltas\n");
     fprintf(stream, "   RX_MSG:     log rx message content\n");
-    fprintf(stream, "   BUS_STATE:  log bus status information\n");
-    fprintf(stream, "   TX_MSG:         log tx message information\n");
+    fprintf(stream, "   CAN_STATE:  log CAN status information\n");
+    fprintf(stream, "   USB_STATE:  log USB status information\n");
+    fprintf(stream, "   TX_MSG:     log tx message information\n");
     fprintf(stream, "   TXR:        log tx message receipts\n");
     fprintf(stream, "   ALL:        log everything\n");
+    fprintf(stream, "--log-change BOOL  enable or disable on-change logging for CAN, USB state\n");
     fprintf(stream, "--tx K1=V1,K2...   transmit message\n");
     fprintf(stream, "   keys are:\n");
     fprintf(stream, "       id      CAN ID (hex)\n");
@@ -227,8 +231,11 @@ int main(int argc, char** argv)
     ac.data_user_constraints.sample_point = 0.875f;
     ac.data_user_constraints.sjw = 1;
     ac.config = true;
+    ac.can_rx_errors_last = -1;
+    ac.can_tx_errors_last = -1;
+    ac.can_bus_state_last = -1;
 
-    
+    //cia_fd_cbt_init_default_real(&ac.nominal_user_constraints, &ac.data_user_constraints);
 
     for (int i = 1; i < argc; ) {
         if (0 == strcmp("-h", argv[i]) ||
@@ -257,14 +264,21 @@ int main(int argc, char** argv)
                 else if (0 == _stricmp("RX_MSG", arg)) {
                     ac.log_flags |= LOG_FLAG_RX_MSG;
                 }
-                else if (0 == _stricmp("BUS_STATE", arg)) {
-                    ac.log_flags |= LOG_FLAG_BUS_STATE;
+                else if (0 == _stricmp("BUS_STATE", arg) ||
+                    0 == _stricmp("CAN_STATE", arg)) {
+                    ac.log_flags |= LOG_FLAG_CAN_STATE;
+                } 
+                else if (0 == _stricmp("USB_STATE", arg)) {
+                    ac.log_flags |= LOG_FLAG_USB_STATE;
                 }
                 else if (0 == _stricmp("TX_MSG", arg)) {
                     ac.log_flags |= LOG_FLAG_TX_MSG;
                 }
                 else if (0 == _stricmp("TXR", arg)) {
                     ac.log_flags |= LOG_FLAG_TXR;
+                }
+                else if (0 == _stricmp("NONE", arg)) {
+                    ac.log_flags = 0u;
                 }
                 else if (0 == _stricmp("NONE", arg)) {
                     ac.log_flags = 0u;
@@ -395,6 +409,54 @@ int main(int argc, char** argv)
                 goto Exit;
             }
         }
+        else if (0 == strcmp("--nsp", argv[i])) {
+            if (i + 1 < argc) {
+                char* end = NULL;
+                ac.nominal_user_constraints.sample_point = strtof(argv[i + 1], &end);
+                if (!end || end == argv[i + 1]) {
+                    fprintf(stderr, "ERROR failed to convert '%s' to float\n", argv[i + 1]);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                if (ac.nominal_user_constraints.sample_point <= 0 || ac.nominal_user_constraints.sample_point >= 1) {
+                    fprintf(stderr, "ERROR invalid nominal sample point %f\n", ac.nominal_user_constraints.sample_point);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                i += 2;
+            }
+            else {
+                fprintf(stderr, "ERROR %s expects a float argument in range (0-1)\n", argv[i]);
+                error = SC_DLL_ERROR_INVALID_PARAM;
+                goto Exit;
+            }
+        }
+        else if (0 == strcmp("--dsp", argv[i])) {
+            if (i + 1 < argc) {
+                char* end = NULL;
+                ac.data_user_constraints.sample_point = strtof(argv[i + 1], &end);
+                if (!end || end == argv[i + 1]) {
+                    fprintf(stderr, "ERROR failed to convert '%s' to float\n", argv[i + 1]);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                if (ac.data_user_constraints.sample_point <= 0 || ac.data_user_constraints.sample_point >= 1) {
+                    fprintf(stderr, "ERROR invalid data sample point %f\n", ac.nominal_user_constraints.sample_point);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                i += 2;
+            }
+            else {
+                fprintf(stderr, "ERROR %s expects a float argument in range (0-1)\n", argv[i]);
+                error = SC_DLL_ERROR_INVALID_PARAM;
+                goto Exit;
+            }
+        }
         else if (0 == strcmp("--tx", argv[i])) {
             if (i + 1 < argc) {
                 if (ac.tx_job_count == _countof(ac.tx_jobs)) {
@@ -425,6 +487,7 @@ int main(int argc, char** argv)
                 goto Exit;
             }
         } 
+
         else if (0 == strcmp("--single", argv[i])) {
             shared = false;
             ++i;
@@ -432,6 +495,17 @@ int main(int argc, char** argv)
         else if (0 == strcmp("--config", argv[i])) {
             if (i + 1 < argc) {
                 ac.config = !is_false(argv[i + 1]);
+                i += 2;
+            }
+            else {
+                fprintf(stderr, "ERROR %s expects a boolean argument\n", argv[i]);
+                error = SC_DLL_ERROR_INVALID_PARAM;
+                goto Exit;
+            }
+        }
+        else if (0 == strcmp("--log-change", argv[i])) {
+            if (i + 1 < argc) {
+                ac.log_on_change = !is_false(argv[i + 1]);
                 i += 2;
             }
             else {
