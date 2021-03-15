@@ -104,11 +104,8 @@ struct sc_stream {
     PUCHAR rx_buffers;
     PUCHAR tx_buffers;
     OVERLAPPED* rx_ovs;
-    uint8_t* rx_reassembly_buffer;
     OVERLAPPED tx_ovs[2];
     size_t buffer_size;
-    uint16_t rx_reassembly_count;
-    uint16_t rx_reassembly_capacity;
     uint16_t tx_size;
     uint8_t rx_count;
     uint8_t rx_next;
@@ -909,7 +906,6 @@ SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t* _stream)
 
         free(stream->rx_buffers);
         free(stream->tx_buffers);
-        free(stream->rx_reassembly_buffer);
         free(stream);
     }
 }
@@ -949,7 +945,6 @@ SC_DLL_API int sc_can_stream_init(
     stream->ctx = ctx;
     stream->rx_callback = callback;
     stream->buffer_size = buffer_size;
-    stream->rx_reassembly_capacity = (uint16_t)(2 * buffer_size);
     
     stream->rx_buffers = calloc(rreqs, stream->buffer_size);
     if (!stream->rx_buffers) {
@@ -969,13 +964,8 @@ SC_DLL_API int sc_can_stream_init(
         goto Error;
     }
 
-    stream->rx_reassembly_buffer = calloc(stream->rx_reassembly_capacity, sizeof(*stream->rx_reassembly_buffer));
-    if (!stream->rx_reassembly_buffer) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Error;
-    }
-
-   for (size_t i = 0; i < _countof(stream->tx_ovs); ++i) {
+    
+    for (size_t i = 0; i < _countof(stream->tx_ovs); ++i) {
         HANDLE h = CreateEventW(NULL, TRUE, TRUE, NULL);
         if (!h) {
             DWORD e = GetLastError();
@@ -1037,15 +1027,12 @@ Error:
 
 static int sc_process_rx_buffer(
     struct sc_stream* stream,
-    PUCHAR ptr, uint16_t bytes,
-    uint16_t* left)
+    PUCHAR ptr, uint16_t bytes)
 {
     PUCHAR const in_beg = ptr;
     PUCHAR const in_end = in_beg + bytes;
     PUCHAR in_ptr = in_beg;
     int error = SC_DLL_ERROR_NONE;
-
-    *left = 0;
 
     while (in_ptr + SC_MSG_CAN_LEN_MULTIPLE <= in_end) {
         struct sc_msg_header const* msg = (struct sc_msg_header const*)in_ptr;
@@ -1055,8 +1042,7 @@ static int sc_process_rx_buffer(
         }
 
         if (in_ptr + msg->len > in_end) {
-            *left = (uint16_t)(in_end - in_ptr);
-            break;
+            return SC_DLL_ERROR_PROTO_VIOLATION;
         }
 
         error = stream->rx_callback(stream->ctx, msg, msg->len);
@@ -1095,42 +1081,6 @@ static inline int sc_rx_submit(
     return SC_DLL_ERROR_NONE;
 }
 
-static int sc_process_messages(
-    struct sc_stream* stream,
-    unsigned index,
-    DWORD size)
-{
-    PUCHAR in_beg = stream->rx_buffers + (size_t)stream->buffer_size * index;
-    PUCHAR in_end = in_beg + size;
-
-    if (stream->rx_reassembly_count) {
-        if (stream->rx_reassembly_capacity < (size_t)stream->rx_reassembly_count + size) {
-            return SC_DLL_ERROR_REASSEMBLY_SPACE;
-        }
-
-        memcpy(&stream->rx_reassembly_buffer[stream->rx_reassembly_count], in_beg, size);
-
-        in_beg = stream->rx_reassembly_buffer;
-        in_end = in_beg + size + stream->rx_reassembly_count;
-        stream->rx_reassembly_count = 0;
-    }
-    
-    uint16_t left = 0; 
-    int error = sc_process_rx_buffer(stream, in_beg, (uint16_t)(in_end - in_beg), &left);
-    if (error) {
-        return error;
-    }
-
-    if (left) {
-        //fprintf(stderr, "save %u bytes\n", left);
-        memmove(stream->rx_reassembly_buffer, in_end - left, left);
-
-        stream->rx_reassembly_count = left;
-    }
-
-    return SC_DLL_ERROR_NONE;
-}
-
 SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
 {
     struct sc_stream* stream = (struct sc_stream*)_stream;
@@ -1165,7 +1115,8 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
         }
 
         if (transferred) {
-           error = sc_process_messages(stream, index, transferred);
+            PUCHAR ptr = stream->rx_buffers + stream->buffer_size * index;
+            error = sc_process_rx_buffer(stream, ptr, (uint16_t)transferred);
             if (error) {
                 return error;
             }
@@ -1291,8 +1242,11 @@ SC_DLL_API int sc_can_stream_tx_batch_end(sc_can_stream_t* _stream)
 
     if (stream->tx_size) {        
         int error = sc_can_stream_tx_send_buffer(stream);
+        if (error) {
+            return error;
+        }
+
         stream->tx_size = 0;
-        return error;
     }
 
     return SC_DLL_ERROR_NONE;
