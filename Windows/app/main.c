@@ -235,7 +235,7 @@ int main(int argc, char** argv)
     ac.can_tx_errors_last = -1;
     ac.can_bus_state_last = -1;
 
-    //cia_fd_cbt_init_default_real(&ac.nominal_user_constraints, &ac.data_user_constraints);
+    cia_fd_cbt_init_default_real(&ac.nominal_user_constraints, &ac.data_user_constraints);
 
     for (int i = 1; i < argc; ) {
         if (0 == strcmp("-h", argv[i]) ||
@@ -518,8 +518,6 @@ int main(int argc, char** argv)
             ++i;
         }
     }
-
-    cia_fd_cbt_init_default_real(&ac.nominal_user_constraints, &ac.data_user_constraints);
 
     s_Shutdown = CreateEventW(NULL, TRUE, FALSE, NULL);
     if (!s_Shutdown) {
