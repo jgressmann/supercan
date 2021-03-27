@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,21 +28,4 @@
 #define SC_PACKED __packed
 #include "supercan.h"
 
-#define CHUNKY_NO_STD_INCLUDES
-#define CHUNKY_CHUNK_SIZE_TYPE u16
-#define CHUNKY_BUFFER_SIZE_TYPE unsigned
-#define CHUNKY_BYTESWAP
-#define CHUNKY_LIKELY likely
-#define CHUNKY_UNLIKELY unlikely
-#define CHUNKY_ASSERT(x) 
-#define CHUNKY_PREFIX sc_chunk
-#include "chunky.h"
-#undef CHUNKY_NO_STD_INCLUDES
-#undef CHUNKY_CHUNK_SIZE_TYPE
-#undef CHUNKY_BUFFER_SIZE_TYPE
-#undef CHUNKY_BYTESWAP
-#undef CHUNKY_LIKELY
-#undef CHUNKY_UNLIKELY
-#undef CHUNKY_ASSERT
-#undef CHUNKY_PREFIX
 
