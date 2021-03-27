@@ -443,25 +443,8 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
     dev->exposed.can_epp = ~0x80 & pipeInfo.PipeId;
 
     BOOL value = TRUE;
-    // Settings this flag makes Windows send an extra zlp
-    // if the buffer size is a multiple of the endpoint size
-    // AND the device can receive more data than the size of the endpoint.
-    //
-    // This is here to not send full 512 bytes buffers on a 64 endpoint
-    // but only as much as required.
-    if (!WinUsb_SetPipePolicy(
-        dev->usb_handle,
-        dev->exposed.can_epp,
-        SHORT_PACKET_TERMINATE,
-        sizeof(value),
-        &value)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
-    }
-
-    // make bulk in pipe raw i/o
+    
+    // make bulk in pipe raw I/O
     // https://docs.microsoft.com/en-us/windows-hardware/drivers/usbcon/winusb-functions-for-pipe-policy-modification
     if (!WinUsb_SetPipePolicy(
         dev->usb_handle,
@@ -487,7 +470,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         goto Error;
     }
 
-    // terminiate cmd bulk out with zlp (if required)
+    // terminiate cmd bulk out with ZLP (if required)
     if (!WinUsb_SetPipePolicy(
         dev->usb_handle,
         dev->exposed.cmd_epp,
@@ -1037,12 +1020,19 @@ static int sc_process_rx_buffer(
     while (in_ptr + SC_MSG_CAN_LEN_MULTIPLE <= in_end) {
         struct sc_msg_header const* msg = (struct sc_msg_header const*)in_ptr;
 
+        if (!msg->id || !msg->len) {
+            // Allow end-of-input message to work around need to send ZLP
+            break;
+        }
+
         if (msg->len < SC_MSG_CAN_LEN_MULTIPLE) {
-            return SC_DLL_ERROR_PROTO_VIOLATION;
+            error = SC_DLL_ERROR_PROTO_VIOLATION;
+            break;
         }
 
         if (in_ptr + msg->len > in_end) {
-            return SC_DLL_ERROR_PROTO_VIOLATION;
+            error = SC_DLL_ERROR_PROTO_VIOLATION;
+            break;
         }
 
         error = stream->rx_callback(stream->ctx, msg, msg->len);
@@ -1240,7 +1230,19 @@ SC_DLL_API int sc_can_stream_tx_batch_end(sc_can_stream_t* _stream)
         return SC_DLL_ERROR_INVALID_PARAM;
     }
 
-    if (stream->tx_size) {        
+    if (stream->tx_size) {
+        if (stream->tx_size & (SC_MSG_CAN_LEN_MULTIPLE - 1)) {
+            return SC_DLL_ERROR_PROTO_VIOLATION;
+        }
+
+        // Check if we need to work around having to send a ZLP
+        if (stream->dev->exposed.epp_size < stream->buffer_size &&
+            stream->tx_size < stream->buffer_size &&
+            (stream->tx_size % stream->dev->exposed.epp_size) == 0) {
+            *((uint32_t*)&stream->tx_buffers[stream->tx_index * stream->buffer_size + stream->tx_size]) = 0;
+            stream->tx_size += 4;
+        }
+
         int error = sc_can_stream_tx_send_buffer(stream);
         if (error) {
             return error;
