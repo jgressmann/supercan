@@ -709,7 +709,7 @@ unlock:
 	return 0;
 }
 
-static int sc_usb_process_msg(struct sc_usb_priv *usb_priv, struct sc_msg_header *hdr)
+static inline int sc_usb_process_msg(struct sc_usb_priv *usb_priv, struct sc_msg_header *hdr)
 {
 	switch (hdr->id) {
 	case SC_MSG_CAN_STATUS:
@@ -750,22 +750,23 @@ static void sc_usb_process_rx_buffer(struct sc_usb_priv *usb_priv, u8 * const ur
 			if (unlikely(mptr == sptr)) {
 				if (net_ratelimit())
 					netdev_dbg(usb_priv->netdev, "EOF @ 0\n");
+			} else if (unlikely(mptr + SC_MSG_CAN_LEN_MULTIPLE != eptr)) {
+				if (net_ratelimit())
+					netdev_dbg(usb_priv->netdev, "EOF @ %x of %x bytes\n", (unsigned int)(mptr - sptr), (unsigned int)(eptr - sptr));
 			}
 			mptr = eptr;
 			break;
 		}
 
 		if (unlikely(hdr->len % SC_MSG_CAN_LEN_MULTIPLE)) {
-			netdev_dbg(usb_priv->netdev, "offset=%u: invalid msg size len=%u\n", (unsigned int)(mptr - sptr), hdr->len);
+			netdev_err(usb_priv->netdev, "offset=%u: invalid msg size=%u\n", (unsigned int)(mptr - sptr), hdr->len);
 			goto error_exit;
 		}
-
 
 		if (unlikely(mptr + hdr->len > eptr)) {
 			netdev_err(usb_priv->netdev, "offset=%u: msg len=%u exceeds buffer len=%u\n", (unsigned int)(mptr - sptr), hdr->len, (unsigned int)(eptr - sptr));
 			goto error_exit;
 		}
-
 
 		mptr += hdr->len;
 
@@ -1760,7 +1761,7 @@ static int sc_usb_probe_dev(struct sc_usb_priv *usb_priv)
 		dev_err(
 			&usb_priv->intf->dev,
 			"device has CAN-FD permanently enabled but its message buffer is "
-			"too small for chunked transfer of %u bytes\n", can_fd_msg_transfer_size);
+			"too small for transfer of %u bytes\n", can_fd_msg_transfer_size);
 		rc = -ENODEV;
 		goto cleanup;
 	}
