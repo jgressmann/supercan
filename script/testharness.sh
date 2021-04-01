@@ -12,12 +12,14 @@ usage()
 	echo "   -s, --seconds SECONDS    limit test runs to SECONDS"
 	echo "   --no-init                don't initialize can devices"
 	echo "   --no-jitter              don't run timestamp jitter test"
+	echo "   --comp-level LEVEL       compress with LEVEL"
 	echo
 }
 
 seconds=300
 init=1
 test_jitter=1
+level=19
 
 #https://stackoverflow.com/questions/192249/how-do-i-parse-command-line-arguments-in-bash
 POSITIONAL=()
@@ -42,6 +44,11 @@ while [ $# -gt 0 ]; do
 			test_jitter=0
 			shift # past argument
 			;;
+		--comp-level)
+			level=$2
+			shift # past argument
+			shift # past value
+			;;
 # 		--default)
 # 		DEFAULT=YES
 # 		shift # past argument
@@ -53,7 +60,6 @@ while [ $# -gt 0 ]; do
  	esac
 done
 set -- "${POSITIONAL[@]}" # restore positional parameters
-
 
 if [ ${#POSITIONAL[@]} -ne 2 ]; then
 	echo "ERROR: $(basename $0) GOODCAN TESTCAN"
@@ -109,7 +115,7 @@ pack_results()
 
 	echo
 	echo INFO: creating archive $tar_file
-	tar -C "$tmp_dir" -c . | zstdmt -19 >"$tmp_dir/$tar_file"
+	tar -C "$tmp_dir" -c --exclude="$tar_file" . | zstdmt -$level >"$tmp_dir/$tar_file"
 
 	if [ -n "$SUDO_UID" ]; then
 		chown -R $SUDO_UID:$SUDO_GID $tmp_dir
