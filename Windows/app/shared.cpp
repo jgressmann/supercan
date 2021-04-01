@@ -145,7 +145,7 @@ void process_rx(app_ctx* ac)
             case SC_CAN_DATA_TYPE_STATUS: {
                 auto* status = &com_ctx->rx.hdr->slots[index].status;
                 
-                if (ac->log_flags & LOG_FLAG_CAN_STATE) {
+                if (!ac->candump && (ac->log_flags & LOG_FLAG_CAN_STATE)) {
                     bool log = false;
                     if (ac->log_on_change) {
                         log = ac->can_rx_errors_last != status->rx_errors ||
@@ -183,7 +183,7 @@ void process_rx(app_ctx* ac)
                     }
                 }
 
-                if (ac->log_flags & LOG_FLAG_USB_STATE) {
+                if (!ac->candump && (ac->log_flags & LOG_FLAG_USB_STATE)) {
                     bool log = false;
                     bool irq_queue_full = status->flags & SC_CAN_STATUS_FLAG_IRQ_QUEUE_FULL;
                     bool desync = status->flags & SC_CAN_STATUS_FLAG_TXR_DESYNC;
@@ -210,29 +210,34 @@ void process_rx(app_ctx* ac)
             case SC_CAN_DATA_TYPE_RX: {
                 auto* rx = &com_ctx->rx.hdr->slots[index].rx;
 
-                if (ac->log_flags & LOG_FLAG_RX_DT) {
-                    int64_t dt_us = 0;
-                    if (ac->rx_last_ts) {
-                        dt_us = rx->timestamp_us - ac->rx_last_ts;
-                        if (dt_us < 0) {
-                            fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
+                if (ac->candump) {
+                    log_candump(ac, stdout, rx->timestamp_us, rx->can_id, rx->flags, rx->dlc, rx->data);
+                }
+                else {
+                    if (ac->log_flags & LOG_FLAG_RX_DT) {
+                        int64_t dt_us = 0;
+                        if (ac->rx_last_ts) {
+                            dt_us = rx->timestamp_us - ac->rx_last_ts;
+                            if (dt_us < 0) {
+                                fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
+                            }
                         }
+
+                        ac->rx_last_ts = rx->timestamp_us;
+
+                        fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
                     }
 
-                    ac->rx_last_ts = rx->timestamp_us;
-
-                    fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
-                }
-
-                if (ac->log_flags & LOG_FLAG_RX_MSG) {
-                    fprintf(stdout, "RX ");
-                    log_msg(ac, rx->can_id, rx->flags, rx->dlc, rx->data);
+                    if (ac->log_flags & LOG_FLAG_RX_MSG) {
+                        fprintf(stdout, "RX ");
+                        log_msg(ac, rx->can_id, rx->flags, rx->dlc, rx->data);
+                    }
                 }
             } break;
             case SC_CAN_DATA_TYPE_TX: {
                 auto* tx = &com_ctx->rx.hdr->slots[index].tx;
 
-                if (!tx->echo && ac->log_flags & LOG_FLAG_TXR) {
+                if (!ac->candump && !tx->echo && (ac->log_flags & LOG_FLAG_TXR)) {
                     if (tx->flags & SC_CAN_FRAME_FLAG_DRP) {
                         fprintf(stdout, "TXR %#08x was dropped @ %016llx\n", tx->track_id, tx->timestamp_us);
                     }
@@ -241,7 +246,7 @@ void process_rx(app_ctx* ac)
                     }
                 }
 
-                if (ac->log_flags & LOG_FLAG_TX_MSG) {
+                if (!ac->candump && (ac->log_flags & LOG_FLAG_TX_MSG)) {
                     fprintf(stdout, "TX ");
                     log_msg(ac, tx->can_id, tx->flags, tx->dlc, tx->data);
                 }
@@ -279,6 +284,9 @@ void process_rx(app_ctx* ac)
                     }
                     fprintf(stdout, "error\n");
                 }
+            } break;
+            default: {
+                fprintf(stderr, "WARN: unhandled msg id=%02x\n", hdr->type);
             } break;
             }
         }

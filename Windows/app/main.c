@@ -78,6 +78,7 @@ static void usage(FILE* stream)
     fprintf(stream, "--shared BOOL  share device access (enabled by default)\n");
     fprintf(stream, "--single       request exclusive device access\n");
     fprintf(stream, "--config BOOL  request config level access (defaults to on)\n");
+    fprintf(stream, "--candump      log received messages in candump log format (overrides other log flags)\n");
 }
 
 
@@ -234,6 +235,7 @@ int main(int argc, char** argv)
     ac.can_rx_errors_last = -1;
     ac.can_tx_errors_last = -1;
     ac.can_bus_state_last = -1;
+    ac.candump = false;
 
     cia_fd_cbt_init_default_real(&ac.nominal_user_constraints, &ac.data_user_constraints);
 
@@ -490,6 +492,10 @@ int main(int argc, char** argv)
 
         else if (0 == strcmp("--single", argv[i])) {
             shared = false;
+            ++i;
+        }
+        else if (0 == strcmp("--candump", argv[i])) {
+            ac.candump = true;;
             ++i;
         }
         else if (0 == strcmp("--config", argv[i])) {

@@ -84,7 +84,7 @@ static bool process_buffer(
 
             sc_tt_track(&s->tt, timestamp_us);
 
-            if (ac->log_flags & LOG_FLAG_CAN_STATE) {
+            if (!ac->candump && (ac->log_flags & LOG_FLAG_CAN_STATE)) {
                 bool log = false;
                 if (ac->log_on_change) {
                     log = ac->can_rx_errors_last != status->rx_errors ||
@@ -122,7 +122,7 @@ static bool process_buffer(
                 }
             }
 
-            if (ac->log_flags & LOG_FLAG_USB_STATE) {
+            if (!ac->candump && (ac->log_flags & LOG_FLAG_USB_STATE)) {
                 bool log = false;
                 bool irq_queue_full = status->flags & SC_CAN_STATUS_FLAG_IRQ_QUEUE_FULL;
                 bool desync = status->flags & SC_CAN_STATUS_FLAG_TXR_DESYNC;
@@ -203,23 +203,28 @@ static bool process_buffer(
                 return false;
             }
 
-            if (ac->log_flags & LOG_FLAG_RX_DT) {
-                int64_t dt_us = 0;
-                if (ac->rx_last_ts) {
-                    dt_us = ts_us - ac->rx_last_ts;
-                    if (dt_us < 0) {
-                        fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
+            if (ac->candump) {
+                log_candump(ac, stdout, ts_us, can_id, rx->flags, rx->dlc, rx->data);
+            }
+            else {
+                if (ac->log_flags & LOG_FLAG_RX_DT) {
+                    int64_t dt_us = 0;
+                    if (ac->rx_last_ts) {
+                        dt_us = ts_us - ac->rx_last_ts;
+                        if (dt_us < 0) {
+                            fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
+                        }
                     }
+
+                    ac->rx_last_ts = ts_us;
+
+                    fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
                 }
 
-                ac->rx_last_ts = ts_us;
-
-                fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
-            }
-
-            if (ac->log_flags & LOG_FLAG_RX_MSG) {
-                fprintf(stdout, "RX ");
-                log_msg(ac, can_id, rx->flags, rx->dlc, rx->data);
+                if (ac->log_flags & LOG_FLAG_RX_MSG) {
+                    fprintf(stdout, "RX ");
+                    log_msg(ac, can_id, rx->flags, rx->dlc, rx->data);
+                }
             }
         } break;
         case SC_MSG_CAN_TXR: {
@@ -233,7 +238,7 @@ static bool process_buffer(
 
             sc_tt_track(&s->tt, timestamp_us);
 
-            if (ac->log_flags & LOG_FLAG_TXR) {
+            if (!ac->candump && (ac->log_flags & LOG_FLAG_TXR)) {
                 if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
                     fprintf(stdout, "tracked message %#02x was dropped @ %08x\n", txr->track_id, timestamp_us);
                 }
@@ -243,6 +248,7 @@ static bool process_buffer(
             }
         } break;
         default:
+            fprintf(stderr, "WARN: unhandled msg id=%02x len=%u\n", msg->id, msg->len);
             break;
         }
     }

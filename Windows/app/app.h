@@ -35,6 +35,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 #ifndef _countof
 #   define _countof(x) (sizeof(x)/sizeof((x)[0]))
@@ -83,6 +84,7 @@ struct app_ctx {
     bool fdf;
     bool config;
     bool log_on_change;
+    bool candump;
 };
 
 static inline uint8_t dlc_to_len(uint8_t dlc)
@@ -138,6 +140,15 @@ static inline bool is_false(char const* str)
 
 void log_msg(
     struct app_ctx* ctx,
+    uint32_t can_id,
+    uint8_t flags,
+    uint8_t dlc,
+    uint8_t const* data);
+
+void log_candump(
+    struct app_ctx* ctx,
+    FILE* f,
+    uint64_t timestamp_us,
     uint32_t can_id,
     uint8_t flags,
     uint8_t dlc,
