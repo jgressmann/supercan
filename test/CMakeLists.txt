@@ -35,7 +35,6 @@ set(TEST_SRC_LIST
     main.cpp
     test_usnprintf.cpp
     test_can_bit_timing.cpp
-    test_chunky.cpp
     test_dev_time_tracker.cpp
 )
 
