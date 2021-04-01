@@ -38,7 +38,8 @@
 #define SC_MAX_RX_URBS 128
 #define SC_MAX_TX_URBS 128
 #define SC_FIFO_CHANGE_LOG_THRESHOLD 8
-
+#define SC_CLOCK_BITS 32
+#define SC_CLOCK_MAX ((u32)((((u64)1) << SC_CLOCK_BITS)-1))
 
 #define SC_VERIFY(condition, recovery) \
 	do { \
@@ -130,6 +131,9 @@ struct sc_usb_priv {
 	u8 prev_rx_fifo_size;
 	u8 prev_tx_fifo_size;
 	u8 opened;
+#ifdef DEBUG
+	atomic_t rx_enter;
+#endif
 };
 
 
@@ -200,23 +204,25 @@ static inline void sc_usb_ktime_from_us(
 	u64 ts_us = 0;
 
 	SC_ASSERT(usb_priv);
+
 	t = &usb_priv->device_time_tracker;
+	timestamp_us &= SC_CLOCK_MAX;
 
 	if (likely(t->ts_initialized)) {
-		uint32_t delta = timestamp_us - t->ts_us_lo;
+		uint32_t delta = (timestamp_us - t->ts_us_lo) & SC_CLOCK_MAX;
 
-		if (delta < 0x7FFFFFFF) { // forward and plausible
-			if (timestamp_us < t->ts_us_lo) {
+		if (likely(delta < (SC_CLOCK_MAX / 4) * 3)) { // forward and plausible
+			if (unlikely(timestamp_us < t->ts_us_lo)) {
 				++t->ts_us_hi;
 				netdev_dbg(usb_priv->netdev, "inc ts high=%lu\n", (unsigned long)t->ts_us_hi);
 			}
 
 			t->ts_us_lo = timestamp_us;
-			ts_us = ((u64)t->ts_us_hi << 32) | timestamp_us;
+			ts_us = ((u64)t->ts_us_hi << SC_CLOCK_BITS) | timestamp_us;
 		} else {
 			// netdev_dbg(usb_priv->netdev, "late ts=%lu lo=%lu\n", (unsigned long)timestamp_us, (unsigned long)t->ts_us_lo);
-			ts_us = ((u64)t->ts_us_hi << 32) | t->ts_us_lo;
-			ts_us -= t->ts_us_lo - timestamp_us;
+			ts_us = ((u64)t->ts_us_hi << SC_CLOCK_BITS) | t->ts_us_lo;
+			ts_us -= (t->ts_us_lo - timestamp_us) & SC_CLOCK_MAX;
 		}
 	} else {
 		netdev_dbg(usb_priv->netdev, "init ts=%lu\n", (unsigned long)timestamp_us);
@@ -837,6 +843,9 @@ static void sc_usb_rx_completed(struct urb *urb)
 	struct sc_usb_priv *usb_priv = NULL;
 //	unsigned long flags = 0;
 	int rc = 0;
+#ifdef DEBUG
+	int threads = 0;
+#endif
 	u8 opened = 0;
 
 	SC_ASSERT(urb);
@@ -855,6 +864,14 @@ static void sc_usb_rx_completed(struct urb *urb)
 	opened = READ_ONCE(usb_priv->opened);
 	if (unlikely(!opened))
 		return;
+
+#ifdef DEBUG
+	/* could not determine any concurrent access though atomic counter */
+	threads = atomic_inc_return(&usb_priv->rx_enter);
+	if (unlikely(threads > 1)) {
+		dev_err(&usb_priv->intf->dev, "%d threads in %s\n", threads, __func__);
+	}
+#endif
 
 	// spin_lock_irqsave(&usb_priv->rx_lock, flags);
 
@@ -901,6 +918,10 @@ static void sc_usb_rx_completed(struct urb *urb)
 			break;
 		}
 	}
+
+#ifdef DEBUG
+	atomic_dec_return(&usb_priv->rx_enter);
+#endif
 
 // #if DEBUG
 // unlock:
@@ -987,7 +1008,9 @@ static int sc_usb_netdev_open(struct net_device *netdev)
 	// spin_lock_irqsave(&usb_priv->rx_lock, flags);
 	{
 		WRITE_ONCE(usb_priv->opened, 1);
-
+#ifdef DEBUG
+		atomic_set(&usb_priv->rx_enter, 0);
+#endif
 		rc = sc_usb_submit_rx_urbs(usb_priv);
 	}
 	// spin_unlock_irqrestore(&usb_priv->rx_lock, flags);
