@@ -600,6 +600,9 @@ static int sc_usb_process_can_rx(struct sc_usb_priv *usb_priv, struct sc_msg_can
 
 		if (rx->flags & SC_CAN_FRAME_FLAG_ESI)
 			cf->flags |= CANFD_ESI;
+
+		memcpy(cf->data, rx->data, data_len);
+		netdev->stats.rx_bytes += data_len;
 	} else {
 		skb = alloc_can_skb(netdev, (struct can_frame **)&cf);
 		if (!skb) {
@@ -607,15 +610,16 @@ static int sc_usb_process_can_rx(struct sc_usb_priv *usb_priv, struct sc_msg_can
 			netdev_dbg(netdev, "rx dropped\n");
 			return 0;
 		}
+
+		if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR) && data_len) {
+			memcpy(cf->data, rx->data, data_len);
+			netdev->stats.rx_bytes += data_len;
+		}
 	}
 
 	cf->can_id = can_id;
 	cf->len = data_len;
 
-	if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR) && data_len) {
-		memcpy(cf->data, rx->data, data_len);
-		netdev->stats.rx_bytes += data_len;
-	}
 
 	++netdev->stats.rx_packets;
 
