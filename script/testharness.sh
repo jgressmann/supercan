@@ -144,6 +144,7 @@ if [ $init -ne 0 ];then
 	for can in $cans; do
 		ip link set down $can || true
 		ip link set $can type can bitrate 1000000 dbitrate 8000000 fd on
+		#ip link set $can type can bitrate 500000 dbitrate 2000000 fd on
 		ip link set up $can
 	done
 fi
@@ -153,9 +154,10 @@ max_frames=$((seconds*10000))
 errors=0
 startup_wait_s=2
 candump_wait_s=3
+frame_len=r
 
 #-I 42 -L 8 -D i -g 1 -b -n $max_frames
-single_sender_can_gen_flags="-e -I r -L r -D r -g 0 -p 1 -b -n $max_frames"
+single_sender_can_gen_flags="-e -I r -L $frame_len -D i -g 0 -p 1 -b -n $max_frames"
 
 same_messages()
 {
@@ -310,7 +312,7 @@ set -e
 #######################
 # both test <-> good
 #######################
-both_sender_can_gen_flags="-e -L r -D r -b -g 0 -p 1 -n $max_frames"
+both_sender_can_gen_flags="-e -L $frame_len -D i -b -g 0 -p 1 -n $max_frames"
 echo
 echo INFO: Sending from both devices | tee -a "$meta_log_path"
 
