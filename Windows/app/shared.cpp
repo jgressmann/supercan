@@ -641,8 +641,10 @@ extern "C" int run_shared(struct app_ctx* ac)
             fprintf(stdout, "no " SC_NAME " devices found\n");
             return SC_DLL_ERROR_NONE;
         }
-
-        fprintf(stdout, "%u " SC_NAME " devices found\n", (unsigned)dev_count);
+        
+        if (!ac->candump) {
+            fprintf(stdout, "%u " SC_NAME " devices found\n", (unsigned)dev_count);
+        }
 
         if (ac->device_index >= dev_count) {
             fprintf(stdout, "Requested device index %u out of range\n", ac->device_index);
@@ -668,15 +670,16 @@ extern "C" int run_shared(struct app_ctx* ac)
             return map_hr_to_error(hr);
         }
 
-        
-        fprintf(stdout, "device features perm=%#04x conf=%#04x\n", com_ctx.dev_data.feat_perm, com_ctx.dev_data.feat_conf);
+        if (!ac->candump) {
+            fprintf(stdout, "device features perm=%#04x conf=%#04x\n", com_ctx.dev_data.feat_perm, com_ctx.dev_data.feat_conf);
 
-        for (size_t i = 0; i < std::min((size_t)com_ctx.dev_data.sn_length, _countof(serial_str) - 1); ++i) {
-            _snwprintf_s(&serial_str[i * 2], 3, _TRUNCATE, L"%02x", com_ctx.dev_data.sn_bytes[i]);
+            for (size_t i = 0; i < std::min((size_t)com_ctx.dev_data.sn_length, _countof(serial_str) - 1); ++i) {
+                _snwprintf_s(&serial_str[i * 2], 3, _TRUNCATE, L"%02x", com_ctx.dev_data.sn_bytes[i]);
+            }
+
+            fwprintf(stdout, L"device identifies as %ls, serial no %ls, firmware version %u.% u.% u\n",
+                com_ctx.dev_data.name, serial_str, com_ctx.dev_data.fw_ver_major, com_ctx.dev_data.fw_ver_minor, com_ctx.dev_data.fw_ver_patch);
         }
-
-        fwprintf(stdout, L"device identifies as %ls, serial no %ls, firmware version %u.% u.% u\n",
-            com_ctx.dev_data.name, serial_str, com_ctx.dev_data.fw_ver_major, com_ctx.dev_data.fw_ver_minor, com_ctx.dev_data.fw_ver_patch);
 
         SysFreeString(com_ctx.dev_data.name);
         com_ctx.dev_data.name = nullptr;

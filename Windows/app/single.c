@@ -319,7 +319,9 @@ int run_single(struct app_ctx* ac)
         goto Exit;
     }
 
-    fprintf(stdout, "%u " SC_NAME " devices found\n", count);
+    if (!ac->candump) {
+        fprintf(stdout, "%u " SC_NAME " devices found\n", count);
+    }
 
     if (ac->device_index >= count) {
         fprintf(stdout, "Requested device index %u out of range\n", ac->device_index);
@@ -335,7 +337,10 @@ int run_single(struct app_ctx* ac)
 
     can_state.dev = dev;
 
-    fprintf(stdout, "cmd epp %#02x, can epp %#02x\n", dev->cmd_epp, dev->can_epp);
+    if (!ac->candump) {
+        fprintf(stdout, "cmd epp %#02x, can epp %#02x\n", dev->cmd_epp, dev->can_epp);
+    }
+
     error = sc_cmd_ctx_init(&cmd_ctx, dev);
     if (error) {
         fprintf(stderr, "failed to initialize command context: %s (%d)\n", sc_strerror(error), error);
@@ -366,19 +371,21 @@ int run_single(struct app_ctx* ac)
         dev_info.feat_perm = dev->dev_to_host16(dev_info.feat_perm);
         dev_info.feat_conf = dev->dev_to_host16(dev_info.feat_conf);
 
-        fprintf(stdout, "device features perm=%#04x conf=%#04x\n", dev_info.feat_perm, dev_info.feat_conf);
+        if (!ac->candump) {
+            fprintf(stdout, "device features perm=%#04x conf=%#04x\n", dev_info.feat_perm, dev_info.feat_conf);
 
-        for (size_t i = 0; i < min((size_t)dev_info.sn_len, _countof(serial_str) - 1); ++i) {
-            snprintf(&serial_str[i * 2], 3, "%02x", dev_info.sn_bytes[i]);
+
+            for (size_t i = 0; i < min((size_t)dev_info.sn_len, _countof(serial_str) - 1); ++i) {
+                snprintf(&serial_str[i * 2], 3, "%02x", dev_info.sn_bytes[i]);
+            }
+
+            dev_info.name_len = min((size_t)dev_info.name_len, sizeof(name_str) - 1);
+            memcpy(name_str, dev_info.name_bytes, dev_info.name_len);
+            name_str[dev_info.name_len] = 0;
+
+            fprintf(stdout, "device identifies as %s, serial no %s, firmware version %u.% u.% u\n",
+                name_str, serial_str, dev_info.fw_ver_major, dev_info.fw_ver_minor, dev_info.fw_ver_patch);
         }
-
-        dev_info.name_len = min((size_t)dev_info.name_len, sizeof(name_str) - 1);
-        memcpy(name_str, dev_info.name_bytes, dev_info.name_len);
-        name_str[dev_info.name_len] = 0;
-
-        fprintf(stdout, "device identifies as %s, serial no %s, firmware version %u.% u.% u\n",
-            name_str, serial_str, dev_info.fw_ver_major, dev_info.fw_ver_minor, dev_info.fw_ver_patch);
-
     }
 
     // fetch can info
