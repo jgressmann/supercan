@@ -1124,24 +1124,23 @@ sc_usb_netdev_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 		&& usb_priv->tx_urb_available_count) {
 
 		struct sc_urb_data *urb_data = NULL;
-		struct sc_msg_can_tx *tx = NULL;
 		unsigned int urb_index = -1;
 		unsigned int echo_skb_index = -1;
 		int error = 0;
 		bool zlp_condition = false;
 
-
 		echo_skb_index = usb_priv->tx_echo_skb_available_ptr[--usb_priv->tx_echo_skb_available_count];
 		SC_DEBUG_VERIFY(echo_skb_index < net_priv->can.echo_skb_max, goto unlock);
-		can_put_echo_skb(skb, netdev, echo_skb_index);
-
 
 		urb_index = usb_priv->tx_urb_available_ptr[--usb_priv->tx_urb_available_count];
 		SC_DEBUG_VERIFY(urb_index < usb_priv->tx_urb_count, goto unlock);
 
 		urb_data = &usb_priv->tx_urb_ptr[urb_index];
-		tx = urb_data->mem;
-		sc_usb_fill_tx(skb, usb_priv, echo_skb_index, tx, tx_len);
+		sc_usb_fill_tx(skb, usb_priv, echo_skb_index, urb_data->mem, tx_len);
+
+		// can_put_echo_skb seems to change this skb so call after having filled
+		// the tx urb
+		can_put_echo_skb(skb, netdev, echo_skb_index);
 
 		//SC_DEBUG_VERIFY(tx->len == tx_len, goto unlock);
 		//SC_DEBUG_VERIFY(tx->track_id == echo_skb_index, goto unlock);
