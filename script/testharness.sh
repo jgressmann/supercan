@@ -5,23 +5,27 @@ set -e
 
 script_dir=$(dirname $0)
 
+default_seconds=300
+default_level=3
+seconds=${default_seconds}
+init=1
+test_jitter=1
+level=${default_level}
+sort=1
+
 usage()
 {
-	echo $(basename $0) GOODCAN TESTCAN
+	echo $(basename $0) \[OPTIONS\] GOODCAN TESTCAN
 	echo
-	echo "   -s, --seconds SECONDS    limit test runs to SECONDS"
+	echo "   -s, --seconds SECONDS    limit test runs to SECONDS (default ${default_seconds})"
 	echo "   --no-init                don't initialize can devices"
 	echo "   --no-jitter              don't run timestamp jitter test"
-	echo "   --comp-level LEVEL       compress with LEVEL"
+	echo "   --comp-level LEVEL       compress with LEVEL (default ${default_level})"
 	echo "   --no-sort                don't sort output by timestamp prior to comparision"
 	echo
 }
 
-seconds=300
-init=1
-test_jitter=1
-level=19
-sort=1
+
 
 #https://stackoverflow.com/questions/192249/how-do-i-parse-command-line-arguments-in-bash
 POSITIONAL=()
