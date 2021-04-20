@@ -433,6 +433,19 @@ static int sc_usb_process_can_error(struct sc_usb_priv *usb_priv, struct sc_msg_
 	return 0;
 }
 
+static inline char const * sc_map_can_state(enum can_state state)
+{
+	switch (state) {
+	case CAN_STATE_ERROR_ACTIVE: return "error active";
+	case CAN_STATE_ERROR_WARNING: return "error warning";
+	case CAN_STATE_ERROR_PASSIVE: return "error passive";
+	case CAN_STATE_BUS_OFF: return "bus off";
+	case CAN_STATE_STOPPED: return "stopped";
+	case CAN_STATE_SLEEPING: return "sleeping";
+	default: return "<unknown>";
+	}
+}
+
 static int sc_usb_process_can_status(struct sc_usb_priv *usb_priv, struct sc_msg_can_status *status)
 {
 	struct net_device *netdev = usb_priv->netdev;
@@ -515,7 +528,7 @@ static int sc_usb_process_can_status(struct sc_usb_priv *usb_priv, struct sc_msg
 		next_state = CAN_STATE_ERROR_ACTIVE;
 
 	if (next_state != curr_state) {
-		netdev_info(netdev, "can bus status 0x%02x -> 0x%02x\n", curr_state, next_state);
+		netdev_info(netdev, "can bus status %s -> %s\n", sc_map_can_state(curr_state), sc_map_can_state(next_state));
 		can_change_state(netdev, &f, next_state, next_state);
 		if (next_state == CAN_STATE_BUS_OFF)
 			can_bus_off(netdev);
