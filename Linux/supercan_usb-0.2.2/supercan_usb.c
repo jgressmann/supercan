@@ -469,12 +469,6 @@ static int sc_usb_process_can_status(struct sc_usb_priv *usb_priv, struct sc_msg
 
 		usb_priv->prev_tx_fifo_size = status->tx_fifo_size;
 	}
-	//if (status->tx_fifo_size != usb_priv->prev_tx_fifo_size) {
-	//if (net_ratelimit())
-	//		netdev_dbg(netdev, "tx fs=%u\n", status->tx_fifo_size);
-
-	//	usb_priv->prev_tx_fifo_size = status->tx_fifo_size;
-	//}
 
 	sc_usb_update_ktime_from_us(usb_priv, usb_priv->host_to_dev32(status->timestamp_us));
 
