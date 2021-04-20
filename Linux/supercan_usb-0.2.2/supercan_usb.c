@@ -882,11 +882,8 @@ static void sc_usb_rx_completed(struct urb *urb)
 		if (likely(urb->actual_length > 0))
 			sc_usb_process_rx_buffer(usb_priv, (u8 *)urb->transfer_buffer, (unsigned int)urb->actual_length);
 
-		//SC_DEBUG_VERIFY(urb->transfer_buffer_length == usb_priv->msg_buffer_size, goto unlock);
 		SC_ASSERT(urb->transfer_buffer_length == usb_priv->msg_buffer_size);
 		rc = usb_submit_urb(urb, GFP_ATOMIC);
-		//dev_dbg(&usb_priv->intf->dev, "rx URB index %u\n", (unsigned int)(urb_data - usb_priv->rx_urb_ptr));
-
 		if (unlikely(rc)) {
 			dev_dbg(&usb_priv->intf->dev, "rx URB index %u\n", (unsigned int)(urb_data - usb_priv->rx_urb_ptr));
 			switch (rc) {
@@ -1052,8 +1049,6 @@ static void sc_usb_fill_tx(
 {
 	struct canfd_frame const *cf = (struct canfd_frame const *)skb->data;
 
-	// netdev_dbg(usb_priv->netdev, "tx can_id %x\n", CAN_EFF_MASK & cf->can_id);
-
 	tx->id = SC_MSG_CAN_TX;
 	tx->len = tx_len;
 	tx->track_id = track_id;
@@ -1132,12 +1127,9 @@ sc_usb_netdev_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 		urb_data = &usb_priv->tx_urb_ptr[urb_index];
 		sc_usb_fill_tx(skb, usb_priv, echo_skb_index, urb_data->mem, tx_len);
 
-		// can_put_echo_skb seems to change this skb so call after having filled
-		// the tx urb
+		// can_put_echo_skb seems to change this skb so call it
+		// after having filled the tx urb
 		can_put_echo_skb(skb, netdev, echo_skb_index);
-
-		//SC_DEBUG_VERIFY(tx->len == tx_len, goto unlock);
-		//SC_DEBUG_VERIFY(tx->track_id == echo_skb_index, goto unlock);
 
 		zlp_condition =
 			tx_len < usb_priv->msg_buffer_size &&
@@ -1168,7 +1160,6 @@ sc_usb_netdev_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 			//netdev_dbg(netdev, "tx URB %u echo %u\n", urb_index, echo_skb_index);
 		}
 	} else {
-		//netdev_dbg(netdev, "tx stop queue\n");
 		netif_stop_queue(netdev);
 		rc = NETDEV_TX_BUSY;
 	}
