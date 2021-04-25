@@ -44,4 +44,3 @@ fi
 
 
 cp "$base_dir/src/supercan.h" "$supercan_dir/"
-cp "$base_dir/src/chunky.h" "$supercan_dir/"

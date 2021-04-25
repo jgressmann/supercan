@@ -84,26 +84,63 @@ static bool process_buffer(
 
             sc_tt_track(&s->tt, timestamp_us);
 
-            if (ac->log_flags & LOG_FLAG_BUS_STATE) {
-                fprintf(stdout, "rx lost=%u tx dropped=%u rx errors=%u tx errors=%u bus=", rx_lost, tx_dropped, status->rx_errors, status->tx_errors);
-                switch (status->bus_status) {
-                case SC_CAN_STATUS_ERROR_ACTIVE:
-                    fprintf(stdout, "error_active");
-                    break;
-                case SC_CAN_STATUS_ERROR_WARNING:
-                    fprintf(stdout, "error_warning");
-                    break;
-                case SC_CAN_STATUS_ERROR_PASSIVE:
-                    fprintf(stdout, "error_passive");
-                    break;
-                case SC_CAN_STATUS_BUS_OFF:
-                    fprintf(stdout, "off");
-                    break;
-                default:
-                    fprintf(stdout, "unknown");
-                    break;
+            if (!ac->candump && (ac->log_flags & LOG_FLAG_CAN_STATE)) {
+                bool log = false;
+                if (ac->log_on_change) {
+                    log = ac->can_rx_errors_last != status->rx_errors ||
+                        ac->can_tx_errors_last != status->tx_errors ||
+                        ac->can_bus_state_last != status->bus_status;
                 }
-                fprintf(stdout, "\n");
+                else {
+                    log = true;
+                }
+
+                ac->can_rx_errors_last = status->rx_errors;
+                ac->can_tx_errors_last = status->tx_errors;
+                ac->can_bus_state_last = status->bus_status;
+
+                if (log) {
+                    fprintf(stdout, "CAN rx errors=%u tx errors=%u bus=", status->rx_errors, status->tx_errors);
+                    switch (status->bus_status) {
+                    case SC_CAN_STATUS_ERROR_ACTIVE:
+                        fprintf(stdout, "error_active");
+                        break;
+                    case SC_CAN_STATUS_ERROR_WARNING:
+                        fprintf(stdout, "error_warning");
+                        break;
+                    case SC_CAN_STATUS_ERROR_PASSIVE:
+                        fprintf(stdout, "error_passive");
+                        break;
+                    case SC_CAN_STATUS_BUS_OFF:
+                        fprintf(stdout, "off");
+                        break;
+                    default:
+                        fprintf(stdout, "unknown");
+                        break;
+                    }
+                    fprintf(stdout, "\n");
+                }
+            }
+
+            if (!ac->candump && (ac->log_flags & LOG_FLAG_USB_STATE)) {
+                bool log = false;
+                bool irq_queue_full = status->flags & SC_CAN_STATUS_FLAG_IRQ_QUEUE_FULL;
+                bool desync = status->flags & SC_CAN_STATUS_FLAG_TXR_DESYNC;
+                if (ac->log_on_change) {
+                    log = ac->usb_rx_lost != rx_lost || 
+                        ac->usb_tx_dropped != tx_dropped ||
+                        irq_queue_full || desync;
+                }
+                else {
+                    log = true;
+                }
+
+                ac->usb_rx_lost = rx_lost;
+                ac->usb_tx_dropped = tx_dropped;
+
+                if (log) {
+                    fprintf(stdout, "CAN->USB rx lost=%u USB->CAN tx dropped=%u irqf=%u desync=%u\n", rx_lost, tx_dropped, irq_queue_full, desync);
+                }
             }
         } break;
         case SC_MSG_CAN_ERROR: {
@@ -166,23 +203,28 @@ static bool process_buffer(
                 return false;
             }
 
-            if (ac->log_flags & LOG_FLAG_RX_DT) {
-                int64_t dt_us = 0;
-                if (ac->rx_last_ts) {
-                    dt_us = ts_us - ac->rx_last_ts;
-                    if (dt_us < 0) {
-                        fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
+            if (ac->candump) {
+                log_candump(ac, stdout, ts_us, can_id, rx->flags, rx->dlc, rx->data);
+            }
+            else {
+                if (ac->log_flags & LOG_FLAG_RX_DT) {
+                    int64_t dt_us = 0;
+                    if (ac->rx_last_ts) {
+                        dt_us = ts_us - ac->rx_last_ts;
+                        if (dt_us < 0) {
+                            fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
+                        }
                     }
+
+                    ac->rx_last_ts = ts_us;
+
+                    fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
                 }
 
-                ac->rx_last_ts = ts_us;
-
-                fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
-            }
-
-            if (ac->log_flags & LOG_FLAG_RX_MSG) {
-                fprintf(stdout, "RX ");
-                log_msg(ac, can_id, rx->flags, rx->dlc, rx->data);
+                if (ac->log_flags & LOG_FLAG_RX_MSG) {
+                    fprintf(stdout, "RX ");
+                    log_msg(ac, can_id, rx->flags, rx->dlc, rx->data);
+                }
             }
         } break;
         case SC_MSG_CAN_TXR: {
@@ -196,7 +238,7 @@ static bool process_buffer(
 
             sc_tt_track(&s->tt, timestamp_us);
 
-            if (ac->log_flags & LOG_FLAG_TXR) {
+            if (!ac->candump && (ac->log_flags & LOG_FLAG_TXR)) {
                 if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
                     fprintf(stdout, "tracked message %#02x was dropped @ %08x\n", txr->track_id, timestamp_us);
                 }
@@ -206,6 +248,7 @@ static bool process_buffer(
             }
         } break;
         default:
+            fprintf(stderr, "WARN: unhandled msg id=%02x len=%u\n", msg->id, msg->len);
             break;
         }
     }
@@ -276,7 +319,9 @@ int run_single(struct app_ctx* ac)
         goto Exit;
     }
 
-    fprintf(stdout, "%u " SC_NAME " devices found\n", count);
+    if (!ac->candump) {
+        fprintf(stdout, "%u " SC_NAME " devices found\n", count);
+    }
 
     if (ac->device_index >= count) {
         fprintf(stdout, "Requested device index %u out of range\n", ac->device_index);
@@ -292,7 +337,10 @@ int run_single(struct app_ctx* ac)
 
     can_state.dev = dev;
 
-    fprintf(stdout, "cmd epp %#02x, can epp %#02x\n", dev->cmd_epp, dev->can_epp);
+    if (!ac->candump) {
+        fprintf(stdout, "cmd epp %#02x, can epp %#02x\n", dev->cmd_epp, dev->can_epp);
+    }
+
     error = sc_cmd_ctx_init(&cmd_ctx, dev);
     if (error) {
         fprintf(stderr, "failed to initialize command context: %s (%d)\n", sc_strerror(error), error);
@@ -323,19 +371,21 @@ int run_single(struct app_ctx* ac)
         dev_info.feat_perm = dev->dev_to_host16(dev_info.feat_perm);
         dev_info.feat_conf = dev->dev_to_host16(dev_info.feat_conf);
 
-        fprintf(stdout, "device features perm=%#04x conf=%#04x\n", dev_info.feat_perm, dev_info.feat_conf);
+        if (!ac->candump) {
+            fprintf(stdout, "device features perm=%#04x conf=%#04x\n", dev_info.feat_perm, dev_info.feat_conf);
 
-        for (size_t i = 0; i < min((size_t)dev_info.sn_len, _countof(serial_str) - 1); ++i) {
-            snprintf(&serial_str[i * 2], 3, "%02x", dev_info.sn_bytes[i]);
+
+            for (size_t i = 0; i < min((size_t)dev_info.sn_len, _countof(serial_str) - 1); ++i) {
+                snprintf(&serial_str[i * 2], 3, "%02x", dev_info.sn_bytes[i]);
+            }
+
+            dev_info.name_len = min((size_t)dev_info.name_len, sizeof(name_str) - 1);
+            memcpy(name_str, dev_info.name_bytes, dev_info.name_len);
+            name_str[dev_info.name_len] = 0;
+
+            fprintf(stdout, "device identifies as %s, serial no %s, firmware version %u.% u.% u\n",
+                name_str, serial_str, dev_info.fw_ver_major, dev_info.fw_ver_minor, dev_info.fw_ver_patch);
         }
-
-        dev_info.name_len = min((size_t)dev_info.name_len, sizeof(name_str) - 1);
-        memcpy(name_str, dev_info.name_bytes, dev_info.name_len);
-        name_str[dev_info.name_len] = 0;
-
-        fprintf(stdout, "device identifies as %s, serial no %s, firmware version %u.% u.% u\n",
-            name_str, serial_str, dev_info.fw_ver_major, dev_info.fw_ver_minor, dev_info.fw_ver_patch);
-
     }
 
     // fetch can info

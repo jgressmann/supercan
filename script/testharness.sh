@@ -5,19 +5,27 @@ set -e
 
 script_dir=$(dirname $0)
 
+default_seconds=300
+default_level=3
+seconds=${default_seconds}
+init=1
+test_jitter=1
+level=${default_level}
+sort=1
+
 usage()
 {
-	echo $(basename $0) GOODCAN TESTCAN
+	echo $(basename $0) \[OPTIONS\] GOODCAN TESTCAN
 	echo
-	echo "   -s, --seconds SECONDS    limit test runs to SECONDS"
+	echo "   -s, --seconds SECONDS    limit test runs to SECONDS (default ${default_seconds})"
 	echo "   --no-init                don't initialize can devices"
 	echo "   --no-jitter              don't run timestamp jitter test"
+	echo "   --comp-level LEVEL       compress with LEVEL (default ${default_level})"
+	echo "   --no-sort                don't sort output by timestamp prior to comparision"
 	echo
 }
 
-seconds=300
-init=1
-test_jitter=1
+
 
 #https://stackoverflow.com/questions/192249/how-do-i-parse-command-line-arguments-in-bash
 POSITIONAL=()
@@ -42,6 +50,15 @@ while [ $# -gt 0 ]; do
 			test_jitter=0
 			shift # past argument
 			;;
+		--no-sort)
+			sort=0
+			shift # past argument
+			;;
+		--comp-level)
+			level=$2
+			shift # past argument
+			shift # past value
+			;;
 # 		--default)
 # 		DEFAULT=YES
 # 		shift # past argument
@@ -53,7 +70,6 @@ while [ $# -gt 0 ]; do
  	esac
 done
 set -- "${POSITIONAL[@]}" # restore positional parameters
-
 
 if [ ${#POSITIONAL[@]} -ne 2 ]; then
 	echo "ERROR: $(basename $0) GOODCAN TESTCAN"
@@ -109,7 +125,7 @@ pack_results()
 
 	echo
 	echo INFO: creating archive $tar_file
-	tar -C "$tmp_dir" -c . | zstdmt -19 >"$tmp_dir/$tar_file"
+	tar -C "$tmp_dir" -c --exclude="$tar_file" . | zstdmt -$level >"$tmp_dir/$tar_file"
 
 	if [ -n "$SUDO_UID" ]; then
 		chown -R $SUDO_UID:$SUDO_GID $tmp_dir
@@ -138,6 +154,7 @@ if [ $init -ne 0 ];then
 	for can in $cans; do
 		ip link set down $can || true
 		ip link set $can type can bitrate 1000000 dbitrate 8000000 fd on
+		#ip link set $can type can bitrate 500000 dbitrate 2000000 fd on
 		ip link set up $can
 	done
 fi
@@ -146,10 +163,13 @@ fi
 max_frames=$((seconds*10000))
 errors=0
 startup_wait_s=2
-candump_wait_s=3
+candump_wait_s=5
+frame_len=r
+candump_options="-t a -L"
+sort_options="-k 1.2,1.18 -s"
 
 #-I 42 -L 8 -D i -g 1 -b -n $max_frames
-single_sender_can_gen_flags="-e -I r -L r -D r -g 0 -p 1 -b -n $max_frames"
+single_sender_can_gen_flags="-e -I r -L $frame_len -D i -g 0 -p 1 -b -n $max_frames"
 
 same_messages()
 {
@@ -183,12 +203,13 @@ echo INFO: Sending from good device $can_good | tee -a "$meta_log_path"
 
 good_to_test_file_test_name=good_to_test_file_test.log
 good_to_test_file_test_path=$log_dir/$good_to_test_file_test_name
-candump -n $max_frames -H -t z -L $can_test >$good_to_test_file_test_path &
+candump -n $max_frames $candump_options -H $can_test >$good_to_test_file_test_path &
 good_to_test_test_pid=$!
 
 good_to_test_file_good_name=good_to_test_file_good.log
 good_to_test_file_good_path=$log_dir/$good_to_test_file_good_name
-candump -n $max_frames -H -t z -L $can_good >$good_to_test_file_good_path &
+# PCAN USB-FD doesn't support hw tx timestamps (always zero)
+candump -n $max_frames $candump_options $can_good >$good_to_test_file_good_path &
 good_to_test_good_pid=$!
 
 # wait a bit, else we may not get first frame
@@ -201,6 +222,13 @@ sleep $candump_wait_s
 kill $good_to_test_test_pid $good_to_test_good_pid 2>/dev/null || true
 
 set +e
+
+if [ $sort -ne 0 ]; then
+	env LC_ALL=C sort $sort_options "$good_to_test_file_good_path" >"$good_to_test_file_good_path.sorted"
+	env LC_ALL=C sort $sort_options "$good_to_test_file_test_path" >"$good_to_test_file_test_path.sorted"
+	good_to_test_file_good_path="$good_to_test_file_good_path.sorted"
+	good_to_test_file_test_path="$good_to_test_file_test_path.sorted"
+fi
 
 lines=$(cat "$good_to_test_file_good_path" | wc -l)
 if [ $max_frames -ne $lines ]; then
@@ -245,12 +273,12 @@ echo INFO: Sending from test device $can_test | tee -a "$meta_log_path"
 
 test_to_good_file_test_name=test_to_good_file_test.log
 test_to_good_file_test_path=$log_dir/$test_to_good_file_test_name
-candump -n $max_frames -H -t z -L $can_test >$test_to_good_file_test_path &
+candump -n $max_frames $candump_options -H $can_test >$test_to_good_file_test_path &
 test_to_good_test_pid=$!
 
 test_to_good_file_good_name=test_to_good_file_good.log
 test_to_good_file_good_path=$log_dir/$test_to_good_file_good_name
-candump -n $max_frames -H -t z -L $can_good >$test_to_good_file_good_path &
+candump -n $max_frames $candump_options -H $can_good >$test_to_good_file_good_path &
 test_to_good_good_pid=$!
 
 # wait a bit, else we may not get first frame
@@ -264,6 +292,13 @@ kill $test_to_good_test_pid $test_to_good_good_pid 2>/dev/null || true
 
 
 set +e
+
+if [ $sort -ne 0 ]; then
+	env LC_ALL=C sort $sort_options "$test_to_good_file_good_path" >"$test_to_good_file_good_path.sorted"
+	env LC_ALL=C sort $sort_options "$test_to_good_file_test_path" >"$test_to_good_file_test_path.sorted"
+	test_to_good_file_good_path="$test_to_good_file_good_path.sorted"
+	test_to_good_file_test_path="$test_to_good_file_test_path.sorted"
+fi
 
 lines=$(cat "$test_to_good_file_good_path" | wc -l)
 if [ $max_frames -ne $lines ]; then
@@ -304,18 +339,19 @@ set -e
 #######################
 # both test <-> good
 #######################
-both_sender_can_gen_flags="-e -L r -D r -b -g 0 -p 1 -n $max_frames"
+both_sender_can_gen_flags="-e -L $frame_len -D i -b -g 0 -p 1 -n $max_frames"
 echo
 echo INFO: Sending from both devices | tee -a "$meta_log_path"
 
 both_file_test_name=both_file_test.log
 both_file_test_path=$log_dir/$both_file_test_name
-candump -n $(($max_frames*2)) -H -t z -L $can_test >$both_file_test_path &
+candump -n $(($max_frames*2)) $candump_options -H $can_test >$both_file_test_path &
 both_test_candump_pid=$!
 
 both_file_good_name=both_file_good.log
 both_file_good_path=$log_dir/$both_file_good_name
-candump -n $(($max_frames*2)) -H -t z -L $can_good >$both_file_good_path &
+# PEAK does not support hw timestamps for own tx messages
+candump -n $(($max_frames*2)) $candump_options $can_good >$both_file_good_path &
 both_good_candump_pid=$!
 
 # wait a bit, else we may not get first frame
@@ -328,7 +364,7 @@ cangen $both_sender_can_gen_flags -I 2 $can_test &
 both_test_cangen_pid=$!
 
 
-echo INFO: Waiting for sends to finish
+echo INFO: Waiting for sends to finish | tee -a "$meta_log_path"
 
 #wait $both_good_cangen_pid $both_test_cangen_pid
 wait $both_good_cangen_pid
@@ -337,6 +373,13 @@ wait $both_test_cangen_pid
 # brittle!
 sleep $candump_wait_s
 kill $both_test_candump_pid $both_good_candump_pid 2>/dev/null || true
+
+if [ $sort -ne 0 ]; then
+	env LC_ALL=C sort $sort_options "$both_file_test_path" >"$both_file_test_path.sorted"
+	env LC_ALL=C sort $sort_options "$both_file_good_path" >"$both_file_good_path.sorted"
+	both_file_test_path="$both_file_test_path.sorted"
+	both_file_good_path="$both_file_good_path.sorted"
+fi
 
 cat "$both_file_test_path" | awk '{ print $3; }' | grep "1##" | sed -E 's/0*(1|2)##//g' >"$log_dir/both_test_send_by_good_content.log"
 cat "$both_file_test_path" | awk '{ print $3; }' | grep "2##" | sed -E 's/0*(1|2)##//g' >"$log_dir/both_test_send_by_test_content.log"
@@ -430,12 +473,12 @@ if [ 0 -ne $test_jitter ]; then
 	echo
 	echo INFO: Sending from good -\> test with a fixed interval of 1 \[s\]
 	ts_slow_good_to_test_path=$log_dir/ts_slow_good_to_test.log
-	candump -n $(($ts_slow_max_frames)) -H -t z -L $can_test >"$ts_slow_good_to_test_path" &
+	candump -n $(($ts_slow_max_frames)) -H -t a -L $can_test >"$ts_slow_good_to_test_path" &
 	ts_slow_good_to_test_test_pid=$!
 
 	cangen $ts_slow_can_gen_flags $can_good
 
-	sleep 3
+	sleep $candump_wait_s
 	kill $ts_slow_good_to_test_test_pid 2>/dev/null || true
 
 	set +e
@@ -469,12 +512,12 @@ if [ 0 -ne $test_jitter ]; then
 	echo
 	echo INFO: Sending from test -\> good with a fixed interval of 1 \[s\]
 	ts_slow_test_to_good_path=$log_dir/ts_slow_test_to_good.log
-	candump -n $(($ts_slow_max_frames)) -H -t z -L $can_test >"$ts_slow_test_to_good_path" &
+	candump -n $(($ts_slow_max_frames)) -H -t a -L $can_test >"$ts_slow_test_to_good_path" &
 	ts_slow_test_to_good_test_pid=$!
 
 	cangen $ts_slow_can_gen_flags $can_test
 
-	sleep 3
+	sleep $candump_wait_s
 	kill $ts_slow_test_to_good_test_pid 2>/dev/null || true
 
 	set +e
@@ -511,12 +554,12 @@ if [ 0 -ne $test_jitter ]; then
 	echo
 	echo INFO: Sending from good -\> test with a fixed interval of 1 \[ms\]
 	ts_fast_good_to_test_path=$log_dir/ts_fast_good_to_test.log
-	candump -n $(($ts_fast_max_frames)) -H -t z -L $can_test >"$ts_fast_good_to_test_path" &
+	candump -n $(($ts_fast_max_frames)) -H -t a -L $can_test >"$ts_fast_good_to_test_path" &
 	ts_fast_good_to_test_test_pid=$!
 
 	cangen $ts_fast_can_gen_flags $can_good
 
-	sleep 3
+	sleep $candump_wait_s
 	kill $ts_fast_good_to_test_test_pid 2>/dev/null || true
 
 	set +e
@@ -551,12 +594,12 @@ if [ 0 -ne $test_jitter ]; then
 	echo
 	echo INFO: Sending from test -\> good with a fixed interval of 1 \[ms\]
 	ts_fast_test_to_good_path=$log_dir/ts_fast_test_to_good.log
-	candump -n $(($ts_fast_max_frames)) -H -t z -L $can_test >"$ts_fast_test_to_good_path" &
+	candump -n $(($ts_fast_max_frames)) -H -t a -L $can_test >"$ts_fast_test_to_good_path" &
 	ts_fast_test_go_good_test_pid=$!
 
 	cangen $ts_fast_can_gen_flags $can_test
 
-	sleep 3
+	sleep $candump_wait_s
 	kill $ts_fast_test_go_good_test_pid 2>/dev/null || true
 
 	set +e
@@ -597,11 +640,15 @@ fi
 # fi
 
 # mv "$tmp_dir/$tar_file" $PWD
+
+echo INFO: Finished with $errors errors. | tee -a "$meta_log_path"
+
 pack_results
 
 cleanup
 
-echo INFO: Finished with $errors errors.
+echo INFO: Packing results and cleaning up.
+
 exit $errors
 
 

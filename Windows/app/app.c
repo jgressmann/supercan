@@ -25,7 +25,7 @@
 
 #include "app.h"
 
-#include <stdio.h>
+#include <stdint.h>
 
 void log_msg(
     struct app_ctx* ctx,
@@ -84,4 +84,42 @@ void log_msg(
         }
     }
     fputc('\n', stdout);
+}
+
+void log_candump(
+    struct app_ctx* ctx,
+    FILE* f,
+    uint64_t timestamp_us,
+    uint32_t can_id,
+    uint8_t flags,
+    uint8_t dlc,
+    uint8_t const* data)
+{
+    uint64_t s = timestamp_us / 1000000u;
+    timestamp_us -= s * 1000000u;
+    fprintf(f, "(%010lu.%06lu) can%u ", (unsigned long)s, (unsigned long)timestamp_us, ctx->device_index);
+
+    if (flags & SC_CAN_FRAME_FLAG_EXT) {
+        fprintf(f, "%08X#", can_id);
+    }
+    else {
+        fprintf(f, "%03X#", can_id);
+    }
+
+    if (flags & SC_CAN_FRAME_FLAG_FDF) {
+        fprintf(f, "#%c", (flags & SC_CAN_FRAME_FLAG_BRS) ? '1' : '0');
+    }
+    else 
+
+    if (flags & SC_CAN_FRAME_FLAG_RTR) {
+        fprintf(f, "RTR\n");
+    }
+    else {
+        unsigned len = dlc_to_len(dlc);
+        for (unsigned i = 0; i < len; ++i) {
+            fprintf(f, "%02X", data[i]);
+        }
+
+        fprintf(f, "\n");
+    }
 }

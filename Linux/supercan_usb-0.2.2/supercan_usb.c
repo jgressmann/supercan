@@ -38,7 +38,8 @@
 #define SC_MAX_RX_URBS 128
 #define SC_MAX_TX_URBS 128
 #define SC_FIFO_CHANGE_LOG_THRESHOLD 8
-
+#define SC_CLOCK_BITS 32
+#define SC_CLOCK_MAX ((u32)((((u64)1) << SC_CLOCK_BITS)-1))
 
 #define SC_VERIFY(condition, recovery) \
 	do { \
@@ -105,20 +106,14 @@ struct sc_usb_priv {
 	u8 *rx_cmd_buffer;              /* points into tx_cmd_buffer mem, don't free */
 	u8 *tx_urb_available_ptr;
 	u8 *tx_echo_skb_available_ptr;
-	u8 *rx_reassembly_ptr;
 	struct can_bittiming_const nominal;
 	struct can_bittiming_const data;
 	struct sc_dev_time_tracker device_time_tracker;
-	sc_chunk_reader rx_can_reader;
-	sc_chunk_writer tx_can_writer;
 	spinlock_t tx_lock;
 	//spinlock_t rx_lock;
-	unsigned int rx_reassembly_capacity;
-	unsigned int rx_reassembly_count;
 	u32 can_clock_hz;
 	u32 ctrlmode_static;
 	u32 ctrlmode_supported;
-	u32 tx_can_buffer[24];
 	u16 feat_perm;
 	u16 feat_conf;
 	u16 cmd_buffer_size;
@@ -136,6 +131,9 @@ struct sc_usb_priv {
 	u8 prev_rx_fifo_size;
 	u8 prev_tx_fifo_size;
 	u8 opened;
+#ifdef DEBUG
+	atomic_t rx_enter;
+#endif
 };
 
 
@@ -206,23 +204,25 @@ static inline void sc_usb_ktime_from_us(
 	u64 ts_us = 0;
 
 	SC_ASSERT(usb_priv);
+
 	t = &usb_priv->device_time_tracker;
+	timestamp_us &= SC_CLOCK_MAX;
 
 	if (likely(t->ts_initialized)) {
-		uint32_t delta = timestamp_us - t->ts_us_lo;
+		uint32_t delta = (timestamp_us - t->ts_us_lo) & SC_CLOCK_MAX;
 
-		if (delta < 0x7FFFFFFF) { // forward and plausible
-			if (timestamp_us < t->ts_us_lo) {
+		if (likely(delta < (SC_CLOCK_MAX / 4) * 3)) { // forward and plausible
+			if (unlikely(timestamp_us < t->ts_us_lo)) {
 				++t->ts_us_hi;
 				netdev_dbg(usb_priv->netdev, "inc ts high=%lu\n", (unsigned long)t->ts_us_hi);
 			}
 
 			t->ts_us_lo = timestamp_us;
-			ts_us = ((u64)t->ts_us_hi << 32) | timestamp_us;
+			ts_us = ((u64)t->ts_us_hi << SC_CLOCK_BITS) | timestamp_us;
 		} else {
 			// netdev_dbg(usb_priv->netdev, "late ts=%lu lo=%lu\n", (unsigned long)timestamp_us, (unsigned long)t->ts_us_lo);
-			ts_us = ((u64)t->ts_us_hi << 32) | t->ts_us_lo;
-			ts_us -= t->ts_us_lo - timestamp_us;
+			ts_us = ((u64)t->ts_us_hi << SC_CLOCK_BITS) | t->ts_us_lo;
+			ts_us -= (t->ts_us_lo - timestamp_us) & SC_CLOCK_MAX;
 		}
 	} else {
 		netdev_dbg(usb_priv->netdev, "init ts=%lu\n", (unsigned long)timestamp_us);
@@ -376,8 +376,6 @@ static int sc_usb_netdev_close(struct net_device *netdev)
 	usb_priv->prev_rx_fifo_size = 0;
 	usb_priv->prev_tx_fifo_size = 0;
 
-	usb_priv->rx_reassembly_count = 0;
-
 	// spin_unlock_irqrestore(&usb_priv->rx_lock, flags);
 
 	netdev_dbg(netdev, "close candev\n");
@@ -435,6 +433,19 @@ static int sc_usb_process_can_error(struct sc_usb_priv *usb_priv, struct sc_msg_
 	return 0;
 }
 
+static inline char const * sc_map_can_state(enum can_state state)
+{
+	switch (state) {
+	case CAN_STATE_ERROR_ACTIVE: return "error active";
+	case CAN_STATE_ERROR_WARNING: return "error warning";
+	case CAN_STATE_ERROR_PASSIVE: return "error passive";
+	case CAN_STATE_BUS_OFF: return "bus off";
+	case CAN_STATE_STOPPED: return "stopped";
+	case CAN_STATE_SLEEPING: return "sleeping";
+	default: return "<unknown>";
+	}
+}
+
 static int sc_usb_process_can_status(struct sc_usb_priv *usb_priv, struct sc_msg_can_status *status)
 {
 	struct net_device *netdev = usb_priv->netdev;
@@ -471,12 +482,6 @@ static int sc_usb_process_can_status(struct sc_usb_priv *usb_priv, struct sc_msg
 
 		usb_priv->prev_tx_fifo_size = status->tx_fifo_size;
 	}
-	//if (status->tx_fifo_size != usb_priv->prev_tx_fifo_size) {
-	//if (net_ratelimit())
-	//		netdev_dbg(netdev, "tx fs=%u\n", status->tx_fifo_size);
-
-	//	usb_priv->prev_tx_fifo_size = status->tx_fifo_size;
-	//}
 
 	sc_usb_update_ktime_from_us(usb_priv, usb_priv->host_to_dev32(status->timestamp_us));
 
@@ -523,7 +528,7 @@ static int sc_usb_process_can_status(struct sc_usb_priv *usb_priv, struct sc_msg
 		next_state = CAN_STATE_ERROR_ACTIVE;
 
 	if (next_state != curr_state) {
-		netdev_info(netdev, "can bus status 0x%02x -> 0x%02x\n", curr_state, next_state);
+		netdev_info(netdev, "can bus status %s -> %s\n", sc_map_can_state(curr_state), sc_map_can_state(next_state));
 		can_change_state(netdev, &f, next_state, next_state);
 		if (next_state == CAN_STATE_BUS_OFF)
 			can_bus_off(netdev);
@@ -602,6 +607,9 @@ static int sc_usb_process_can_rx(struct sc_usb_priv *usb_priv, struct sc_msg_can
 
 		if (rx->flags & SC_CAN_FRAME_FLAG_ESI)
 			cf->flags |= CANFD_ESI;
+
+		memcpy(cf->data, rx->data, data_len);
+		netdev->stats.rx_bytes += data_len;
 	} else {
 		skb = alloc_can_skb(netdev, (struct can_frame **)&cf);
 		if (!skb) {
@@ -609,15 +617,16 @@ static int sc_usb_process_can_rx(struct sc_usb_priv *usb_priv, struct sc_msg_can
 			netdev_dbg(netdev, "rx dropped\n");
 			return 0;
 		}
+
+		if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR) && data_len) {
+			memcpy(cf->data, rx->data, data_len);
+			netdev->stats.rx_bytes += data_len;
+		}
 	}
 
 	cf->can_id = can_id;
 	cf->len = data_len;
 
-	if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR) && data_len) {
-		memcpy(cf->data, rx->data, data_len);
-		netdev->stats.rx_bytes += data_len;
-	}
 
 	++netdev->stats.rx_packets;
 
@@ -707,7 +716,7 @@ unlock:
 	return 0;
 }
 
-static int sc_usb_process_msg(struct sc_usb_priv *usb_priv, struct sc_msg_header *hdr)
+static inline int sc_usb_process_msg(struct sc_usb_priv *usb_priv, struct sc_msg_header *hdr)
 {
 	switch (hdr->id) {
 	case SC_MSG_CAN_STATUS:
@@ -727,129 +736,50 @@ static int sc_usb_process_msg(struct sc_usb_priv *usb_priv, struct sc_msg_header
 
 static void sc_usb_process_rx_buffer(struct sc_usb_priv *usb_priv, u8 * const urb_data_ptr, unsigned int urb_data_size)
 {
-	u8 *ptr = urb_data_ptr;
-	unsigned int chunk_count = 0;
-	unsigned int i = 0;
+	u8 const *sptr = urb_data_ptr;
+	u8 const *eptr = sptr + urb_data_size;
+	u8 const *mptr = NULL;
 	int error = 0;
+
 
 	SC_ASSERT(usb_priv);
 	SC_ASSERT(urb_data_ptr);
 	SC_ASSERT(urb_data_size);
 	SC_ASSERT(urb_data_size <= usb_priv->msg_buffer_size);
 
-	chunk_count = urb_data_size / usb_priv->ep_size;
-
-	if (unlikely(chunk_count * usb_priv->ep_size != urb_data_size)) {
-		if (net_ratelimit())
-			netdev_warn(
-				usb_priv->netdev,
-				"rx msg size %u not multiple of %u\n",
-				urb_data_size,
-				(unsigned int)usb_priv->ep_size);
-	}
-
-	if (unlikely(!chunk_count))
-		return;
-
-//	if (net_ratelimit())
-//		netdev_dbg(usb_priv->netdev, "rx %u chunks\n", chunk_count);
-
-	for (i = 0; i < chunk_count; ++i, ptr += usb_priv->ep_size) {
-		u8 *sptr = NULL;
-		u8 *eptr = NULL;
-		u8 *mptr = NULL;
-		u8 *chunk_data_ptr = NULL;
-		u16 chunk_data_size = 0;
-
-		error = sc_chunk_reader_chunk_process(&usb_priv->rx_can_reader, ptr, &chunk_data_ptr, &chunk_data_size);
-		if (unlikely(error != CHUNKYE_NONE)) {
-			switch (error) {
-			case CHUNKYE_SEQ:
-				netdev_err(
-					usb_priv->netdev,
-					"rx seq violation, seq expect=%u have=%u\n",
-					usb_priv->rx_can_reader.seq_no, usb_priv->host_to_dev16(((sc_chunk_chunk_hdr *)ptr)->seq_no));
-				break;
-			default:
-				netdev_err(usb_priv->netdev, "rx unknown de-chunk error %d\n", error);
-				break;
-			}
-
-			goto error_exit;
-		}
-
-		if (unlikely(!chunk_data_size)) {
-			if (net_ratelimit())
-				netdev_warn(usb_priv->netdev, "rx chunk index=%u has zero size\n", i);
-
-			continue;
-		}
-
-		if (usb_priv->rx_reassembly_count) {
-			unsigned int chunk_size = usb_priv->rx_reassembly_count + chunk_data_size;
-
-//			if (net_ratelimit())
-//				netdev_dbg(usb_priv->netdev, "rx reassmbly\n");
-
-			if (chunk_size > usb_priv->rx_reassembly_capacity) {
-				netdev_warn(
-					usb_priv->netdev,
-					"rx chunk size (%u) exceeds capacity (%u) of reassembly buffer, messages will be lost\n",
-					chunk_size,
-					usb_priv->rx_reassembly_capacity);
-
-				usb_priv->rx_reassembly_count = 0;
-				continue;
-			}
-
-			memcpy(usb_priv->rx_reassembly_ptr + usb_priv->rx_reassembly_count, chunk_data_ptr, chunk_data_size);
-			usb_priv->rx_reassembly_count += chunk_data_size;
-
-			sptr = usb_priv->rx_reassembly_ptr;
-			eptr = usb_priv->rx_reassembly_ptr + usb_priv->rx_reassembly_count;
-
-			usb_priv->rx_reassembly_count = 0;
-		} else {
-			sptr = chunk_data_ptr;
-			eptr = sptr + chunk_data_size;
-		}
-
-
 //		if (net_ratelimit())
 //			netdev_dbg(usb_priv->netdev, "rx process msg buffer of %u bytes\n", (unsigned)(eptr-sptr));
 
-		for (mptr = sptr; mptr + SC_MSG_CAN_LEN_MULTIPLE <= eptr; ) {
-			struct sc_msg_header *hdr = (struct sc_msg_header *)mptr;
+	for (mptr = sptr; mptr + SC_MSG_CAN_LEN_MULTIPLE <= eptr; ) {
+		struct sc_msg_header *hdr = (struct sc_msg_header *)mptr;
 
-			if (unlikely(hdr->id == SC_MSG_EOF || !hdr->len)) {
-				if (mptr == sptr) {
-					if (net_ratelimit())
-						netdev_dbg(usb_priv->netdev, "chunk index=%u len=%u: EOF @ 0\n", i, (unsigned int)(eptr - sptr));
-				}
-				mptr = eptr;
-				break;
+		if (unlikely(hdr->id == SC_MSG_EOF || !hdr->len)) {
+			if (unlikely(mptr == sptr)) {
+				if (net_ratelimit())
+					netdev_dbg(usb_priv->netdev, "EOF @ 0\n");
+			} else if (unlikely(mptr + SC_MSG_CAN_LEN_MULTIPLE != eptr)) {
+				if (net_ratelimit())
+					netdev_dbg(usb_priv->netdev, "EOF @ %x of %x bytes\n", (unsigned int)(mptr - sptr), (unsigned int)(eptr - sptr));
 			}
-
-			if (unlikely(hdr->len % SC_MSG_CAN_LEN_MULTIPLE)) {
-				netdev_dbg(usb_priv->netdev, "chunk index=%u len=%u: invalid msg header len=%u\n", i, (unsigned int)(eptr - sptr), hdr->len);
-				goto error_exit;
-			}
-
-
-			if (unlikely(mptr + hdr->len > eptr))
-				break;
-
-			mptr += hdr->len;
-
-			error = sc_usb_process_msg(usb_priv, hdr);
-			if (unlikely(error))
-				goto error_exit;
+			mptr = eptr;
+			break;
 		}
 
-		if (mptr < eptr) {
-			memmove(usb_priv->rx_reassembly_ptr, mptr, eptr - mptr);
-			usb_priv->rx_reassembly_count = eptr - mptr;
+		if (unlikely(hdr->len % SC_MSG_CAN_LEN_MULTIPLE)) {
+			netdev_err(usb_priv->netdev, "offset=%u: invalid msg size=%u\n", (unsigned int)(mptr - sptr), hdr->len);
+			goto error_exit;
 		}
+
+		if (unlikely(mptr + hdr->len > eptr)) {
+			netdev_err(usb_priv->netdev, "offset=%u: msg len=%u exceeds buffer len=%u\n", (unsigned int)(mptr - sptr), hdr->len, (unsigned int)(eptr - sptr));
+			goto error_exit;
+		}
+
+		mptr += hdr->len;
+
+		error = sc_usb_process_msg(usb_priv, hdr);
+		if (unlikely(error))
+			goto error_exit;
 	}
 
 	return;
@@ -925,6 +855,9 @@ static void sc_usb_rx_completed(struct urb *urb)
 	struct sc_usb_priv *usb_priv = NULL;
 //	unsigned long flags = 0;
 	int rc = 0;
+#ifdef DEBUG
+	int threads = 0;
+#endif
 	u8 opened = 0;
 
 	SC_ASSERT(urb);
@@ -944,6 +877,14 @@ static void sc_usb_rx_completed(struct urb *urb)
 	if (unlikely(!opened))
 		return;
 
+#ifdef DEBUG
+	/* could not determine any concurrent access though atomic counter */
+	threads = atomic_inc_return(&usb_priv->rx_enter);
+	if (unlikely(threads > 1)) {
+		dev_err(&usb_priv->intf->dev, "%d threads in %s\n", threads, __func__);
+	}
+#endif
+
 	// spin_lock_irqsave(&usb_priv->rx_lock, flags);
 
 	// if (unlikely(!usb_priv->opened))
@@ -954,11 +895,8 @@ static void sc_usb_rx_completed(struct urb *urb)
 		if (likely(urb->actual_length > 0))
 			sc_usb_process_rx_buffer(usb_priv, (u8 *)urb->transfer_buffer, (unsigned int)urb->actual_length);
 
-		//SC_DEBUG_VERIFY(urb->transfer_buffer_length == usb_priv->msg_buffer_size, goto unlock);
 		SC_ASSERT(urb->transfer_buffer_length == usb_priv->msg_buffer_size);
 		rc = usb_submit_urb(urb, GFP_ATOMIC);
-		//dev_dbg(&usb_priv->intf->dev, "rx URB index %u\n", (unsigned int)(urb_data - usb_priv->rx_urb_ptr));
-
 		if (unlikely(rc)) {
 			dev_dbg(&usb_priv->intf->dev, "rx URB index %u\n", (unsigned int)(urb_data - usb_priv->rx_urb_ptr));
 			switch (rc) {
@@ -989,6 +927,10 @@ static void sc_usb_rx_completed(struct urb *urb)
 			break;
 		}
 	}
+
+#ifdef DEBUG
+	atomic_dec_return(&usb_priv->rx_enter);
+#endif
 
 // #if DEBUG
 // unlock:
@@ -1061,7 +1003,6 @@ static int sc_usb_netdev_open(struct net_device *netdev)
 	// unsigned long flags = 0;
 	int rc = 0;
 
-	SC_ASSERT(usb_priv->rx_reassembly_count == 0);
 	SC_ASSERT(usb_priv->tx_urb_available_count == usb_priv->tx_urb_count);
 	SC_ASSERT(usb_priv->tx_echo_skb_available_count == net_priv->can.echo_skb_max);
 
@@ -1075,11 +1016,10 @@ static int sc_usb_netdev_open(struct net_device *netdev)
 
 	// spin_lock_irqsave(&usb_priv->rx_lock, flags);
 	{
-		sc_chunk_reader_init(&usb_priv->rx_can_reader, usb_priv, &sc_chunk_byte_swap);
-		sc_chunk_writer_init(&usb_priv->tx_can_writer, usb_priv->ep_size, usb_priv, &sc_chunk_byte_swap);
-
 		WRITE_ONCE(usb_priv->opened, 1);
-
+#ifdef DEBUG
+		atomic_set(&usb_priv->rx_enter, 0);
+#endif
 		rc = sc_usb_submit_rx_urbs(usb_priv);
 	}
 	// spin_unlock_irqrestore(&usb_priv->rx_lock, flags);
@@ -1121,8 +1061,6 @@ static void sc_usb_fill_tx(
 	u8 tx_len)
 {
 	struct canfd_frame const *cf = (struct canfd_frame const *)skb->data;
-
-	// netdev_dbg(usb_priv->netdev, "tx can_id %x\n", CAN_EFF_MASK & cf->can_id);
 
 	tx->id = SC_MSG_CAN_TX;
 	tx->len = tx_len;
@@ -1188,38 +1126,35 @@ sc_usb_netdev_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 		&& usb_priv->tx_urb_available_count) {
 
 		struct sc_urb_data *urb_data = NULL;
-		struct sc_msg_can_tx *tx = NULL;
 		unsigned int urb_index = -1;
 		unsigned int echo_skb_index = -1;
 		int error = 0;
+		bool zlp_condition = false;
 
 		echo_skb_index = usb_priv->tx_echo_skb_available_ptr[--usb_priv->tx_echo_skb_available_count];
 		SC_DEBUG_VERIFY(echo_skb_index < net_priv->can.echo_skb_max, goto unlock);
-		can_put_echo_skb(skb, netdev, echo_skb_index);
-
 
 		urb_index = usb_priv->tx_urb_available_ptr[--usb_priv->tx_urb_available_count];
 		SC_DEBUG_VERIFY(urb_index < usb_priv->tx_urb_count, goto unlock);
 
 		urb_data = &usb_priv->tx_urb_ptr[urb_index];
-		sc_chunk_writer_set(&usb_priv->tx_can_writer, urb_data->mem, usb_priv->msg_buffer_size);
-		tx = sc_chunk_writer_chunk_reserve(&usb_priv->tx_can_writer, tx_len);
-		if (likely(tx)) {
-			sc_usb_fill_tx(skb, usb_priv, echo_skb_index, tx, tx_len);
-		} else {
-			unsigned int w = 0;
+		sc_usb_fill_tx(skb, usb_priv, echo_skb_index, urb_data->mem, tx_len);
 
-			tx = (__typeof__(tx))usb_priv->tx_can_buffer;
-			sc_usb_fill_tx(skb, usb_priv, echo_skb_index, tx, tx_len);
-			w = sc_chunk_writer_write(&usb_priv->tx_can_writer, tx, tx_len);
-			SC_DEBUG_VERIFY(w == tx_len, goto unlock);
-			(void)w;
+		// can_put_echo_skb seems to change this skb so call it
+		// after having filled the tx urb
+		can_put_echo_skb(skb, netdev, echo_skb_index);
+
+		zlp_condition =
+			tx_len < usb_priv->msg_buffer_size &&
+			usb_priv->ep_size < usb_priv->msg_buffer_size &&
+			(tx_len % usb_priv->ep_size) == 0;
+
+		if (unlikely(zlp_condition)) {
+			*(u32*)(((u8*)urb_data->mem) + tx_len) = 0;
+			tx_len += 4;
 		}
-		//SC_DEBUG_VERIFY(tx->len == tx_len, goto unlock);
-		//SC_DEBUG_VERIFY(tx->track_id == echo_skb_index, goto unlock);
 
-		urb_data->urb->transfer_buffer_length = sc_chunk_writer_finalize(&usb_priv->tx_can_writer);
-		SC_DEBUG_VERIFY(0 == (urb_data->urb->transfer_buffer_length % usb_priv->ep_size), goto unlock);
+		urb_data->urb->transfer_buffer_length = tx_len;
 
 		error = usb_submit_urb(urb_data->urb, GFP_ATOMIC);
 
@@ -1238,7 +1173,6 @@ sc_usb_netdev_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 			//netdev_dbg(netdev, "tx URB %u echo %u\n", urb_index, echo_skb_index);
 		}
 	} else {
-		//netdev_dbg(netdev, "tx stop queue\n");
 		netif_stop_queue(netdev);
 		rc = NETDEV_TX_BUSY;
 	}
@@ -1362,9 +1296,6 @@ static void sc_usb_netdev_uninit(struct sc_usb_priv *usb_priv)
 	kfree(usb_priv->tx_cmd_buffer);
 	usb_priv->tx_cmd_buffer = NULL;
 	usb_priv->rx_cmd_buffer = NULL;
-
-	kfree(usb_priv->rx_reassembly_ptr);
-	usb_priv->rx_reassembly_ptr = NULL;
 
 	kfree(usb_priv->tx_echo_skb_available_ptr);
 	usb_priv->tx_echo_skb_available_ptr = NULL;
@@ -1509,13 +1440,6 @@ static int sc_usb_netdev_init(struct sc_usb_priv *usb_priv)
 
 	/* rx cmd buffer is part of tx cmd buffer */
 	usb_priv->rx_cmd_buffer = usb_priv->tx_cmd_buffer + usb_priv->cmd_buffer_size;
-
-	usb_priv->rx_reassembly_capacity = 3 * usb_priv->msg_buffer_size;
-	usb_priv->rx_reassembly_ptr = kmalloc(usb_priv->rx_reassembly_capacity, GFP_KERNEL);
-	if (!usb_priv->rx_reassembly_ptr) {
-		rc = -ENOMEM;
-		goto fail;
-	}
 
 	usb_priv->tx_echo_skb_available_count = usb_priv->static_tx_fifo_size;
 	usb_priv->tx_echo_skb_available_ptr = kmalloc_array(usb_priv->tx_echo_skb_available_count, sizeof(*usb_priv->tx_echo_skb_available_ptr), GFP_KERNEL);
@@ -1834,7 +1758,7 @@ static int sc_usb_probe_dev(struct sc_usb_priv *usb_priv)
 		dev_err(
 			&usb_priv->intf->dev,
 			"device has CAN-FD permanently enabled but its message buffer is "
-			"too small for chunked transfer of %u bytes\n", can_fd_msg_transfer_size);
+			"too small for transfer of %u bytes\n", can_fd_msg_transfer_size);
 		rc = -ENODEV;
 		goto cleanup;
 	}

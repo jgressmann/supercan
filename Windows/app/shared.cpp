@@ -145,54 +145,99 @@ void process_rx(app_ctx* ac)
             case SC_CAN_DATA_TYPE_STATUS: {
                 auto* status = &com_ctx->rx.hdr->slots[index].status;
                 
-                if (ac->log_flags & LOG_FLAG_BUS_STATE) {
-                    fprintf(stdout, "rx lost=%u tx dropped=%u rx errors=%u tx errors=%u bus=", status->rx_lost, status->tx_dropped, status->rx_errors, status->tx_errors);
-                    switch (status->bus_status) {
-                    case SC_CAN_STATUS_ERROR_ACTIVE:
-                        fprintf(stdout, "error_active");
-                        break;
-                    case SC_CAN_STATUS_ERROR_WARNING:
-                        fprintf(stdout, "error_warning");
-                        break;
-                    case SC_CAN_STATUS_ERROR_PASSIVE:
-                        fprintf(stdout, "error_passive");
-                        break;
-                    case SC_CAN_STATUS_BUS_OFF:
-                        fprintf(stdout, "off");
-                        break;
-                    default:
-                        fprintf(stdout, "unknown");
-                        break;
+                if (!ac->candump && (ac->log_flags & LOG_FLAG_CAN_STATE)) {
+                    bool log = false;
+                    if (ac->log_on_change) {
+                        log = ac->can_rx_errors_last != status->rx_errors ||
+                            ac->can_tx_errors_last != status->tx_errors ||
+                            ac->can_bus_state_last != status->bus_status;
                     }
-                    fprintf(stdout, "\n");
+                    else {
+                        log = true;
+                    }
+
+                    ac->can_rx_errors_last = status->rx_errors;
+                    ac->can_tx_errors_last = status->tx_errors;
+                    ac->can_bus_state_last = status->bus_status;
+
+                    if (log) {
+                        fprintf(stdout, "CAN rx errors=%u tx errors=%u bus=", status->rx_errors, status->tx_errors);
+                        switch (status->bus_status) {
+                        case SC_CAN_STATUS_ERROR_ACTIVE:
+                            fprintf(stdout, "error_active");
+                            break;
+                        case SC_CAN_STATUS_ERROR_WARNING:
+                            fprintf(stdout, "error_warning");
+                            break;
+                        case SC_CAN_STATUS_ERROR_PASSIVE:
+                            fprintf(stdout, "error_passive");
+                            break;
+                        case SC_CAN_STATUS_BUS_OFF:
+                            fprintf(stdout, "off");
+                            break;
+                        default:
+                            fprintf(stdout, "unknown");
+                            break;
+                        }
+                        fprintf(stdout, "\n");
+                    }
+                }
+
+                if (!ac->candump && (ac->log_flags & LOG_FLAG_USB_STATE)) {
+                    bool log = false;
+                    bool irq_queue_full = status->flags & SC_CAN_STATUS_FLAG_IRQ_QUEUE_FULL;
+                    bool desync = status->flags & SC_CAN_STATUS_FLAG_TXR_DESYNC;
+                    auto rx_lost = status->rx_lost;
+                    auto tx_dropped = status->tx_dropped;
+
+                    if (ac->log_on_change) {
+                        log = ac->usb_rx_lost != rx_lost ||
+                            ac->usb_tx_dropped != tx_dropped ||
+                            irq_queue_full || desync;
+                    }
+                    else {
+                        log = true;
+                    }
+
+                    ac->usb_rx_lost = rx_lost;
+                    ac->usb_tx_dropped = tx_dropped;
+
+                    if (log) {
+                        fprintf(stdout, "CAN->USB rx lost=%u USB->CAN tx dropped=%u irqf=%u desync=%u\n", rx_lost, tx_dropped, irq_queue_full, desync);
+                    }
                 }
             } break;
             case SC_CAN_DATA_TYPE_RX: {
                 auto* rx = &com_ctx->rx.hdr->slots[index].rx;
 
-                if (ac->log_flags & LOG_FLAG_RX_DT) {
-                    int64_t dt_us = 0;
-                    if (ac->rx_last_ts) {
-                        dt_us = rx->timestamp_us - ac->rx_last_ts;
-                        if (dt_us < 0) {
-                            fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
+                if (ac->candump) {
+                    log_candump(ac, stdout, rx->timestamp_us, rx->can_id, rx->flags, rx->dlc, rx->data);
+                }
+                else {
+                    if (ac->log_flags & LOG_FLAG_RX_DT) {
+                        int64_t dt_us = 0;
+                        if (ac->rx_last_ts) {
+                            dt_us = rx->timestamp_us - ac->rx_last_ts;
+                            if (dt_us < 0) {
+                                fprintf(stderr, "WARN negative rx msg dt [us]: %lld\n", dt_us);
+                            }
                         }
+
+                        ac->rx_last_ts = rx->timestamp_us;
+
+                        fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
                     }
 
-                    ac->rx_last_ts = rx->timestamp_us;
-
-                    fprintf(stdout, "rx delta %.3f [ms]\n", dt_us * 1e-3f);
-                }
-
-                if (ac->log_flags & LOG_FLAG_RX_MSG) {
-                    fprintf(stdout, "RX ");
-                    log_msg(ac, rx->can_id, rx->flags, rx->dlc, rx->data);
+                    if (ac->log_flags & LOG_FLAG_RX_MSG) {
+                        fprintf(stdout, "RX ");
+                        log_msg(ac, rx->can_id, rx->flags, rx->dlc, rx->data);
+                    }
                 }
             } break;
             case SC_CAN_DATA_TYPE_TX: {
                 auto* tx = &com_ctx->rx.hdr->slots[index].tx;
 
-                if (!tx->echo && ac->log_flags & LOG_FLAG_TXR) {
+                if (!ac->candump && !tx->echo && (ac->log_flags & LOG_FLAG_TXR)) {
                     if (tx->flags & SC_CAN_FRAME_FLAG_DRP) {
                         fprintf(stdout, "TXR %#08x was dropped @ %016llx\n", tx->track_id, tx->timestamp_us);
                     }
@@ -201,7 +246,7 @@ void process_rx(app_ctx* ac)
                     }
                 }
 
-                if (ac->log_flags & LOG_FLAG_TX_MSG) {
+                if (!ac->candump && (ac->log_flags & LOG_FLAG_TX_MSG)) {
                     fprintf(stdout, "TX ");
                     log_msg(ac, tx->can_id, tx->flags, tx->dlc, tx->data);
                 }
@@ -239,6 +284,9 @@ void process_rx(app_ctx* ac)
                     }
                     fprintf(stdout, "error\n");
                 }
+            } break;
+            default: {
+                fprintf(stderr, "WARN: unhandled msg id=%02x\n", hdr->type);
             } break;
             }
         }
@@ -593,8 +641,10 @@ extern "C" int run_shared(struct app_ctx* ac)
             fprintf(stdout, "no " SC_NAME " devices found\n");
             return SC_DLL_ERROR_NONE;
         }
-
-        fprintf(stdout, "%u " SC_NAME " devices found\n", (unsigned)dev_count);
+        
+        if (!ac->candump) {
+            fprintf(stdout, "%u " SC_NAME " devices found\n", (unsigned)dev_count);
+        }
 
         if (ac->device_index >= dev_count) {
             fprintf(stdout, "Requested device index %u out of range\n", ac->device_index);
@@ -620,15 +670,16 @@ extern "C" int run_shared(struct app_ctx* ac)
             return map_hr_to_error(hr);
         }
 
-        
-        fprintf(stdout, "device features perm=%#04x conf=%#04x\n", com_ctx.dev_data.feat_perm, com_ctx.dev_data.feat_conf);
+        if (!ac->candump) {
+            fprintf(stdout, "device features perm=%#04x conf=%#04x\n", com_ctx.dev_data.feat_perm, com_ctx.dev_data.feat_conf);
 
-        for (size_t i = 0; i < std::min((size_t)com_ctx.dev_data.sn_length, _countof(serial_str) - 1); ++i) {
-            _snwprintf_s(&serial_str[i * 2], 3, _TRUNCATE, L"%02x", com_ctx.dev_data.sn_bytes[i]);
+            for (size_t i = 0; i < std::min((size_t)com_ctx.dev_data.sn_length, _countof(serial_str) - 1); ++i) {
+                _snwprintf_s(&serial_str[i * 2], 3, _TRUNCATE, L"%02x", com_ctx.dev_data.sn_bytes[i]);
+            }
+
+            fwprintf(stdout, L"device identifies as %ls, serial no %ls, firmware version %u.% u.% u\n",
+                com_ctx.dev_data.name, serial_str, com_ctx.dev_data.fw_ver_major, com_ctx.dev_data.fw_ver_minor, com_ctx.dev_data.fw_ver_patch);
         }
-
-        fwprintf(stdout, L"device identifies as %ls, serial no %ls, firmware version %u.% u.% u\n",
-            com_ctx.dev_data.name, serial_str, com_ctx.dev_data.fw_ver_major, com_ctx.dev_data.fw_ver_minor, com_ctx.dev_data.fw_ver_patch);
 
         SysFreeString(com_ctx.dev_data.name);
         com_ctx.dev_data.name = nullptr;
