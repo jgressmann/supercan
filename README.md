@@ -14,7 +14,7 @@ To use a SuperCAN device, simply plug it in. On Linux, ensure the driver module 
 
 # Status
 
-SuperCAN supports Windows 10 and Linux. The protocol should be considered in alpha stadium as the driver code for both platforms is maturing. With the release of version 1.0.0 the protocol will be frozen.
+SuperCAN supports Windows 10 and Linux.
 
 
 ## Build
@@ -77,10 +77,19 @@ If you have a debugger probe such as SEGGER's J-Link you can choose any option. 
 
 ### 1. Build and flash stand-alone SuperCAN
 
+#### J-Link
 ```
 $ cd Boards/examples/device/supercan
 $ make V=1 HWREV=3 flash-jlink
 ```
+
+#### Atmel ICE
+```
+$ cd Boards/examples/device/supercan
+$ make V=1 HWREV=3 flash-edbg
+```
+
+
 
 This creates and flashes the firmware file. Make sure to replace _HWREV=3_ with the version of the board you are using.
 
@@ -94,20 +103,38 @@ Ensure you have `python3` installed.
 
 This option installs the SuperDFU  bootloader on the device. SuperDFU implements [USB DFU 1.1](https://usb.org/sites/default/files/DFU_1.1.pdf).
 
+##### J-LINK
+
 ```
 $ cd Boards/examples/device/atsame51_dfu
 $ make V=1 BOARD=d5035-01 HWREV=3 BOOTLOADER=1 VID=0x1d50 PID=0x5036 flash-jlink
+```
+
+##### Atmel ICE
+
+```
+$ cd Boards/examples/device/atsame51_dfu
+$ make V=1 BOARD=d5035-01 HWREV=3 BOOTLOADER=1 VID=0x1d50 PID=0x5036 flash-edbg
 ```
 
 This creates and flashes the bootloader. Make sure to replace _HWREV=3_ with the revision of the board you are using.
 
 Next, flash SuperCAN using these steps
 
+##### J-LINK
+
 ```
 $ cd Boards/examples/device/supercan
 $ make V=1 HWREV=3 APP=1 flash-dfu
 ```
 
+
+##### Atmel ICE
+
+```
+$ cd Boards/examples/device/supercan
+$ make V=1 HWREV=3 APP=1 OFFSET=0x4000 edbg-dfu
+```
 ### 3. Build and upload SuperCAN through SuperDFU
 
 #### Prequisites
