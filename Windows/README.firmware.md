@@ -17,7 +17,7 @@ Below you'll find the steps that worked for me on my Windows 10 (x64) machine. Y
 
 	![USB DFU 1.1 selected in Zadig](doc/zadig-runtime-mode-replace-v10-v6.png)
 
-5. Open an administraive terminal (cmd.exe, _Run as Administrator_)
+5. Open an administrative terminal (cmd.exe, _Run as Administrator_)
 
 6. Reset the device and (try to) flash firmware.
 
