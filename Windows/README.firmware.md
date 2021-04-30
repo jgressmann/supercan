@@ -61,3 +61,5 @@ Most likely you don't have a compatible driver set for the device in DFU mode.
 * Have the _Device Manager_ open while performing driver assignment.
 	* Enable the display of _Hidden Devices_ through the _Views_ menu.
 	* You can _undo_ a driver assignment performed through _Zadig_ by selecting the device, then pressing _Del_ on the keyboard, and then confirming that you want to _Uninstall driver software_. You may need to replug the device afterwards.
+
+* By the looks of it dfu-util v0.10 _does not_ work. However, v0.9 works fine.
