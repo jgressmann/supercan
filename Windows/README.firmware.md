@@ -2,7 +2,7 @@
 
 Ensure you have [Zadig](https://zadig.akeo.ie/) available as well as [dfu-util](http://dfu-util.sourceforge.net/releases/).
 
-Below you'll find the steps that worked for me on my Windows 10 (x64) machine. Your mileage may very well vary.
+Below you'll find the steps that worked for me on my Windows 10 (x64) machine. Your mileage may vary.
 
 
 ## Steps
