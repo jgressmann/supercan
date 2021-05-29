@@ -15,10 +15,10 @@ export TARGET_DIR=$APPVEYOR_BUILD_FOLDER/tmp
 hw_revs="$(seq -s ' ' 3)"
 
 # install build dependencies
-#sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi
+sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi
 
 # init submodules
-#git submodule update --init --recursive
+git submodule update --init --recursive
 
 env
 
