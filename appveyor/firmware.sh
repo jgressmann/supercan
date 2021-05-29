@@ -12,7 +12,7 @@ export MAKE_ARGS="-j V=1"
 export BOOTLOADER_NAME="D5035-01 SuperCAN DFU"
 export TARGET_DIR=$APPVEYOR_BUILD_FOLDER/tmp
 
-hw_revs="$(seq 3)"
+hw_revs="$(seq -s ' ' 3)"
 
 # install build dependencies
 sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi
@@ -23,9 +23,10 @@ git submodule update --init --recursive
 env
 
 # Save current commit
+mkdir -p $TARGET_DIR/supercan
 echo $APPVEYOR_REPO_COMMIT >$TARGET_DIR/supercan/COMMIT
 
-# output dirs
+# make output dirs for hw revs
 for i in "$hw_revs"; do
 	mkdir -p $TARGET_DIR/supercan/$BOARD/0$i
 done
