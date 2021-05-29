@@ -15,10 +15,10 @@ export TARGET_DIR=$APPVEYOR_BUILD_FOLDER/tmp
 hw_revs="$(seq -s ' ' 3)"
 
 # install build dependencies
-sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi
+#sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi
 
 # init submodules
-git submodule update --init --recursive
+#git submodule update --init --recursive
 
 env
 
@@ -27,7 +27,7 @@ mkdir -p $TARGET_DIR/supercan
 echo $APPVEYOR_REPO_COMMIT >$TARGET_DIR/supercan/COMMIT
 
 # make output dirs for hw revs
-for i in "$hw_revs"; do
+for i in $hw_revs; do
 	mkdir -p $TARGET_DIR/supercan/$BOARD/0$i
 done
 
@@ -35,8 +35,8 @@ done
 # SuperDFU
 cd $APPVEYOR_BUILD_FOLDER/Boards/examples/device/atsame51_dfu
 
-for i in "$hw_revs"; do
-	make $MAKE_ARGS BOARD=$BOARD BOOTLOADER=1 VID=$VID PID=$PID_DFU "PRODUCT_NAME=$BOOTLOADER_NAME" "INTERFACE_NAME=$BOOTLOADER_NAME" HWREV=$i
+for i in $hw_revs; do
+	make $MAKE_ARGS BOARD=$BOARD BOOTLOADER=1 VID=$VID PID=$PID_DFU PRODUCT_NAME="$BOOTLOADER_NAME" INTERFACE_NAME="$BOOTLOADER_NAME" HWREV=$i
 	cp _build/build-$BOARD/$BOARD-firmware.hex $TARGET_DIR/supercan/$BOARD/0$i/superdfu.hex
 	rm -rf _build
 done
@@ -44,7 +44,7 @@ done
 # SuperCAN
 cd $APPVEYOR_BUILD_FOLDER/Boards/examples/device/supercan
 
-for i in "$hw_revs"; do
+for i in $hw_revs; do
 	make $MAKE_ARGS HWREV=$i
 	cp _build/build-$BOARD/$BOARD-firmware.hex $TARGET_DIR/supercan/$BOARD/0$i/supercan-standalone.hex
 	rm -rf _build
