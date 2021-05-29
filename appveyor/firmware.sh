@@ -1,4 +1,7 @@
-#!/bin/sh -e -x
+#!/bin/sh
+
+set -e
+set -x
 
 export DEBIAN_FRONTEND=noninteractive
 export BOARD=d5035-01
