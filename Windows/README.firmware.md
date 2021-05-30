@@ -56,6 +56,32 @@ Most likely you don't have a compatible driver set for the device in DFU mode.
 
 4. Try flashing the firmware again from step 6.
 
+### Flashing with dfu-util 0.10 fails
+
+This version seems to misinterpret the vendor/product ID found in the suffix of the firmware file.
+Strangely enough, _dfu-suffix_ reports the proper values:
+
+```
+dfu-suffix.exe -c ..\Downloads\supercan\d5035-01\03\supercan.dfu
+dfu-suffix (dfu-util) 0.10
+
+Copyright 2011-2012 Stefan Schmidt, 2013-2020 Tormod Volden
+This program is Free Software and has ABSOLUTELY NO WARRANTY
+Please report bugs to http://sourceforge.net/p/dfu-util/tickets/
+
+The file ..\Downloads\supercan\d5035-01\03\supercan.dfu contains a DFU suffix with the following properties:
+BCD device:     0xFFFF
+Product ID:     0x5035
+Vendor ID:      0x1D50
+BCD DFU:        0x0100
+Length:         16
+CRC:            0xF30CA4DD
+```
+
+### Fix
+
+Use version 0.9 of dfu-util.
+
 ## Hints
 
 * Have the _Device Manager_ open while performing driver assignment.
