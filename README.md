@@ -14,7 +14,8 @@ To use a SuperCAN device, simply plug it in. On Linux, ensure the driver module 
 
 # Status
 
-SuperCAN supports Windows 10 and Linux.
+SuperCAN supports Windows 10 and Linux. Windows uses can use [CAN++](https://github.com/TDahlmann/canpp) as frontend,
+on Linux the device appears as regular SocketCAN device.
 
 
 ## Build
