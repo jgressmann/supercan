@@ -14,8 +14,7 @@ To use a SuperCAN device, simply plug it in. On Linux, ensure the driver module 
 
 # Status
 
-SuperCAN supports Windows 10 and Linux. Windows uses can use [CAN++](https://github.com/TDahlmann/canpp) as frontend,
-on Linux the device appears as regular SocketCAN device.
+SuperCAN supports Windows 10 and Linux.
 
 
 ## Build
@@ -25,6 +24,17 @@ Build        | Status
 *Firmware*   | [![Build status](https://ci.appveyor.com/api/projects/status/i398eskxl418rwf9?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-firmware)
 *Linux*      | [![Build status](https://ci.appveyor.com/api/projects/status/knw9udgvlal4u3b0?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-linux)
 *Windows*    | [![Build status](https://ci.appveyor.com/api/projects/status/p25qholxtadg71ej?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-windows)
+
+## Apps
+
+### Windows
+
+- [CAN++](https://github.com/TDahlmann/canpp)
+
+### Linux
+
+- can-utils
+- [CANdevStudio](https://github.com/GENIVI/CANdevStudio)
 
 # Firmware update
 
