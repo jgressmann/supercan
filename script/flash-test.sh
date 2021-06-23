@@ -5,7 +5,7 @@
 
 script_dir=$(dirname $0)
 
-flash_pause_s=5
+usb_enum_pause_s=5
 jlink_options="-device ATSAME51J19 -if swd -JTAGConf -1,-1 -speed auto"
 
 usage()
@@ -109,10 +109,11 @@ echo INFO: Test run date $date_str
 mkdir -p "$log_dir"
 
 
-# generate erase file
+# generate erase file (erase command fails but does end up erasing the flash memory)
 cat >"$tmp_dir/erase.jlink" << EOF
 ExitOnError 1
 r
+ExitOnError 0
 erase
 exit
 EOF
@@ -132,17 +133,20 @@ errors=0
 # erase target
 echo INFO: Erase target flash | tee -a "$meta_log_path"
 JLinkExe $jlink_options -CommandFile "$tmp_dir/erase.jlink" 2>&1 | tee -a "$log_dir/erase.log"
-exit_code=$?
+exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
 	echo "ERROR: failed to erase device (exit code $exit_code)" | tee -a "$meta_log_path"
 	errors=$((errors+1))
 fi
 
+# wait a bit (device enumeration)
+sleep $usb_enum_pause_s
+
 # flash bootloader
 echo INFO: Flashing bootloader | tee -a "$meta_log_path"
 JLinkExe $jlink_options -CommandFile "$tmp_dir/flash-bootloader.jlink" 2>&1 | tee -a "$log_dir/flash-bootloader.log"
-exit_code=$?
+exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
 	echo "ERROR: failed to flash bootloader to device (exit code $exit_code)" | tee -a "$meta_log_path"
@@ -150,12 +154,12 @@ if [ $exit_code -ne 0 ]; then
 fi
 
 # wait a bit (device enumeration)
-sleep $flash_pause_s
+sleep $usb_enum_pause_s
 
 # upload app through DFU (empty flash)
 echo INFO: Uploading application onto empty flash | tee -a "$meta_log_path"
 sudo dfu-util -d 1d50:5035,:5036 -R -D "$app_fw_file" 2>&1 | tee -a "$log_dir/dfu-upload-app-empty.log"
-exit_code=$?
+exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
 	echo "ERROR: failed to upload application to device through DFU (exit code $exit_code)" | tee -a "$meta_log_path"
@@ -163,12 +167,12 @@ if [ $exit_code -ne 0 ]; then
 fi
 
 # wait a bit (device enumeration)
-sleep $flash_pause_s
+sleep $usb_enum_pause_s
 
 # upload app through DFU (app bootloader decend)
 echo INFO: Application bootloader decend and firmware upload | tee -a "$meta_log_path"
 sudo dfu-util -d 1d50:5035,:5036 -R -D "$app_fw_file" 2>&1 | tee -a "$log_dir/dfu-decend-to-bl-then-upload-app.log"
-exit_code=$?
+exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
 	echo "ERROR: failed to decend into bootloader / upload application to device through DFU (exit code $exit_code)" | tee -a "$meta_log_path"
@@ -179,14 +183,14 @@ fi
 #######################
 # archive results
 #######################
-
+echo
 echo INFO: Finished with $errors errors. | tee -a "$meta_log_path"
 
 pack_results
 
 cleanup
 
-echo INFO: Packing results and cleaning up.
+echo INFO: Packed results and cleaned up.
 
 exit $errors
 
