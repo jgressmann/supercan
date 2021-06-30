@@ -39,6 +39,9 @@ for i in $hw_revs; do
 	make $MAKE_ARGS BOARD=$BOARD BOOTLOADER=1 VID=$VID PID=$PID_DFU PRODUCT_NAME="$BOOTLOADER_NAME" INTERFACE_NAME="$BOOTLOADER_NAME" HWREV=$i
 	cp _build/build-$BOARD/$BOARD-firmware.hex $TARGET_DIR/supercan/$BOARD/0$i/superdfu.hex
 	rm -rf _build
+	make $MAKE_ARGS BOARD=$BOARD BOOTLOADER=1 VID=$VID PID=$PID_DFU PRODUCT_NAME="$BOOTLOADER_NAME" INTERFACE_NAME="$BOOTLOADER_NAME" HWREV=$i APP=1 dfu
+	cp _build/build-$BOARD/$BOARD-firmware.dfu $TARGET_DIR/supercan/$BOARD/0$i/superdfu.dfu
+	rm -rf _build
 done
 
 # SuperCAN
