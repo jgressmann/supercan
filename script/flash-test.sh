@@ -10,7 +10,7 @@ jlink_options="-device ATSAME51J19 -if swd -JTAGConf -1,-1 -speed auto"
 
 usage()
 {
-	echo $(basename $0) \[OPTIONS\] BL_FW_FILE APP_FW_FILE
+	echo $(basename $0) \[OPTIONS\] BL_FW_FILE app_dfu_file
 	echo
 	echo
 }
@@ -35,21 +35,27 @@ while [ $# -gt 0 ]; do
 done
 set -- "${POSITIONAL[@]}" # restore positional parameters
 
-if [ ${#POSITIONAL[@]} -ne 2 ]; then
-	echo "ERROR: $(basename $0) BL_FW_FILE APP_FW_FILE"
+if [ ${#POSITIONAL[@]} -ne 3 ]; then
+	echo "ERROR: $(basename $0) BL_FW_FILE BL_DFU_FILE APP_DFU_FILE"
 	exit 1
 fi
 
 bl_fw_file=${POSITIONAL[0]}
-app_fw_file=${POSITIONAL[1]}
+bl_dfu_file=${POSITIONAL[1]}
+app_dfu_file=${POSITIONAL[2]}
 
 if [ ! -f "$bl_fw_file" ]; then
 	echo "ERROR: no such file $bl_fw_file"
 	exit 1
 fi
 
-if [ ! -f "$app_fw_file" ]; then
-	echo "ERROR: no such file $app_fw_file"
+if [ ! -f "$bl_dfu_file" ]; then
+	echo "ERROR: no such file $bl_dfu_file"
+	exit 1
+fi
+
+if [ ! -f "$app_dfu_file" ]; then
+	echo "ERROR: no such file $app_dfu_file"
 	exit 1
 fi
 
@@ -158,7 +164,7 @@ sleep $usb_enum_pause_s
 
 # upload app through DFU (empty flash)
 echo INFO: Uploading application onto empty flash | tee -a "$meta_log_path"
-sudo dfu-util -d 1d50:5035,:5036 -R -D "$app_fw_file" 2>&1 | tee -a "$log_dir/dfu-upload-app-empty.log"
+dfu-util -d 1d50:5035,:5036 -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/dfu-upload-app-empty.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
@@ -170,14 +176,54 @@ fi
 sleep $usb_enum_pause_s
 
 # upload app through DFU (app bootloader decend)
-echo INFO: Application bootloader decend and firmware upload | tee -a "$meta_log_path"
-sudo dfu-util -d 1d50:5035,:5036 -R -D "$app_fw_file" 2>&1 | tee -a "$log_dir/dfu-decend-to-bl-then-upload-app.log"
+echo INFO: Application bootloader decend and app upload | tee -a "$meta_log_path"
+dfu-util -d 1d50:5035,:5036 -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/dfu-decend-to-bl-then-upload-app.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
 	echo "ERROR: failed to decend into bootloader / upload application to device through DFU (exit code $exit_code)" | tee -a "$meta_log_path"
 	errors=$((errors+1))
 fi
+
+# wait a bit (device enumeration)
+sleep $usb_enum_pause_s
+
+# upload bootloader through DFU (app bootloader decend)
+echo INFO: Application bootloader decend and bootloader upload | tee -a "$meta_log_path"
+dfu-util -d 1d50:5035,:5036 -R -D "$bl_dfu_file" 2>&1 | tee -a "$log_dir/dfu-decend-to-bl-then-upload-bl-1.log"
+exit_code=${PIPESTATUS[0]}
+
+if [ $exit_code -ne 0 ]; then
+	echo "ERROR: failed to decend into bootloader / upload bootloader to device through DFU (exit code $exit_code)" | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
+# wait a bit (device enumeration)
+sleep $usb_enum_pause_s
+
+# upload bootloader again (DFU image is slighly different)
+echo INFO: Application bootloader decend and bootloader upload from DFU bootloader | tee -a "$meta_log_path"
+dfu-util -d 1d50:5035,:5036 -R -D "$bl_dfu_file" 2>&1 | tee -a "$log_dir/dfu-decend-to-bl-then-upload-bl-2.log"
+exit_code=${PIPESTATUS[0]}
+
+if [ $exit_code -ne 0 ]; then
+	echo "ERROR: failed to decend into bootloader / upload bootloader to device through DFU (exit code $exit_code)" | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
+# wait a bit (device enumeration)
+sleep $usb_enum_pause_s
+
+# upload app again (DFU image is slighly different)
+echo INFO: Application bootloader decend and app upload from DFU bootloader | tee -a "$meta_log_path"
+dfu-util -d 1d50:5035,:5036 -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/dfu-decend-to-bl-then-upload-bl-2.log"
+exit_code=${PIPESTATUS[0]}
+
+if [ $exit_code -ne 0 ]; then
+	echo "ERROR: failed to decend into bootloader / upload app to device through DFU (exit code $exit_code)" | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
 
 
 #######################
