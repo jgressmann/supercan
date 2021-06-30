@@ -135,95 +135,117 @@ exit
 EOF
 
 errors=0
+number=0
+message=
 
 # erase target
-echo INFO: Erase target flash | tee -a "$meta_log_path"
-JLinkExe $jlink_options -CommandFile "$tmp_dir/erase.jlink" 2>&1 | tee -a "$log_dir/erase.log"
+message="erase target flash"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+JLinkExe $jlink_options -CommandFile "$tmp_dir/erase.jlink" 2>&1 | tee -a "$log_dir/${number}-erase-chip.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
-	echo "ERROR: failed to erase device (exit code $exit_code)" | tee -a "$meta_log_path"
+	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
 	errors=$((errors+1))
 fi
 
+number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-# flash bootloader
-echo INFO: Flashing bootloader | tee -a "$meta_log_path"
-JLinkExe $jlink_options -CommandFile "$tmp_dir/flash-bootloader.jlink" 2>&1 | tee -a "$log_dir/flash-bootloader.log"
+message="flash bootloader onto empty chip"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+JLinkExe $jlink_options -CommandFile "$tmp_dir/flash-bootloader.jlink" 2>&1 | tee -a "$log_dir/${number}-flash-bootloader.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
-	echo "ERROR: failed to flash bootloader to device (exit code $exit_code)" | tee -a "$meta_log_path"
+	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
 	errors=$((errors+1))
 fi
 
+number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-# upload app through DFU (empty flash)
-echo INFO: Uploading application onto empty flash | tee -a "$meta_log_path"
-dfu-util -d 1d50:5035,:5036 -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/dfu-upload-app-empty.log"
+message="upload application onto empty flash"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+dfu-util -d 1d50:5035,:5036 -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/${number}-bl-upload-app-onto-empty-flash.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
-	echo "ERROR: failed to upload application to device through DFU (exit code $exit_code)" | tee -a "$meta_log_path"
+	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
 	errors=$((errors+1))
 fi
 
+number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-# upload app through DFU (app bootloader decend)
-echo INFO: Application bootloader decend and app upload | tee -a "$meta_log_path"
-dfu-util -d 1d50:5035,:5036 -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/dfu-decend-to-bl-then-upload-app.log"
+message="application bootloader decend and application upload"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+dfu-util -d 1d50:5035,:5036 -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/${number}-app-decend-to-bl-then-upload-app.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
-	echo "ERROR: failed to decend into bootloader / upload application to device through DFU (exit code $exit_code)" | tee -a "$meta_log_path"
+	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
 	errors=$((errors+1))
 fi
 
+number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-# upload bootloader through DFU (app bootloader decend)
-echo INFO: Application bootloader decend and bootloader upload | tee -a "$meta_log_path"
-dfu-util -d 1d50:5035,:5036 -R -D "$bl_dfu_file" 2>&1 | tee -a "$log_dir/dfu-decend-to-bl-then-upload-bl-1.log"
+message="application bootloader decend and bootloader upload"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+dfu-util -d 1d50:5035,:5036 -R -D "$bl_dfu_file" 2>&1 | tee -a "$log_dir/${number}-app-decend-to-bl-then-upload-bl.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
-	echo "ERROR: failed to decend into bootloader / upload bootloader to device through DFU (exit code $exit_code)" | tee -a "$meta_log_path"
+	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
 	errors=$((errors+1))
 fi
 
+number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-# upload bootloader again (DFU image is slighly different)
-echo INFO: Application bootloader decend and bootloader upload from DFU bootloader | tee -a "$meta_log_path"
-dfu-util -d 1d50:5035,:5036 -R -D "$bl_dfu_file" 2>&1 | tee -a "$log_dir/dfu-decend-to-bl-then-upload-bl-2.log"
+message="bootloader upload without application"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+dfu-util -d 1d50:5035,:5036 -R -D "$bl_dfu_file" 2>&1 | tee -a "$log_dir/${number}-bl-without-app-upload-bl.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
-	echo "ERROR: failed to decend into bootloader / upload bootloader to device through DFU (exit code $exit_code)" | tee -a "$meta_log_path"
+	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
 	errors=$((errors+1))
 fi
 
+number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-# upload app again (DFU image is slighly different)
-echo INFO: Application bootloader decend and app upload from DFU bootloader | tee -a "$meta_log_path"
-dfu-util -d 1d50:5035,:5036 -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/dfu-decend-to-bl-then-upload-bl-2.log"
+message="application bootloader decend and update of DFU-uploaded bootloader"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+dfu-util -d 1d50:5035,:5036 -R -D "$bl_dfu_file" 2>&1 | tee -a "$log_dir/${number}-app-decend-to-dfued-bl-then-upload-bl.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
-	echo "ERROR: failed to decend into bootloader / upload app to device through DFU (exit code $exit_code)" | tee -a "$meta_log_path"
+	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
 	errors=$((errors+1))
 fi
 
+number=$((number+1))
+# wait a bit (device enumeration)
+sleep $usb_enum_pause_s
+
+message="application to DFU\'ed bootloader decend and update of application"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+dfu-util -d 1d50:5035,:5036 -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/${number}-app-decend-to-dfued-bl-then-upload-app.log"
+exit_code=${PIPESTATUS[0]}
+
+if [ $exit_code -ne 0 ]; then
+	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
 
 
 #######################
