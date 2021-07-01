@@ -38,6 +38,7 @@ cd $APPVEYOR_BUILD_FOLDER/Boards/examples/device/atsame51_dfu
 for i in $hw_revs; do
 	make $MAKE_ARGS BOARD=$BOARD BOOTLOADER=1 VID=$VID PID=$PID_DFU PRODUCT_NAME="$BOOTLOADER_NAME" INTERFACE_NAME="$BOOTLOADER_NAME" HWREV=$i
 	cp _build/build-$BOARD/$BOARD-firmware.hex $TARGET_DIR/supercan/$BOARD/0$i/superdfu.hex
+	cp _build/build-$BOARD/$BOARD-firmware.bin $TARGET_DIR/supercan/$BOARD/0$i/superdfu.bin
 	rm -rf _build
 	make $MAKE_ARGS BOARD=$BOARD BOOTLOADER=1 VID=$VID PID=$PID_DFU PRODUCT_NAME="$BOOTLOADER_NAME" INTERFACE_NAME="$BOOTLOADER_NAME" HWREV=$i APP=1 dfu
 	cp _build/build-$BOARD/$BOARD-firmware.dfu $TARGET_DIR/supercan/$BOARD/0$i/superdfu.dfu
@@ -50,9 +51,11 @@ cd $APPVEYOR_BUILD_FOLDER/Boards/examples/device/supercan
 for i in $hw_revs; do
 	make $MAKE_ARGS HWREV=$i
 	cp _build/build-$BOARD/$BOARD-firmware.hex $TARGET_DIR/supercan/$BOARD/0$i/supercan-standalone.hex
+	cp _build/build-$BOARD/$BOARD-firmware.bin $TARGET_DIR/supercan/$BOARD/0$i/supercan-standalone.bin
 	rm -rf _build
 	make $MAKE_ARGS HWREV=$i APP=1 dfu
 	cp _build/build-$BOARD/$BOARD-firmware.superdfu.hex $TARGET_DIR/supercan/$BOARD/0$i/supercan-dfu.hex
+	cp _build/build-$BOARD/$BOARD-firmware.superdfu.bin $TARGET_DIR/supercan/$BOARD/0$i/supercan-dfu.bin
 	cp _build/build-$BOARD/$BOARD-firmware.dfu $TARGET_DIR/supercan/$BOARD/0$i/supercan.dfu
 	rm -rf _build
 done
