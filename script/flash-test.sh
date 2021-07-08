@@ -287,7 +287,7 @@ number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-verify_bl_is_running
+verify_bl_is_running_from_bank $initial_bank
 
 number=$((number+1))
 
