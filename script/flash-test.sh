@@ -5,8 +5,12 @@
 
 script_dir=$(dirname $0)
 
-usb_enum_pause_s=5
+usb_enum_pause_s=3
 jlink_options="-device ATSAME51J19 -if swd -JTAGConf -1,-1 -speed auto"
+vid=1d50
+pid_bl=5036
+pid_app=5035
+
 
 usage()
 {
@@ -27,7 +31,7 @@ while [ $# -gt 0 ]; do
 			usage
 			exit 0
 			;;
-		*)    # unknown option
+		*) # unknown option
 			POSITIONAL+=("$1") # save it in an array for later
 			shift # past argument
  			;;
@@ -69,6 +73,7 @@ fi
 tmp_dir=
 date_str=$(date +"%F_%H%M%S")
 
+
 cleanup()
 {
 	if [ ! -z "$tmp_dir" ] && [ -d "$tmp_dir" ]; then
@@ -103,6 +108,7 @@ pack_results()
 	mv "$tmp_dir/$tar_file" $PWD
 }
 
+
 trap error_cleanup EXIT
 
 tmp_dir=$(mktemp -d)
@@ -113,6 +119,61 @@ echo INFO: Using tmp dir $tmp_dir
 echo INFO: Test run date $date_str
 
 mkdir -p "$log_dir"
+
+
+errors=0
+number=0
+message=
+
+verify_bl_is_running()
+{
+	message="verify bootloader is running"
+	echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+	output=$( lsusb -v -d ${vid}:${pid_bl} 2>&1 | tee -a "$log_dir/${number}-verify-bl-is-running.log" )
+
+
+	if [ -z "$output" ]; then
+		echo "ERROR: failed step \"$message\": could not list device in DFU mode (${vid}:${pid_bl})" | tee -a "$meta_log_path"
+		errors=$((errors+1))
+	fi
+}
+
+verify_bl_is_running_from_bank()
+{
+	local target_bank=$1
+	shift
+
+	verify_bl_is_running
+
+	local actual_bank=$( grep Bank "$log_dir/${number}-verify-bl-is-running.log" | sed -E 's/.* Bank ([0-9])/\1/' )
+
+	if [ -z "$actual_bank" ]; then
+		echo "ERROR: failed step \"$message\": failed to determine current flash memory bank" | tee -a "$meta_log_path"
+		errors=$((errors+1))
+	fi
+
+	number=$((number+1))
+
+	message="verify bootloader running from bank $target_bank"
+	echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+	if [ $target_bank -ne $actual_bank ]; then
+		echo "ERROR: failed step \"$message\": bootloader upload didn't start from bank $target_bank" | tee -a "$meta_log_path"
+		errors=$((errors+1))
+	fi
+}
+
+verify_app_is_running()
+{
+	message="verify the application is running"
+	echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+	local output=$( lsusb -v -d ${vid}:${pid_app} 2>&1 | tee -a "$log_dir/${number}-verify-app-is-running.log" )
+
+
+	if [ -z "$output" ]; then
+		echo "ERROR: failed step \"$message\": could not list device in RT mode (${vid}:${pid_app})" | tee -a "$meta_log_path"
+		errors=$((errors+1))
+	fi
+}
 
 
 # generate erase file (erase command fails but does end up erasing the flash memory)
@@ -134,9 +195,7 @@ go
 exit
 EOF
 
-errors=0
-number=0
-message=
+
 
 # erase target
 message="erase target flash"
@@ -153,6 +212,20 @@ number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
+
+message="verify neither bootloader nor application is running"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+output_bl=$( lsusb -v -d ${vid}:${pid_bl} 2>&1 | tee -a "$log_dir/${number}-verify-no-dfu-app-vid-pid-after-erase.log" )
+output_app=$( lsusb -v -d ${vid}:${pid_app} 2>&1 | tee -a "$log_dir/${number}-verify-no-dfu-app-vid-pid-after-erase.log" )
+
+
+if [ -n "$output_bl" ] || [ -n "$output_app" ]; then
+	echo "ERROR: failed step \"$message\": found USB device for VID:PID ${vid}:${pid_bl},${pid_app}" | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
+# echo "INFO: Successfully finished step $number: $message" | tee -a "$meta_log_path"
+
 message="flash bootloader onto empty chip"
 echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
 JLinkExe $jlink_options -CommandFile "$tmp_dir/flash-bootloader.jlink" 2>&1 | tee -a "$log_dir/${number}-flash-bootloader.log"
@@ -163,13 +236,28 @@ if [ $exit_code -ne 0 ]; then
 	errors=$((errors+1))
 fi
 
+
+number=$((number+1))
+# wait a bit (device enumeration)
+sleep $usb_enum_pause_s
+
+verify_bl_is_running
+
+
+initial_bank=$( grep Bank "$log_dir/${number}-verify-bl-is-running.log" | sed -E 's/.* Bank ([0-9])/\1/' )
+
+if [ -z "$initial_bank" ]; then
+	echo "ERROR: failed step \"$message\": failed to determine initial flash memory bank" | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
 number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
 message="upload application onto empty flash"
 echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
-dfu-util -d 1d50:5035,:5036 -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/${number}-bl-upload-app-onto-empty-flash.log"
+dfu-util -d ${vid}:${pid_app},:${pid_bl} -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/${number}-bl-upload-app-onto-empty-flash.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
@@ -181,9 +269,13 @@ number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-message="application bootloader decend and application upload"
+verify_app_is_running
+
+number=$((number+1))
+
+message="application to bootloader decend"
 echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
-dfu-util -d 1d50:5035,:5036 -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/${number}-app-decend-to-bl-then-upload-app.log"
+dfu-util -d ${vid}:${pid_app} -R -e 2>&1 | tee -a "$log_dir/${number}-app-decend-to-bl.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
@@ -195,9 +287,13 @@ number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-message="application bootloader decend and bootloader upload"
+verify_bl_is_running
+
+number=$((number+1))
+
+message="application upload"
 echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
-dfu-util -d 1d50:5035,:5036 -R -D "$bl_dfu_file" 2>&1 | tee -a "$log_dir/${number}-app-decend-to-bl-then-upload-bl.log"
+dfu-util -d ${vid}:${pid_app},:${pid_bl} -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/${number}-upload-app.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
@@ -209,9 +305,13 @@ number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-message="bootloader upload without application"
+verify_app_is_running
+
+number=$((number+1))
+
+message="application to bootloader decend"
 echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
-dfu-util -d 1d50:5035,:5036 -R -D "$bl_dfu_file" 2>&1 | tee -a "$log_dir/${number}-bl-without-app-upload-bl.log"
+dfu-util -d ${vid}:${pid_app} -R -e 2>&1 | tee -a "$log_dir/${number}-app-decend-to-bl.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
@@ -223,9 +323,14 @@ number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-message="application bootloader decend and update of DFU-uploaded bootloader"
+verify_bl_is_running_from_bank $initial_bank
+
+number=$((number+1))
+
+
+message="bootloader upload onto empty alternate bank"
 echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
-dfu-util -d 1d50:5035,:5036 -R -D "$bl_dfu_file" 2>&1 | tee -a "$log_dir/${number}-app-decend-to-dfued-bl-then-upload-bl.log"
+dfu-util -d ${vid}:${pid_app},:${pid_bl} -R -D "$bl_dfu_file" 2>&1 | tee -a "$log_dir/${number}-upload-bl.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
@@ -237,9 +342,104 @@ number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-message="application to DFU\'ed bootloader decend and update of application"
+# should be bootloader, not app because the flash was empty
+verify_bl_is_running
+
+alternate_bank=$( grep Bank "$log_dir/${number}-verify-bl-is-running.log" | sed -E 's/.* Bank ([0-9])/\1/' )
+
+if [ -z "$alternate_bank" ]; then
+	echo "ERROR: failed step \"$message\": failed to determine alternate flash memory bank" | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
+number=$((number+1))
+
+message="verify bootloader upload switched banks"
 echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
-dfu-util -d 1d50:5035,:5036 -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/${number}-app-decend-to-dfued-bl-then-upload-app.log"
+if [ $initial_bank -eq $alternate_bank ]; then
+	echo "ERROR: failed step \"$message\": bootloader upload didn't switch banks" | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
+number=$((number+1))
+
+message="application upload"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+dfu-util -d ${vid}:${pid_app},:${pid_bl} -R -D "$app_dfu_file" 2>&1 | tee -a "$log_dir/${number}-upload-app.log"
+exit_code=${PIPESTATUS[0]}
+
+if [ $exit_code -ne 0 ]; then
+	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
+number=$((number+1))
+# wait a bit (device enumeration)
+sleep $usb_enum_pause_s
+
+verify_app_is_running
+
+number=$((number+1))
+
+message="application to bootloader decend"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+dfu-util -d ${vid}:${pid_app} -R -e 2>&1 | tee -a "$log_dir/${number}-app-decend-to-bl.log"
+exit_code=${PIPESTATUS[0]}
+
+if [ $exit_code -ne 0 ]; then
+	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
+number=$((number+1))
+# wait a bit (device enumeration)
+sleep $usb_enum_pause_s
+
+verify_bl_is_running_from_bank $alternate_bank
+
+number=$((number+1))
+
+
+
+message="bootloader upload onto the bootloader initially flashed"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+dfu-util -d ${vid}:${pid_app},:${pid_bl} -R -D "$bl_dfu_file" 2>&1 | tee -a "$log_dir/${number}-upload-bl.log"
+exit_code=${PIPESTATUS[0]}
+
+if [ $exit_code -ne 0 ]; then
+	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
+number=$((number+1))
+# wait a bit (device enumeration)
+sleep $usb_enum_pause_s
+
+# should be app now
+verify_app_is_running
+
+
+message="application to bootloader decend"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+dfu-util -d ${vid}:${pid_app} -R -e 2>&1 | tee -a "$log_dir/${number}-app-decend-to-bl.log"
+exit_code=${PIPESTATUS[0]}
+
+if [ $exit_code -ne 0 ]; then
+	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
+number=$((number+1))
+# wait a bit (device enumeration)
+sleep $usb_enum_pause_s
+
+verify_bl_is_running_from_bank $initial_bank
+
+number=$((number+1))
+
+message="switch back to RT mode"
+echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
+dfu-util -d ${vid}:${pid_app} -R -e 2>&1 | tee -a "$log_dir/${number}-reset.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
