@@ -27,6 +27,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 
+#include <usnprintf.h>
 
 #define FLAG_HEX_MASC   0x1
 //#define FLAG_SIGN	   0x2
@@ -34,6 +35,7 @@
 static const char hex[16] = "0123456789abcdef";
 static const char HEX[16] = "0123456789ABCDEF";
 
+USNPRINTF_SECTION
 static
 inline
 void
@@ -51,6 +53,7 @@ uprint_ulong_long_reverse_char(
 	++*offset_ptr;
 }
 
+USNPRINTF_SECTION
 static
 void
 uprint_ulong_long_raw(
@@ -92,7 +95,7 @@ uprint_ulong_long_raw(
 	}
 }
 
-
+USNPRINTF_SECTION
 int usnprintf(
 	char * restrict buffer,
 	size_t size,

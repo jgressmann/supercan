@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,8 +31,14 @@ extern "C" {
 #endif
 
 #ifdef __GNUC__
-#define restrict __restrict__
+	#define restrict __restrict__
+	#ifdef USNPRINTF_SECTION_NAME
+		#define USNPRINTF_SECTION __attribute__((section(USNPRINTF_SECTION_NAME)))
+	#else
+		#define USNPRINTF_SECTION
+	#endif
 #endif
+
 
 
 /* micro snprintf replacement
@@ -43,7 +49,7 @@ extern "C" {
  * Width specifier * is _not_ supported. Number specifiers are ignored.
  * Precision specifiers are ignored.
  **/
-int usnprintf(
+USNPRINTF_SECTION int usnprintf(
 	char * restrict buffer,
 	size_t size,
 	char const * restrict fmt,
