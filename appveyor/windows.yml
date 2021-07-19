@@ -1,0 +1,83 @@
+image: Visual Studio 2019
+branches:
+  only:
+    - master
+
+# set clone depth
+clone_depth: 1
+
+environment:
+  SOLUTION: Windows\supercan.sln
+  MSBUILD_OPTIONS: -noLogo -m -t:Build -p:Configuration=Release
+  ResourcesExtraDefines: SC_BUILD_NUMBER=$(APPVEYOR_BUILD_NUMBER)
+  PRODUCT_VERSION_MAJOR: 1
+  PRODUCT_VERSION_MINOR: 0
+  PRODUCT_VERSION_PATCH: 1
+  PRODUCT_VERSION_BUILD: $(APPVEYOR_BUILD_NUMBER)
+  VCVARS64: C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat
+  QT_BASE_DIR32: C:\Qt\5.15.2\msvc2019
+  QT_BASE_DIR64: C:\Qt\5.15.2\msvc2019_64
+
+#C:\Qt\5.15.2\msvc2019_64\bin\qmake.exe C:\DUT\git\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler" && C:/Qt/Tools/QtCreator/bin/jom.exe qmake_all
+build_script:
+  - set
+  - msbuild %MSBUILD_OPTIONS% -p:Platform=x86 %SOLUTION%
+  - msbuild %MSBUILD_OPTIONS% -p:Platform=x64 %SOLUTION%
+  - mkdir qt\32
+  - cd qt\32
+  - %QT_BASE_DIR32%\bin\qmake.exe ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler"
+  - make qmake_all
+  - cd ..\..
+  - mkdir qt\64
+  - cd qt\64
+  - %QT_BASE_DIR64%\bin\qmake.exe ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler"
+  - make qmake_all
+  - cd ..\..
+  # package
+  - mkdir bin\x86
+  - mkdir lib\x86
+  - mkdir inc
+  - xcopy /y /f Windows\Win32\Release\supercan32.dll bin\x86\
+  - xcopy /y /f Windows\Win32\Release\supercan_app32.exe bin\x86\
+  - xcopy /y /f Windows\Win32\Release\supercan32.lib lib\x86\
+  - xcopy /y /f Windows\x64\Release\supercan64.dll bin\x86\
+  - xcopy /y /f Windows\x64\Release\supercan_app64.exe bin\x86\
+  - xcopy /y /f Windows\x64\Release\supercan64.lib lib\x86\
+  - xcopy /y /f /s Windows\inc inc\
+  - xcopy /y /f Windows\Win32\Release\supercan_srv32.exe bin\x86\
+  - xcopy /y /f Windows\x64\Release\supercan_srv64.exe bin\x86\
+  - 7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src
+  # installer
+  - call "%VCVARS64%" x64 && makensis /DSC_VERSION_MAJOR=%PRODUCT_VERSION_MAJOR% /DSC_VERSION_MINOR=%PRODUCT_VERSION_MINOR% /DSC_VERSION_PATCH=%PRODUCT_VERSION_PATCH% /DSC_VERSION_BUILD=%PRODUCT_VERSION_BUILD% Windows\NSIS\supercan.nsi
+  - move Windows\NSIS\supercan_inst.exe .
+
+artifacts:
+  - path: supercan-win.7z
+    name: files
+  - path: supercan_inst.exe
+    name: installer
+
+deploy:
+  - provider: GitHub
+    release: latest-master
+    description: 'Builds SuperCAN software from latest master sources'
+    artifact: files, installer
+    draft: false
+    prerelease: true
+    force_update: true
+    auth_token:
+      secure: K/HQrOXWX8zskwhGF/Uvxw/bdu0iDcZ0lBy1NgYBJiGkzQS49OqXGp3XGEoh12BS
+    on:
+      branch: master                # release from master branch only
+
+  - provider: GitHub
+    release: $(APPVEYOR_REPO_TAG_NAME)
+    description: 'SuperCAN $(APPVEYOR_REPO_TAG_NAME)'
+    artifact: files, installer
+    draft: true
+    prerelease: false
+    force_update: true
+    auth_token:
+      secure: K/HQrOXWX8zskwhGF/Uvxw/bdu0iDcZ0lBy1NgYBJiGkzQS49OqXGp3XGEoh12BS
+    on:
+      APPVEYOR_REPO_TAG: true       # deploy on tag push only
