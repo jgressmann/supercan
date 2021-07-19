@@ -1,10 +1,11 @@
 SETLOCAL EnableDelayedExpansion
 SET
 
-dir /s %QT_BASE_DIR32%
+REM Visual Studio Build
 REM msbuild %MSBUILD_OPTIONS% -p:Platform=x86 %SOLUTION% || exit /b !ERRORLEVEL!
 REM msbuild %MSBUILD_OPTIONS% -p:Platform=x64 %SOLUTION% || exit /b !ERRORLEVEL!
-"%COMPILER%\vcvarsall.bat" %targetPlatform%
+
+REM Qt Build
 mkdir qt\32
 cd qt\32
 (call "%VCVARS32%" x86 && "%QT_BASE_DIR32%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler" && make qmake_all) || exit /b !ERRORLEVEL!
@@ -13,6 +14,7 @@ mkdir qt\64
 cd qt\64
 (call "%VCVARS64%" x64 && "%QT_BASE_DIR64%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler" && make qmake_all) || exit /b !ERRORLEVEL!
 cd ..\..
+
 REM package
 mkdir bin\x86
 mkdir bin\x64
