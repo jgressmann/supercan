@@ -18,19 +18,18 @@ environment:
   QT_BASE_DIR32: C:\Qt\5.15.2\msvc2019
   QT_BASE_DIR64: C:\Qt\5.15.2\msvc2019_64
 
-#C:\Qt\5.15.2\msvc2019_64\bin\qmake.exe C:\DUT\git\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler" && C:/Qt/Tools/QtCreator/bin/jom.exe qmake_all
 build_script:
   - set
   - msbuild %MSBUILD_OPTIONS% -p:Platform=x86 %SOLUTION%
   - msbuild %MSBUILD_OPTIONS% -p:Platform=x64 %SOLUTION%
   - mkdir qt\32
   - cd qt\32
-  - "%QT_BASE_DIR32%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler"
+  - "$(QT_BASE_DIR32)\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler"
   - make qmake_all
   - cd ..\..
   - mkdir qt\64
   - cd qt\64
-  - "%QT_BASE_DIR64%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler"
+  - "$(QT_BASE_DIR64)\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler"
   - make qmake_all
   - cd ..\..
   # package
