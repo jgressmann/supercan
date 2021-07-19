@@ -5,5 +5,5 @@ It enables the use of SuperCAN devices on Windows from Qt.
 
 # Prerequisites
 
-You need to install the _driver_ package for Windows, that is the COM server for the plugin to work.
+You need to install the _driver_ package for Windows which contains the COM server required for the plugin to work.
 

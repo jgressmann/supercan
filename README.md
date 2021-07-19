@@ -25,6 +25,7 @@ Build        | Status
 ### Windows
 
 - [CAN++](https://github.com/TDahlmann/canpp)
+- [CANDevStudio](https://github.com/GENIVI/CANdevStudio)
 
 _NOTE: Kindly ensure you have the device driver package installed on your system._
 
