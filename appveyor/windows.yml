@@ -25,12 +25,12 @@ build_script:
   - msbuild %MSBUILD_OPTIONS% -p:Platform=x64 %SOLUTION%
   - mkdir qt\32
   - cd qt\32
-  - %QT_BASE_DIR32%\bin\qmake.exe ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler"
+  - "%QT_BASE_DIR32%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler"
   - make qmake_all
   - cd ..\..
   - mkdir qt\64
   - cd qt\64
-  - %QT_BASE_DIR64%\bin\qmake.exe ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler"
+  - "%QT_BASE_DIR64%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler"
   - make qmake_all
   - cd ..\..
   # package
