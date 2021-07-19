@@ -8,11 +8,11 @@ REM msbuild %MSBUILD_OPTIONS% -p:Platform=x64 %SOLUTION% || exit /b !ERRORLEVEL!
 REM Qt Build
 mkdir qt\32
 cd qt\32
-(call "%VCVARS32%" x86 && "%QT_BASE_DIR32%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler" && make qmake_all) || exit /b !ERRORLEVEL!
+(call "%VCVARS32%" x86 && "%QT_BASE_DIR32%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler" && nmake qmake_all) || exit /b !ERRORLEVEL!
 cd ..\..
 mkdir qt\64
 cd qt\64
-(call "%VCVARS64%" x64 && "%QT_BASE_DIR64%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler" && make qmake_all) || exit /b !ERRORLEVEL!
+(call "%VCVARS64%" x64 && "%QT_BASE_DIR64%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler" && nmake qmake_all) || exit /b !ERRORLEVEL!
 cd ..\..
 
 REM package
