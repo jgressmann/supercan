@@ -31,8 +31,9 @@ xcopy /y /f Windows\x64\Release\supercan64.lib lib\x64\
 xcopy /y /f /s Windows\inc inc\
 xcopy /y /f Windows\Win32\Release\supercan_srv32.exe bin\x64\
 xcopy /y /f Windows\x64\Release\supercan_srv64.exe bin\x64\
-xcopy /y /f Windows\qt\32\plugins\canbus\*.dll bin\x86\
-xcopy /y /f Windows\qt\64\plugins\canbus\*.dll bin\x64\
+xcopy /y /f qt\32\plugins\canbus\*.dll bin\x86\
+xcopy /y /f qt\64\plugins\canbus\*.dll bin\x64\
+dir /s qt
 7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src  || exit /b !ERRORLEVEL!
 REM installer
 call "%VCVARS64%" x64 && makensis /DSC_VERSION_MAJOR=%PRODUCT_VERSION_MAJOR% /DSC_VERSION_MINOR=%PRODUCT_VERSION_MINOR% /DSC_VERSION_PATCH=%PRODUCT_VERSION_PATCH% /DSC_VERSION_BUILD=%PRODUCT_VERSION_BUILD% Windows\NSIS\supercan.nsi  || exit /b !ERRORLEVEL!
