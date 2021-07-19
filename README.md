@@ -27,7 +27,7 @@ Build        | Status
 - [CAN++](https://github.com/TDahlmann/canpp)
 - [CANDevStudio](https://github.com/GENIVI/CANdevStudio)
 
-_NOTE: Kindly ensure you have the device driver package installed on your system._
+_NOTE: Kindly ensure you have the device driver package installed on your system. Ensure you have copied the plugin from the Windows archive into the plugin folder of the CANdevStudio directory._
 
 ### Linux
 
