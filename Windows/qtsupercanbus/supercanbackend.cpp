@@ -25,7 +25,6 @@
 
 
 #include <cstring>
-#include <atomic>
 #include <QtCore/qloggingcategory.h>
 #include <QEvent>
 #include <supercan_winapi.h>
@@ -961,19 +960,27 @@ void SuperCanBackend::busCleanup()
 #endif
 
     if (m_ConfiguredBus) {
-        char configAccess = 0;
-        unsigned long timeoutMs = 0;
-        auto hr = m_ScDevice->AcquireConfigurationAccess(&configAccess, &timeoutMs);
 
-        if (SUCCEEDED(hr)) {
-            hr = m_ScDevice->SetBus(false);
-            if (FAILED(hr)) {
-                qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "Failed to take device %u off the bus (hr=%lx).", m_ScDeviceIndex, hr);
+        m_ConfiguredBus = false;
+
+        if (m_ScDevice) {
+            char configAccess = 0;
+            unsigned long timeoutMs = 0;
+
+            auto hr = m_ScDevice->AcquireConfigurationAccess(&configAccess, &timeoutMs);
+
+            if (SUCCEEDED(hr)) {
+                hr = m_ScDevice->SetBus(false);
+                if (FAILED(hr)) {
+                    qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "Failed to take device %u off the bus (hr=%lx).", m_ScDeviceIndex, hr);
+                }
+
+                m_ScDevice->ReleaseConfigurationAccess();
+            } else {
+                qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "Failed to request configuration access to take device %u off the bus (hr=%lx).", m_ScDeviceIndex, hr);
             }
-
-            m_ScDevice->ReleaseConfigurationAccess();
         } else {
-            qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "Failed to request configuration access to take device %u off the bus (hr=%lx).", m_ScDeviceIndex, hr);
+            qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "Bus configured but no SC device ptr (index=%u)?", m_ScDeviceIndex);
         }
     }
 }
