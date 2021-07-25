@@ -7,11 +7,13 @@ script_dir=$(dirname $0)
 
 default_seconds=300
 default_level=3
+default_data_bitrate=8000000
 seconds=${default_seconds}
 init=1
 test_jitter=1
 level=${default_level}
 sort=1
+data_bitrate=${default_data_bitrate}
 
 usage()
 {
@@ -22,6 +24,7 @@ usage()
 	echo "   --no-jitter              don't run timestamp jitter test"
 	echo "   --comp-level LEVEL       compress with LEVEL (default ${default_level})"
 	echo "   --no-sort                don't sort output by timestamp prior to comparision"
+	echo "   --data-bitrate           set bitrate for data phase (default ${default_data_bitrate})"
 	echo
 }
 
@@ -56,6 +59,11 @@ while [ $# -gt 0 ]; do
 			;;
 		--comp-level)
 			level=$2
+			shift # past argument
+			shift # past value
+			;;
+		--data-bitrate)
+			data_bitrate=$2
 			shift # past argument
 			shift # past value
 			;;
@@ -150,10 +158,10 @@ echo INFO: Run tests for $seconds seconds | tee -a "$meta_log_path"
 
 cans="$can_good $can_test"
 if [ $init -ne 0 ];then
-	echo INFO: Initialize devices to nominal 1MBit/s data 8MBit/s | tee -a "$meta_log_path"
+	echo INFO: Initialize devices to nominal 1000000 Bit/s data ${data_bitrate} bit/s | tee -a "$meta_log_path"
 	for can in $cans; do
 		ip link set down $can || true
-		ip link set $can type can bitrate 1000000 dbitrate 8000000 fd on
+		ip link set $can type can bitrate 1000000 dbitrate ${data_bitrate} fd on
 		#ip link set $can type can bitrate 500000 dbitrate 2000000 fd on
 		ip link set up $can
 	done
