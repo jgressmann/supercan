@@ -1237,7 +1237,6 @@ start:
 			// netdev_dbg(netdev, "start tx timer\n");
 			hrtimer_start(&usb_priv->tx_batch_timer, ms_to_ktime(1), HRTIMER_MODE_REL);
 		}
-
 	} else {
 		netif_stop_queue(netdev);
 		rc = NETDEV_TX_BUSY;
