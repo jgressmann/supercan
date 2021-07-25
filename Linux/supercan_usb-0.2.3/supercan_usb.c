@@ -426,12 +426,6 @@ static int sc_usb_process_can_error(struct sc_usb_priv *usb_priv, struct sc_msg_
 	}
 
 	++can_stats->bus_error;
-
-	if (net_ratelimit())
-		netdev_dbg(netdev, "error frame %08x: %02x%02x%02x%02x%02x%02x%02x%02x\n",
-			cf->can_id, cf->data[0], cf->data[1], cf->data[2], cf->data[3],
-			cf->data[4], cf->data[5], cf->data[6], cf->data[7]);
-
 	++net_stats->rx_packets;
 	net_stats->rx_bytes += cf->can_dlc;
 	netif_rx(skb);
@@ -549,11 +543,6 @@ static int sc_usb_process_can_status(struct sc_usb_priv *usb_priv, struct sc_msg
 			return -ENOMEM;
 
 		*cf = f;
-
-		if (net_ratelimit())
-			netdev_dbg(netdev, "error frame %08x: %02x%02x%02x%02x%02x%02x%02x%02x\n",
-				cf->can_id, cf->data[0], cf->data[1], cf->data[2], cf->data[3],
-				cf->data[4], cf->data[5], cf->data[6], cf->data[7]);
 
 		++net_stats->rx_packets;
 		net_stats->rx_bytes += cf->can_dlc;
