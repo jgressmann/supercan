@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,25 +34,83 @@
 #include <QtCore/qlist.h>
 #include <QtCore/qtimer.h>
 
-#include <qt_windows.h>
-
-#ifndef SC_STATIC
-#   define SC_DLL_API __declspec(dllimport)
+#ifndef _MSC_VER
+    #error Please use a Microsoft compiler to build this project
 #endif
+
+#include <qt_windows.h>
+#include <supercan_srv.h>
 #include <supercan_winapi.h>
-#include <supercan_dll.h>
-#include <supercan_misc.h>
+#import <supercan_srv.tlb> raw_interfaces_only
+
 
 QT_BEGIN_NAMESPACE
+
+
+class ComScope
+{
+public:
+    ~ComScope()
+    {
+        Uninit();
+    }
+
+    ComScope()
+        : m_Uninit(false)
+        , m_Available(false)
+    {
+        Init();
+    }
+
+    Q_DISABLE_COPY_MOVE(ComScope);
+
+    operator bool() const
+    {
+        return m_Available;
+    }
+
+    void Init()
+    {
+        Uninit();
+
+        auto hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+
+        if (SUCCEEDED(hr)) {
+            m_Available = true;
+            m_Uninit = true;
+        } else {
+            m_Uninit = false;
+            m_Available = RPC_E_CHANGED_MODE == hr;
+        }
+    }
+
+    void Uninit()
+    {
+        if (m_Uninit) {
+            m_Uninit = false;
+            CoUninitialize();
+        }
+
+        m_Available = false;
+    }
+
+private:
+    bool m_Uninit;
+    bool m_Available;
+};
 
 
 class SuperCanBackend : public QCanBusDevice
 {
     Q_OBJECT
-    Q_DISABLE_COPY(SuperCanBackend)
+    Q_DISABLE_COPY_MOVE(SuperCanBackend)
 public:
     enum SuperCanConfigKey {
-        UrbsPerChannelKey = UserKey,
+        DontConfigureKey = UserKey, // Don't attempt to configure the bus
+        NominalSamplePoint,         // defaults to CiA recommendataion
+        DataSamplePoint,            // defaults to CiA recommendataion
+        NominalSjw,                 // defaults to CiA recommendataion
+        DataSjw,                    // defaults to CiA recommendataion
     };
     Q_ENUM(SuperCanConfigKey)
 
@@ -60,11 +118,8 @@ public:
     ~SuperCanBackend() override;
     explicit SuperCanBackend(const QString &name, QObject *parent = nullptr);
 
-
     bool open() override;
     void close() override;
-
-//    void setConfigurationParameter(int key, const QVariant &value) override;
 
     bool writeFrame(const QCanBusFrame &newData) override;
 
@@ -72,51 +127,54 @@ public:
 
     static bool canCreate(QString *errorReason);
     static QList<QCanBusDeviceInfo> interfaces();
+    bool event(QEvent* ev) override;
+
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
+Q_SIGNALS:
+    void busStatusChanged(QCanBusDevice::CanBusStatus status);
+#endif
 
 
 private slots:
     void expired();
 
-
 private:
-    int busOn();
+    bool busOn();
     void busOff();
     void busCleanup();
-    bool trySendFrame(const QCanBusFrame& frame, bool emit_signal);
     inline bool deviceValid() const { return m_Initialized; }
-    int setBus(bool on);
-    int setNominalBitrate(unsigned value);
-    int setDataBitrate(unsigned value);
+    bool setBus(bool on);
     void resetConfiguration();
-    void applyConfigurationParameter(int key, const QVariant &value);
-    static int on_rx(void* ctx, void const* ptr, uint16_t bytes);
-    void rx(uint8_t const* ptr, uint16_t bytes);
-    bool tryToAcquireTxSlot(uint8_t* slot);
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
+    void setBusStatus(QCanBusDevice::CanBusStatus status);
+#endif
+    static QCanBusFrame::TimeStamp convertTimestamp(quint64 t);
+    void placeFrame(const QCanBusFrame& frame, quint32 index);
+    bool init();
+    void uninit();
 
 private:
     QTimer m_Timer;
-    sc_dev_t* m_ScDevice;
-    sc_cmd_ctx_t m_ScCmdCtx;
-    sc_can_stream_t m_ScCanStream;
-    sc_msg_dev_info m_ScDevInfo;
-    sc_msg_can_info m_ScCanInfo;
-    sc_dev_time_tracker_t m_TimeTracker;
-    uint32_t m_ScDevIndex;
-    QByteArray rx_buffer;
-    QByteArray tx_buffer;
-    QVector<uint8_t> m_TxSlotsAvailable;
-    int m_Urbs;
-    uint16_t m_FeatPerm;
-    uint16_t m_FeatConf;
-    bool m_IsOnBus;
-    bool m_Fd;
-    bool m_HasFd;
-    bool m_HasTxr;
-    bool m_Initialized;
+    ComScope m_Com;
+    SuperCAN::ISuperCANDevicePtr m_ScDevice;
+    SuperCAN::SuperCANDeviceData m_ScDeviceData;
+    HANDLE m_RxRingFileHandle;
+    HANDLE m_TxRingFileHandle;
+    HANDLE m_RxRingEventHandle;
+    HANDLE m_TxRingEventHandle;
+    sc_can_mm_header* m_RxRingPtr;
+    sc_can_mm_header* m_TxRingPtr;
+    size_t m_RxRingElements;
+    size_t m_TxRingElements;
+    unsigned m_ScDeviceIndex;
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
     QCanBusDevice::CanBusStatus m_BusStatus;
 #endif
-
+    bool m_IsOnBus;
+    bool m_Initialized;
+    bool m_ConfiguredBus;
+    bool m_InitRequired;
+    bool m_Echo;
 };
 
 QT_END_NAMESPACE

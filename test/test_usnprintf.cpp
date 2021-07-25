@@ -367,6 +367,19 @@ TEST (usnprintf_can_prefix_with_0x)
     CHECK_EQUAL(0, strcmp(ubuf, cbuf));
 }
 
+TEST (usnprintf_handles_escaped_percent)
+{
+    char buf[8];
+
+    int chars = usnprintf(buf, sizeof(buf), "%%");
+    CHECK_EQUAL(1, chars);
+    CHECK_EQUAL('%', buf[0]);
+
+    chars = usnprintf(buf, sizeof(buf), "%%d", 42);
+    CHECK_EQUAL(2, chars);
+    CHECK_EQUAL('%', buf[0]);
+    CHECK_EQUAL('d', buf[1]);
+}
 
 
 } // anon namespace

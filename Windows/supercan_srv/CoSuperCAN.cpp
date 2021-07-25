@@ -563,7 +563,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					}
 					else {
 						uint32_t index = priv->rx.index % data->rx.elements;
-						sc_can_mm_slot_t* slot = &priv->rx.hdr->slots[index];
+						sc_can_mm_slot_t* slot = &priv->rx.hdr->elements[index];
 						slot->tx.type = SC_CAN_DATA_TYPE_TX;
 						slot->tx.can_id = echo->can_id;
 						slot->tx.flags = txr->flags;
@@ -628,7 +628,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 				}
 				else {
 					uint32_t index = priv->rx.index % data->rx.elements;
-					sc_can_mm_slot_t* slot = &priv->rx.hdr->slots[index];
+					sc_can_mm_slot_t* slot = &priv->rx.hdr->elements[index];
 					slot->rx.type = SC_CAN_DATA_TYPE_RX;
 					slot->rx.can_id = rx->can_id;
 					slot->rx.dlc = rx->dlc;
@@ -680,7 +680,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 				}
 				else {
 					uint32_t index = priv->rx.index % data->rx.elements;
-					sc_can_mm_slot_t* slot = &priv->rx.hdr->slots[index];
+					sc_can_mm_slot_t* slot = &priv->rx.hdr->elements[index];
 
 					slot->status.type = SC_CAN_DATA_TYPE_STATUS;
 					slot->status.flags = status->flags;
@@ -731,7 +731,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 				}
 				else {
 					uint32_t index = priv->rx.index % data->rx.elements;
-					sc_can_mm_slot_t* slot = &priv->rx.hdr->slots[index];
+					sc_can_mm_slot_t* slot = &priv->rx.hdr->elements[index];
 
 					slot->error.type = SC_CAN_DATA_TYPE_ERROR;
 					slot->error.flags = error->flags;
@@ -1362,7 +1362,7 @@ void ScDev::TxMain()
 				}
 				else if (used) {
 					uint32_t slot_index = priv->tx.index % data->tx.elements;
-					sc_can_mm_slot_t* slot = &priv->tx.hdr->slots[slot_index];
+					sc_can_mm_slot_t* slot = &priv->tx.hdr->elements[slot_index];
 					if (SC_CAN_DATA_TYPE_TX == slot->tx.type) {
 						// wait with a timeout to prevent spinning
 						r = WaitForSingleObject(m_TxFifoAvailable, 1);

@@ -1,0 +1,54 @@
+image: Visual Studio 2019
+branches:
+  only:
+    - master
+
+# set clone depth
+clone_depth: 1
+
+environment:
+  SOLUTION: Windows\supercan.sln
+  MSBUILD_OPTIONS: -noLogo -m -t:Build -p:Configuration=Release
+  ResourcesExtraDefines: SC_BUILD_NUMBER=$(APPVEYOR_BUILD_NUMBER)
+  PRODUCT_VERSION_MAJOR: 1
+  PRODUCT_VERSION_MINOR: 0
+  PRODUCT_VERSION_PATCH: 1
+  PRODUCT_VERSION_BUILD: $(APPVEYOR_BUILD_NUMBER)
+  VCVARS32: C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars32.bat
+  VCVARS64: C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat
+  QT_BASE_DIR32: C:\Qt\5.15.2\msvc2019
+  QT_BASE_DIR64: C:\Qt\5.15.2\msvc2019_64
+
+build_script:
+  - appveyor\windows.cmd
+
+artifacts:
+  - path: supercan-win.7z
+    name: files
+  - path: supercan_inst.exe
+    name: installer
+
+deploy:
+  - provider: GitHub
+    release: latest-master
+    description: 'Builds SuperCAN software from latest master sources'
+    artifact: files, installer
+    draft: false
+    prerelease: true
+    force_update: true
+    auth_token:
+      secure: K/HQrOXWX8zskwhGF/Uvxw/bdu0iDcZ0lBy1NgYBJiGkzQS49OqXGp3XGEoh12BS
+    on:
+      branch: master                # release from master branch only
+
+  - provider: GitHub
+    release: $(APPVEYOR_REPO_TAG_NAME)
+    description: 'SuperCAN $(APPVEYOR_REPO_TAG_NAME)'
+    artifact: files, installer
+    draft: true
+    prerelease: false
+    force_update: true
+    auth_token:
+      secure: K/HQrOXWX8zskwhGF/Uvxw/bdu0iDcZ0lBy1NgYBJiGkzQS49OqXGp3XGEoh12BS
+    on:
+      APPVEYOR_REPO_TAG: true       # deploy on tag push only

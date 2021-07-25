@@ -1,6 +1,9 @@
 # DKMS setup
 
-Install `dkms` if you haven't already.
+Install `dkms` if you haven't already, for instance
+```
+$ sudo apt-get install dkms
+```
 
 ## Add, build & install the kernel module
 

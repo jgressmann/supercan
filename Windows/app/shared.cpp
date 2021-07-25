@@ -139,11 +139,11 @@ void process_rx(app_ctx* ac)
     else if (used) {
         for (uint32_t i = 0; i < used; ++i, ++gi) {
             auto index = gi % com_ctx->rx.elements;
-            auto* hdr = &com_ctx->rx.hdr->slots[index].hdr;
+            auto* hdr = &com_ctx->rx.hdr->elements[index].hdr;
 
             switch (hdr->type) {
             case SC_CAN_DATA_TYPE_STATUS: {
-                auto* status = &com_ctx->rx.hdr->slots[index].status;
+                auto* status = &com_ctx->rx.hdr->elements[index].status;
                 
                 if (!ac->candump && (ac->log_flags & LOG_FLAG_CAN_STATE)) {
                     bool log = false;
@@ -208,7 +208,7 @@ void process_rx(app_ctx* ac)
                 }
             } break;
             case SC_CAN_DATA_TYPE_RX: {
-                auto* rx = &com_ctx->rx.hdr->slots[index].rx;
+                auto* rx = &com_ctx->rx.hdr->elements[index].rx;
 
                 if (ac->candump) {
                     log_candump(ac, stdout, rx->timestamp_us, rx->can_id, rx->flags, rx->dlc, rx->data);
@@ -235,7 +235,7 @@ void process_rx(app_ctx* ac)
                 }
             } break;
             case SC_CAN_DATA_TYPE_TX: {
-                auto* tx = &com_ctx->rx.hdr->slots[index].tx;
+                auto* tx = &com_ctx->rx.hdr->elements[index].tx;
 
                 if (!ac->candump && !tx->echo && (ac->log_flags & LOG_FLAG_TXR)) {
                     if (tx->flags & SC_CAN_FRAME_FLAG_DRP) {
@@ -252,7 +252,7 @@ void process_rx(app_ctx* ac)
                 }
             } break;
             case SC_CAN_DATA_TYPE_ERROR: {
-                auto* error = &com_ctx->rx.hdr->slots[index].error;
+                auto* error = &com_ctx->rx.hdr->elements[index].error;
 
                 if (SC_CAN_ERROR_NONE != error->error) {
                     fprintf(
@@ -481,7 +481,7 @@ int run(app_ctx* ac)
                         was_full = false;
 
                         auto index = pi % com_ctx->tx.elements;
-                        auto* tx = &com_ctx->tx.hdr->slots[index].tx;
+                        auto* tx = &com_ctx->tx.hdr->elements[index].tx;
                         tx->type = SC_CAN_DATA_TYPE_TX;
                         tx->can_id = job->can_id;
                         tx->flags = job->flags;

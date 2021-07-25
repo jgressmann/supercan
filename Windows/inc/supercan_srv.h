@@ -35,7 +35,7 @@
 
 #define SC_SRV_VERSION_MAJOR 0
 #define SC_SRV_VERSION_MINOR 5
-#define SC_SRV_VERSION_PATCH 2
+#define SC_SRV_VERSION_PATCH 3
 
 #ifdef __cplusplus
 extern "C" {
@@ -140,7 +140,7 @@ struct sc_can_mm_header {
     volatile int32_t error;         // device error
     volatile uint32_t flags;        // flags
     volatile uint32_t reserved1[8]; // reserved for now
-    sc_can_mm_slot_t slots[0];
+    sc_can_mm_slot_t elements[0];
 };
 
 #ifdef __cplusplus
