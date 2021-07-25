@@ -128,7 +128,7 @@ $ cd Boards/examples/device/atsame51_dfu
 $ make -j V=1 BOARD=d5035-01 HWREV=3 BOOTLOADER=1 VID=0x1d50 PID=0x5036 PRODUCT_NAME="D5035-01 SuperCAN DFU" INTERFACE_NAME="D5035-01 SuperCAN DFU" flash-edbg
 ```
 
-This creates and flashes the bootloader. Make sure to replace _HWREV=3_, with the revision of the board you are using.
+This creates and flashes the bootloader. Make sure to replace _HWREV=3_ with the revision of the board you are using.
 
 Next, flash SuperCAN using these steps
 
