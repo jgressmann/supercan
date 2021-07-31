@@ -197,4 +197,4 @@ To build the Linux kernel module, please follow [these instructions](Linux/READM
 
 SuperCAN is available under the MIT license. SuperCAN uses FreeRTOS and TinyUSB which are both available under the same license.
 
-The Linux driver is available under GPLv2.
+The Linux driver is available under GPLv2 or MIT.
