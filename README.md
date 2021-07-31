@@ -48,9 +48,20 @@ Ensure you have `dfu-util` available on your system. Windows users can [download
 
 ### Linux
 
+#### SuperCAN
 ```
 sudo dfu-util -d 1d50:5035,:5036 -R -D supercan.dfu
 ```
+
+#### SuperDFU
+
+Since version 0.3.3, the bootloader can be updated through DFU. Earlier versions require a debug probe (see below).
+
+```
+sudo dfu-util -d 1d50:5035,:5036 -R -D superdfu.dfu
+```
+
+_NOTE: You likely need to re-flash the CAN application once the bootloader has been updated._
 
 ### Windows
 

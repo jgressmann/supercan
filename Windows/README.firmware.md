@@ -1,4 +1,4 @@
-# Firmware Update
+# SuperCAN Firmware Update
 
 Ensure you have [Zadig](https://zadig.akeo.ie/) available as well as [dfu-util](http://dfu-util.sourceforge.net/releases/).
 
@@ -19,7 +19,7 @@ Below you'll find the steps that worked for me on my Windows 10 (x64) machine. Y
 
 5. Open an administrative terminal (cmd.exe, _Run as Administrator_)
 
-6. Reset the device and (try to) flash firmware.
+6. Reset the device and (try to) flash the CAN application firmware.
 
 	Note that I have copied dfu-util and the firmware into `C:\dfu`
 
@@ -87,3 +87,13 @@ Use version 0.9 of dfu-util.
 * Have the _Device Manager_ open while performing driver assignment.
 	* Enable the display of _Hidden Devices_ through the _Views_ menu.
 	* You can _undo_ a driver assignment performed through _Zadig_ by selecting the device, then pressing _Del_ on the keyboard, and then confirming that you want to _Uninstall driver software_. You may need to replug the device afterwards.
+
+
+## SuperDFU Firmware Update
+
+The bootloader can be updated starting for SuperDFU version 0.3.3.
+
+To update the bootloader follow the instructions for flashing the CAN application but use `superdfu.dfu` instead of `supercan.dfu`.
+
+_NOTE: You likely need to re-flash the CAN application once the bootloader has been updated._
+
