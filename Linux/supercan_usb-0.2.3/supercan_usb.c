@@ -1960,7 +1960,7 @@ err:
 
 MODULE_AUTHOR("Jean Gressmann <jean@0x42.de>");
 MODULE_DESCRIPTION("Driver for the SuperCAN family of CAN(-FD) interfaces");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("Dual MIT/GPL");
 
 
 
