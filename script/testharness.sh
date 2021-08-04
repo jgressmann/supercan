@@ -157,13 +157,13 @@ echo INFO: Run tests for $seconds seconds | tee -a "$meta_log_path"
 
 
 cans="$can_good $can_test"
-if [ $init -ne 0 ];then
-	echo INFO: Initialize devices to nominal 1000000 Bit/s data ${data_bitrate} bit/s | tee -a "$meta_log_path"
+if [ $init -ne 0 ]; then
+	echo INFO: Initialize devices to nominal 1000000 bit/s data ${data_bitrate} bit/s | tee -a "$meta_log_path"
 	for can in $cans; do
 		ip link set down $can || true
 		ip link set $can type can bitrate 1000000 dbitrate ${data_bitrate} fd on
 		#ip link set $can type can bitrate 500000 dbitrate 2000000 fd on
-		ip link set up $can
+		# ip link set up $can
 	done
 fi
 
@@ -201,6 +201,67 @@ same_messages()
 
 
 # run tests
+
+#########################
+# error frame generation
+#########################
+ip link set up $can_test
+
+no_tx_ack_log_cangen_name=test_no_tx_ack_cangen.log
+no_tx_ack_log_cangen_path=$log_dir/$no_tx_ack_log_cangen_name
+no_tx_ack_log_candump_name=test_no_tx_ack_candump.log
+no_tx_ack_log_candump_path=$log_dir/$no_tx_ack_log_candump_name
+tx_ack_log_candump_name=test_tx_ack_candump.log
+tx_ack_log_candump_path=$log_dir/$tx_ack_log_candump_name
+
+
+echo INFO: Error frame generation test \(no tx ack\) on $can_test | tee -a "$meta_log_path"
+candump $can_test,#ffffffff -e >$no_tx_ack_log_candump_path &
+candump_pid=$!
+
+echo INFO: Sending CAN frames and expect error indicating no one else is on the bus | tee -a "$meta_log_path"
+# generate some frames to exceed queue capacity
+cangen $can_test -b -n 100 >$no_tx_ack_log_cangen_path 2>&1 || true
+
+# should fail with "write: No buffer space available"
+exhausted_send_queue=`grep "write: No buffer space available" $no_tx_ack_log_cangen_path`
+if [ -n "$exhausted_send_queue" ]; then
+	echo INFO: cangen stopped on its own due to full queue OK! | tee -a "$meta_log_path"
+else
+	echo ERROR: expected cangen to exceed send queue capacity of $can_test! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
+kill $candump_pid 2>/dev/null || true
+
+no_tx_ack=`grep no-acknowledgement-on-tx $no_tx_ack_log_candump_path`
+if [ -n "$no_tx_ack" ]; then
+	echo INFO: found expected string 'no-acknowledgement-on-tx' in $no_tx_ack_log_candump_path OK! | tee -a "$meta_log_path"
+else
+	echo ERROR: could not find expected string 'no-acknowledgement-on-tx' in $no_tx_ack_log_candump_path! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
+candump $candump_options $can_test >$tx_ack_log_candump_path &
+candump_pid=$!
+
+echo INFO: Bringing up $can_good to check that queued frames for $can_test get sent | tee -a "$meta_log_path"
+# bring the good CAN online to have ack
+ip link set up $can_good
+
+sleep $candump_wait_s
+
+kill $candump_pid 2>/dev/null || true
+
+have_can_frames=`grep $can_test $tx_ack_log_candump_path | wc -l`
+if [ $have_can_frames -gt 0 ]; then
+	echo INFO: With second node $can_good on CAN, frames queued in $can_test got sent OK! | tee -a "$meta_log_path"
+else
+	echo ERROR: no frames sent despite both $can_test and $can_good being online! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+fi
+
+
 
 #######################
 # good -> test
