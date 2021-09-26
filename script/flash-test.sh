@@ -10,6 +10,7 @@ jlink_options="-device ATSAME51J19 -if swd -JTAGConf -1,-1 -speed auto"
 vid=1d50
 pid_bl=5036
 pid_app=5035
+dfu_util_detach_options="-R -e"
 
 
 usage()
@@ -383,7 +384,7 @@ number=$((number+1))
 
 message="application to bootloader decend"
 echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
-dfu-util -d ${vid}:${pid_app} -R -e 2>&1 | tee -a "$log_dir/${number}-app-decend-to-bl.log"
+dfu-util -d ${vid}:${pid_app} ${dfu_util_detach_options} 2>&1 | tee -a "$log_dir/${number}-app-decend-to-bl.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
@@ -421,7 +422,7 @@ verify_app_is_running
 
 message="application to bootloader decend"
 echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
-dfu-util -d ${vid}:${pid_app} -R -e 2>&1 | tee -a "$log_dir/${number}-app-decend-to-bl.log"
+dfu-util -d ${vid}:${pid_app} ${dfu_util_detach_options} 2>&1 | tee -a "$log_dir/${number}-app-decend-to-bl.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
