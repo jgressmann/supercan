@@ -1066,7 +1066,7 @@ static void sc_usb_fill_tx(
 	tx->len = tx_len;
 	tx->track_id = track_id;
 	tx->can_id = usb_priv->host_to_dev32(CAN_EFF_MASK & cf->can_id);
-	tx->dlc = can_len2dlc(cf->len);
+	tx->dlc = can_fd_len2dlc(cf->len);
 
 	tx->flags = 0;
 
