@@ -570,7 +570,7 @@ static int sc_usb_process_can_rx(struct sc_usb_priv *usb_priv, struct sc_msg_can
 		return -ETOOSMALL;
 	}
 
-	data_len = can_fd_dlc2len(rx->dlc);
+	data_len = can_dlc2len(rx->dlc);
 	can_id = usb_priv->host_to_dev32(rx->can_id);
 
 	if (rx->flags & SC_CAN_FRAME_FLAG_RTR) {
@@ -964,10 +964,14 @@ static int sc_apply_configuration(struct sc_usb_priv *usb_priv)
 	struct sc_msg_features *feat = (struct sc_msg_features *)usb_priv->tx_cmd_buffer;
 
 	int rc = 0;
-	int can_fd_mode = (net_priv->can.ctrlmode & CAN_CTRLMODE_FD) == CAN_CTRLMODE_FD;
-	int single_shot_mode = (net_priv->can.ctrlmode & CAN_CTRLMODE_ONE_SHOT) == CAN_CTRLMODE_ONE_SHOT;
-	u32 features = SC_FEATURE_FLAG_TXR |
-			(can_fd_mode ? SC_FEATURE_FLAG_FDF : 0) | (single_shot_mode ? SC_FEATURE_FLAG_DAR : 0);
+	bool can_fd_mode = (net_priv->can.ctrlmode & CAN_CTRLMODE_FD) == CAN_CTRLMODE_FD;
+	bool single_shot_mode = (net_priv->can.ctrlmode & CAN_CTRLMODE_ONE_SHOT) == CAN_CTRLMODE_ONE_SHOT;
+	bool liston_only_mode = (net_priv->can.ctrlmode & CAN_CTRLMODE_LISTENONLY) == CAN_CTRLMODE_LISTENONLY;
+	u32 features = SC_FEATURE_FLAG_TXR
+					| (can_fd_mode ? SC_FEATURE_FLAG_FDF : 0)
+					| (single_shot_mode ? SC_FEATURE_FLAG_DAR : 0)
+					| (liston_only_mode ? SC_FEATURE_FLAG_MON_MODE : 0)
+					;
 
 	// clear previous features
 	memset(feat, 0, sizeof(*feat));
@@ -1062,7 +1066,7 @@ static void sc_usb_fill_tx(
 	tx->len = tx_len;
 	tx->track_id = track_id;
 	tx->can_id = usb_priv->host_to_dev32(CAN_EFF_MASK & cf->can_id);
-	tx->dlc = can_fd_len2dlc(cf->len);
+	tx->dlc = can_len2dlc(cf->len);
 
 	tx->flags = 0;
 
