@@ -570,7 +570,7 @@ static int sc_usb_process_can_rx(struct sc_usb_priv *usb_priv, struct sc_msg_can
 		return -ETOOSMALL;
 	}
 
-	data_len = can_dlc2len(rx->dlc);
+	data_len = can_fd_dlc2len(rx->dlc);
 	can_id = usb_priv->host_to_dev32(rx->can_id);
 
 	if (rx->flags & SC_CAN_FRAME_FLAG_RTR) {
