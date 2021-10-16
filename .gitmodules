@@ -1,7 +1,6 @@
-[submodule "Boards"]
-	path = Boards
-	url = https://github.com/jgressmann/tinyusb.git
-	branch = supercan
 [submodule "3rd-party/CppUnitLite2"]
 	path = 3rd-party/CppUnitLite2
 	url = https://github.com/jgressmann/CppUnitLite2
+[submodule "Boards"]
+	path = Boards
+	url = git@github.com:jgressmann/tinyusb.git
