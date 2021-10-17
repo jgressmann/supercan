@@ -96,6 +96,6 @@ for board in $boards; do
 done
 
 # archive
-cd $TARGET_DIR && (tar cf supercan | pixz -9 >supercan-firmware.tar.xz)
+cd $TARGET_DIR && (tar c supercan | pixz -9 >supercan-firmware.tar.xz)
 
 # find $TARGET_DIR || true
