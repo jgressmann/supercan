@@ -16,6 +16,11 @@ Build        | Status
 *Linux*      | [![Build status](https://ci.appveyor.com/api/projects/status/knw9udgvlal4u3b0?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-linux)
 *Windows*    | [![Build status](https://ci.appveyor.com/api/projects/status/p25qholxtadg71ej?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-windows)
 
+
+## Supported Devices
+
+Have a look [here](doc/README.devices.rst).
+
 ## Supported Operating Systems
 
 SuperCAN supports Windows 10 and Linux.
