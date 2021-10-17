@@ -20,7 +20,7 @@ export TARGET_DIR=$APPVEYOR_BUILD_FOLDER/tmp
 
 
 # install build dependencies
-sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi
+sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz
 
 # init submodules
 git submodule update --init --recursive
@@ -77,14 +77,12 @@ for i in $hw_revs; do
 done
 unset hw_revs
 
-#####################
-# Teensy 4.x boards #
-#####################
+################
+# Other Boards #
+################
 
 
-
-
-boards="teensy_40 d5035_03"
+boards="teensy_40 d5035_03 same54xplainedpro"
 for board in $boards; do
 	export BOARD=$board
 
@@ -98,6 +96,6 @@ for board in $boards; do
 done
 
 # archive
-cd $TARGET_DIR && tar cfz supercan-firmware.tar.gz supercan
+cd $TARGET_DIR && (tar cf supercan | pixz -9 >supercan-firmware.tar.xz)
 
 # find $TARGET_DIR || true
