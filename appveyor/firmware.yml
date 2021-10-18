@@ -1,0 +1,44 @@
+image: Ubuntu2004
+branches:
+  only:
+    - master
+
+# set clone depth
+clone_depth: 1
+
+# environment variables
+environment:
+  ARCHIVE_FILE: tmp/supercan-firmware.tar.xz
+
+build_script:
+  - chmod +x $APPVEYOR_BUILD_FOLDER/appveyor/firmware.sh && $APPVEYOR_BUILD_FOLDER/appveyor/firmware.sh
+
+artifacts:
+  - path: $(ARCHIVE_FILE)
+    name: files
+
+deploy:
+  - provider: GitHub
+    release: latest-master
+    description: 'Builds SuperCAN firmware from latest master sources'
+    artifact: files
+    draft: false
+    prerelease: true
+    force_update: true
+    auth_token:
+      secure: K/HQrOXWX8zskwhGF/Uvxw/bdu0iDcZ0lBy1NgYBJiGkzQS49OqXGp3XGEoh12BS
+    on:
+      branch: master                # release from master branch only
+
+  - provider: GitHub
+    release: $(APPVEYOR_REPO_TAG_NAME)
+    description: 'SuperCAN $(APPVEYOR_REPO_TAG_NAME)'
+    artifact: files
+    draft: true
+    prerelease: false
+    force_update: true
+    auth_token:
+      secure: K/HQrOXWX8zskwhGF/Uvxw/bdu0iDcZ0lBy1NgYBJiGkzQS49OqXGp3XGEoh12BS
+    on:
+      APPVEYOR_REPO_TAG: true       # deploy on tag push only
+
