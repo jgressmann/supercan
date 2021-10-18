@@ -23,7 +23,7 @@ export TARGET_DIR=$APPVEYOR_BUILD_FOLDER/tmp
 sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz
 
 # init submodules
-git submodule update --init --recursive
+git submodule update --init --depth 1 --recursive
 
 env
 
