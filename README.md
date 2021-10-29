@@ -8,7 +8,7 @@
 This is project SuperCAN. An open source USB to CAN-FD protocol.
 SuperCAN works with [these devices](doc/README.devices.rst) to form an USB to CAN-FD interface.
 
-## Build Status
+## Builds
 
 Build        | Status
 ------------ | -------------
@@ -37,7 +37,7 @@ _NOTE: Kindly ensure you have the device driver package installed on your system
 
 ### Linux
 
-- can-utils
+- [can-utils](https://github.com/linux-can/can-utils)
 - [CANdevStudio](https://github.com/GENIVI/CANdevStudio)
 
 _NOTE: Kindly ensure you have the device driver built and loaded into the kernel. See below._
