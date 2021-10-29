@@ -65,13 +65,13 @@ If you have a debugger probe such as SEGGER's J-Link you can choose any option. 
 #### J-Link
 ```
 $ cd Boards/examples/device/supercan
-$ make -j V=1 HWREV=3 flash-jlink
+$ make -j V=1 BOARD=d5035_01 HWREV=3 flash-jlink
 ```
 
 #### Atmel ICE
 ```
 $ cd Boards/examples/device/supercan
-$ make -j V=1 HWREV=3 flash-edbg
+$ make -j V=1 BOARD=d5035_01 HWREV=3 flash-edbg
 ```
 
 
@@ -92,14 +92,14 @@ This option installs the SuperDFU  bootloader on the device. SuperDFU implements
 
 ```
 $ cd Boards/examples/device/atsame51_dfu
-$ make -j V=1 BOARD=d5035-01 HWREV=3 BOOTLOADER=1 VID=0x1d50 PID=0x5036 PRODUCT_NAME="D5035-01 SuperCAN DFU" INTERFACE_NAME="D5035-01 SuperCAN DFU" flash-jlink
+$ make -j V=1 BOARD=d5035_01 HWREV=3 BOOTLOADER=1 VID=0x1d50 PID=0x5036 PRODUCT_NAME="D5035-01 SuperCAN DFU" INTERFACE_NAME="D5035-01 SuperCAN DFU" flash-jlink
 ```
 
 ##### Atmel ICE
 
 ```
 $ cd Boards/examples/device/atsame51_dfu
-$ make -j V=1 BOARD=d5035-01 HWREV=3 BOOTLOADER=1 VID=0x1d50 PID=0x5036 PRODUCT_NAME="D5035-01 SuperCAN DFU" INTERFACE_NAME="D5035-01 SuperCAN DFU" flash-edbg
+$ make -j V=1 BOARD=d5035_01 HWREV=3 BOOTLOADER=1 VID=0x1d50 PID=0x5036 PRODUCT_NAME="D5035-01 SuperCAN DFU" INTERFACE_NAME="D5035-01 SuperCAN DFU" flash-edbg
 ```
 
 This creates and flashes the bootloader. Make sure to replace _HWREV=3_ with the revision of the board you are using.
@@ -110,7 +110,7 @@ Next, flash SuperCAN using these steps
 
 ```
 $ cd Boards/examples/device/supercan
-$ make -j V=1 HWREV=3 APP=1 flash-dfu
+$ make -j V=1 BOARD=d5035_01 HWREV=3 APP=1 flash-dfu
 ```
 
 
@@ -118,7 +118,7 @@ $ make -j V=1 HWREV=3 APP=1 flash-dfu
 
 ```
 $ cd Boards/examples/device/supercan
-$ make -j V=1 HWREV=3 APP=1 OFFSET=0x4000 edbg-dfu
+$ make -j V=1 BOARD=d5035_01 HWREV=3 APP=1 OFFSET=0x4000 edbg-dfu
 ```
 ### 3. Build and upload SuperCAN through SuperDFU
 
@@ -132,7 +132,7 @@ Build the SuperCAN DFU file
 
 ```
 $ cd Boards/examples/device/supercan
-$ make -j V=1 HWREV=3 APP=1 dfu
+$ make -j V=1 BOARD=d5035_01 HWREV=3 APP=1 dfu
 ```
 
 Ensure _HWREV_ matches the board you are using.
