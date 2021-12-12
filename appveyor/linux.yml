@@ -1,0 +1,29 @@
+image: Ubuntu
+branches:
+  only:
+    - linux-pre-v5.11
+
+# set clone depth
+clone_depth: 1
+
+# environment variables
+environment:
+  DEBIAN_FRONTEND: noninteractive
+
+
+install:
+  # by default, all script lines are interpreted as batch
+  - sudo apt-get update && sudo apt-get install -y dkms
+
+# scripts to run before build
+#before_build:
+#  - git submodule update --init --recursive
+
+
+build_script:
+  #- env
+  #- pwd
+  #- find
+  - export SUPERCAN_DIR=$(find "$APPVEYOR_BUILD_FOLDER/Linux" -type d -name 'supercan_usb-*' | head)
+  - $APPVEYOR_BUILD_FOLDER/Linux/dkms-init.sh
+  - make V=1 KERNELRELEASE=$(uname -r) -C /lib/modules/$(uname -r)/build M=$SUPERCAN_DIR
