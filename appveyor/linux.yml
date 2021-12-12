@@ -1,7 +1,7 @@
-image: Ubuntu
+image: Ubuntu2004
 branches:
   only:
-    - linux-pre-v5.11
+    - master
 
 # set clone depth
 clone_depth: 1
@@ -16,8 +16,8 @@ install:
   - sudo apt-get update && sudo apt-get install -y dkms
 
 # scripts to run before build
-#before_build:
-#  - git submodule update --init --recursive
+before_build:
+ - git submodule update --init --depth 1 --recursive Linux
 
 
 build_script:
