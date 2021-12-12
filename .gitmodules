@@ -4,3 +4,6 @@
 [submodule "Boards"]
 	path = Boards
 	url = https://github.com/jgressmann/tinyusb.git
+[submodule "Linux"]
+	path = Linux
+	url = https://github.com/jgressmann/supercan-linux.git
