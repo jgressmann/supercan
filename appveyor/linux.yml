@@ -25,6 +25,6 @@ build_script:
   - pwd
   - find
   - export SUPERCAN_DIR=$(find "$APPVEYOR_BUILD_FOLDER/Linux" -type d -name 'supercan_usb-*' | head)
-  - echo "SUPERCAN_DIR: $SUPERCAN_DIR"
+  - echo SUPERCAN_DIR: $SUPERCAN_DIR
   - $APPVEYOR_BUILD_FOLDER/Linux/dkms-init.sh
   - make V=1 KERNELRELEASE=$(uname -r) -C /lib/modules/$(uname -r)/build M=$SUPERCAN_DIR
