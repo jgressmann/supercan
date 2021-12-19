@@ -17,7 +17,7 @@ install:
 
 # scripts to run before build
 before_build:
- - git submodule update --init --depth 1 --recursive Linux
+ - git submodule update --init --recursive Linux
  - cd Linux && git checkout pre-v5.13 && cd ..
 
 
