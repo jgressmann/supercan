@@ -11,6 +11,7 @@ default_data_bitrate=8000000
 seconds=${default_seconds}
 init=1
 test_jitter=1
+test_error_recovery=1
 level=${default_level}
 sort=1
 data_bitrate=${default_data_bitrate}
@@ -22,6 +23,7 @@ usage()
 	echo "   -s, --seconds SECONDS    limit test runs to SECONDS (default ${default_seconds})"
 	echo "   --no-init                don't initialize can devices"
 	echo "   --no-jitter              don't run timestamp jitter test"
+	echo "   --no-error-recovery      don't run error recovery test"
 	echo "   --comp-level LEVEL       compress with LEVEL (default ${default_level})"
 	echo "   --no-sort                don't sort output by timestamp prior to comparision"
 	echo "   --data-bitrate           set bitrate for data phase (default ${default_data_bitrate})"
@@ -51,6 +53,10 @@ while [ $# -gt 0 ]; do
 			;;
 		--no-jitter)
 			test_jitter=0
+			shift # past argument
+			;;
+		--no-error-recovery)
+			test_error_recovery=0
 			shift # past argument
 			;;
 		--no-sort)
@@ -157,15 +163,6 @@ echo INFO: Run tests for $seconds seconds | tee -a "$meta_log_path"
 
 
 cans="$can_good $can_test"
-if [ $init -ne 0 ]; then
-	echo INFO: Initialize devices to nominal 1000000 bit/s data ${data_bitrate} bit/s | tee -a "$meta_log_path"
-	for can in $cans; do
-		ip link set down $can || true
-		ip link set $can type can bitrate 1000000 dbitrate ${data_bitrate} fd on
-		#ip link set $can type can bitrate 500000 dbitrate 2000000 fd on
-		# ip link set up $can
-	done
-fi
 
 
 max_frames=$((seconds*10000))
@@ -201,6 +198,250 @@ same_messages()
 
 
 # run tests
+
+################
+# error recovery
+################
+
+
+if [ $init -ne 0 ]; then
+	if [ $test_error_recovery -ne 0 ]; then
+		error_recovery_error_passive_log_good_can_tx_path=$log_dir/error_recovery_error_passive_log_good_can_tx.log
+		error_recovery_error_passive_log_test_can_rx_path=$log_dir/error_recovery_error_passive_log_test_can_rx.log
+		error_recovery_error_passive_log_good_can_rx_path=$log_dir/error_recovery_error_passive_log_good_can_tx.log
+		error_recovery_error_passive_log_test_can_tx_path=$log_dir/error_recovery_error_passive_log_test_can_tx.log
+		error_recovery_error_passive_stats_test_can_path=$log_dir/error_recovery_error_passive_stats_test_can.log
+
+
+		error_recovery_bus_off_log_good_can_tx_path=$log_dir/error_recovery_bus_off_log_good_can_tx.log
+		error_recovery_bus_off_log_test_can_rx_path=$log_dir/error_recovery_bus_off_log_test_can_rx.log
+		error_recovery_bus_off_log_good_can_rx_path=$log_dir/error_recovery_bus_off_log_good_can_rx.log
+		error_recovery_bus_off_log_test_can_tx_path=$log_dir/error_recovery_bus_off_log_test_can_tx.log
+		error_recovery_bus_off_stats_test_can_path=$log_dir/error_recovery_bus_off_stats_test_can.log
+
+		error_recovery_good_can_bitrate=500000
+		error_recovery_test_can_bitrate=1000000
+		error_recovery_tx_frames=10
+		# Linux seems to ignore the first frame
+		error_recovery_acceptable_rx_frames=$((error_recovery_tx_frames-1))
+
+
+
+
+		################
+		# GOOD -> TEST
+		################
+
+		for can in $cans; do
+			ip link set down $can || true
+		done
+
+		ip link set $can_good type can bitrate $error_recovery_good_can_bitrate fd off
+		ip link set $can_test type can bitrate $error_recovery_test_can_bitrate fd off
+
+		ip link set up $can_good
+		ip link set up $can_test
+
+		echo "INFO: Sending frames from $can_good (bitrate $error_recovery_good_can_bitrate), expecting $can_test (bitrate $error_recovery_test_can_bitrate) to go into error-passive" | tee -a "$meta_log_path"
+		cangen $can_good -L 8 -D ffffffffffffffff -I 7ff -n 10
+
+		ip -details -statistics link show $test_can >$error_recovery_error_passive_stats_test_can_path 2>&1
+
+		error_passive=`grep "can state ERROR-PASSIVE" $error_recovery_error_passive_stats_test_can_path`
+		if [ -n "$error_passive" ]; then
+			echo INFO: $can_test in error-passive state, OK! | tee -a "$meta_log_path"
+		else
+			echo ERROR: $can_test not in error-passive state! | tee -a "$meta_log_path"
+			errors=$((errors+1))
+		fi
+
+		echo "INFO: Bringing both devices up to same bitrate" | tee -a "$meta_log_path"
+		ip link set down $can_good
+		ip link set $can_good type can bitrate $error_recovery_test_can_bitrate fd off
+		ip link set up $can_good
+
+		candump $candump_options $can_good >$error_recovery_error_passive_log_good_can_tx_path &
+		candump_good_pid=$!
+
+		candump $candump_options $can_test >$error_recovery_error_passive_log_test_can_rx_path &
+		candump_test_pid=$!
+
+		echo "INFO: good -> test" | tee -a "$meta_log_path"
+		cangen $can_good -L 8 -D i -I i -n $error_recovery_tx_frames
+
+		sleep $candump_wait_s
+
+		kill $candump_good_pid 2>/dev/null || true
+		kill $candump_test_pid 2>/dev/null || true
+
+		lines=$(cat "$error_recovery_error_passive_log_good_can_tx_path" | wc -l)
+		if [ $lines -lt $error_recovery_acceptable_rx_frames ]; then
+			echo ERROR: GOOD log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+			errors=$((errors+1))
+		else
+			echo INFO: GOOD log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
+		fi
+
+		lines=$(cat "$error_recovery_error_passive_log_test_can_rx_path" | wc -l)
+		if [ $lines -ne $error_recovery_tx_frames ]; then
+			echo ERROR: TEST log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+			errors=$((errors+1))
+		else
+			echo INFO: TEST log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
+		fi
+
+
+		echo "INFO: test -> good" | tee -a "$meta_log_path"
+
+		candump $candump_options $can_good >$error_recovery_error_passive_log_good_can_rx_path &
+		candump_good_pid=$!
+
+		candump $candump_options $can_test >$error_recovery_error_passive_log_test_can_tx_path &
+		candump_test_pid=$!
+
+		cangen $can_test -L 8 -D i -I i -n $error_recovery_tx_frames
+
+		sleep $candump_wait_s
+
+		kill $candump_good_pid 2>/dev/null || true
+		kill $candump_test_pid 2>/dev/null || true
+
+		lines=$(cat "$error_recovery_error_passive_log_good_can_rx_path" | wc -l)
+		if [ $lines -ne $error_recovery_tx_frames ]; then
+			echo ERROR: GOOD log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+			errors=$((errors+1))
+		else
+			echo INFO: GOOD log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
+		fi
+
+		lines=$(cat "$error_recovery_error_passive_log_test_can_tx_path" | wc -l)
+		if [ $lines -ne $error_recovery_tx_frames ]; then
+			echo ERROR: TEST log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+			errors=$((errors+1))
+		else
+			echo INFO: TEST log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
+		fi
+
+		################
+		# TEST -> GOOD
+		################
+
+		for can in $cans; do
+			ip link set down $can || true
+		done
+
+
+		ip link set $can_good type can bitrate $error_recovery_good_can_bitrate fd off
+		ip link set $can_test type can bitrate $error_recovery_test_can_bitrate fd off
+
+		ip link set up $can_good
+		ip link set up $can_test
+
+		echo "INFO: Sending frames from $can_test (bitrate $error_recovery_test_can_bitrate), expecting $can_test to go into bus-off" | tee -a "$meta_log_path"
+		cangen $can_test -L 8 -D ffffffffffffffff -I 7ff -n 10
+
+		ip -details -statistics link show $test_can >$error_recovery_bus_off_stats_test_can_path 2>&1
+
+		bus_off=`grep "can state BUS-OFF" $error_recovery_bus_off_stats_test_can_path`
+		if [ -n "$bus_off" ]; then
+			echo INFO: $can_test in bus-off state, OK! | tee -a "$meta_log_path"
+		else
+			echo ERROR: $can_test not in bus-off state! | tee -a "$meta_log_path"
+			errors=$((errors+1))
+		fi
+
+		echo "INFO: Bringing both devices up to same bitrate" | tee -a "$meta_log_path"
+		for can in $cans; do
+			ip link set down $can || true
+		done
+
+		ip link set $can_good type can bitrate $error_recovery_test_can_bitrate fd off
+		ip link set $can_test type can bitrate $error_recovery_test_can_bitrate fd off
+
+		ip link set up $can_good
+		ip link set up $can_test
+
+		candump $candump_options $can_good >$error_recovery_bus_off_log_good_can_rx_path &
+		candump_good_pid=$!
+
+		candump $candump_options $can_test >$error_recovery_bus_off_log_test_can_tx_path &
+		candump_test_pid=$!
+
+		echo "INFO: test -> good" | tee -a "$meta_log_path"
+		cangen $can_test -L 8 -D i -I i -n $error_recovery_tx_frames
+
+		sleep $candump_wait_s
+
+		kill $candump_good_pid 2>/dev/null || true
+		kill $candump_test_pid 2>/dev/null || true
+
+		lines=$(cat "$error_recovery_bus_off_log_test_can_tx_path" | wc -l)
+		if [ $lines -lt $error_recovery_acceptable_rx_frames ]; then
+			echo ERROR: TEST log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+			errors=$((errors+1))
+		else
+			echo INFO: TEST log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
+		fi
+
+		lines=$(cat "$error_recovery_error_passive_log_test_can_rx_path" | wc -l)
+		if [ $lines -ne $error_recovery_tx_frames ]; then
+			echo ERROR: GOOD log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+			errors=$((errors+1))
+		else
+			echo INFO: GOOD log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
+		fi
+
+
+		candump $candump_options $can_good >$error_recovery_bus_off_log_good_can_tx_path &
+		candump_good_pid=$!
+
+		candump $candump_options $can_test >$error_recovery_bus_off_log_test_can_rx_path &
+		candump_test_pid=$!
+
+		echo "INFO: good -> test" | tee -a "$meta_log_path"
+		cangen $can_good -L 8 -D i -I i -n $error_recovery_tx_frames
+
+		sleep $candump_wait_s
+
+		kill $candump_good_pid 2>/dev/null || true
+		kill $candump_test_pid 2>/dev/null || true
+
+		lines=$(cat "$error_recovery_bus_off_log_good_can_tx_path" | wc -l)
+		if [ $lines -ne $error_recovery_tx_frames ]; then
+			echo ERROR: GOOD log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+			errors=$((errors+1))
+		else
+			echo INFO: GOOD log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
+		fi
+
+		lines=$(cat "$error_recovery_bus_off_log_test_can_rx_path" | wc -l)
+		if [ $lines -ne $error_recovery_tx_frames ]; then
+			echo ERROR: TEST log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+			errors=$((errors+1))
+		else
+			echo INFO: TEST log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
+		fi
+	else
+	echo INFO: not running error recovery tests. | tee -a "$meta_log_path"
+	fi
+else
+	echo INFO: init forbidden, not running error recovery tests. | tee -a "$meta_log_path"
+fi
+
+# pack_results
+
+# exit 0
+
+if [ $init -ne 0 ]; then
+	echo INFO: Initialize devices to nominal 1000000 bit/s data ${data_bitrate} bit/s | tee -a "$meta_log_path"
+	for can in $cans; do
+		ip link set down $can || true
+		ip link set $can type can bitrate 1000000 dbitrate ${data_bitrate} fd on
+		#ip link set $can type can bitrate 500000 dbitrate 2000000 fd on
+		# ip link set up $can
+	done
+fi
+
 
 #########################
 # error frame generation
@@ -260,6 +501,7 @@ else
 	echo ERROR: no frames sent despite both $can_test and $can_good being online! | tee -a "$meta_log_path"
 	errors=$((errors+1))
 fi
+
 
 
 
