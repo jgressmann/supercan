@@ -168,8 +168,9 @@ cans="$can_good $can_test"
 max_frames=$((seconds*10000))
 errors=0
 startup_wait_s=2
-candump_wait_s=5
+candump_wait_s=3
 frame_len=r
+alias candump='stdbuf -oL candump'
 candump_options="-t a -L"
 sort_options="-k 1.2,1.18 -s"
 
