@@ -222,8 +222,7 @@ if [ $init -ne 0 ]; then
 		error_recovery_good_can_bitrate=500000
 		error_recovery_test_can_bitrate=1000000
 		error_recovery_tx_frames=10
-		# Linux seems to ignore the first frame
-		error_recovery_acceptable_rx_frames=$((error_recovery_tx_frames-1))
+		error_recovery_acceptable_rx_frames=$error_recovery_tx_frames
 
 
 
@@ -428,9 +427,6 @@ else
 	echo INFO: init forbidden, not running error recovery tests. | tee -a "$meta_log_path"
 fi
 
-# pack_results
-
-# exit 0
 
 if [ $init -ne 0 ]; then
 	echo INFO: Initialize devices to nominal 1000000 bit/s data ${data_bitrate} bit/s | tee -a "$meta_log_path"
