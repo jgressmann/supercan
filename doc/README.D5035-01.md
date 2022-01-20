@@ -31,7 +31,7 @@ _NOTE: You likely need to re-flash the CAN application once the bootloader has b
 Please follow [these steps](../Windows/README.firmware.md).
 # Building
 
-This section describes the steps to build the software in a Linux-like environment. Windows users should read [this](Windows/README.building.md).
+This section describes the steps to build the software in a Linux-like environment. Windows users should read [this](../Windows/README.building.md).
 
 ## Setup
 
