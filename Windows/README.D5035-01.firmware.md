@@ -1,4 +1,4 @@
-# SuperCAN Firmware Update Guide for Windows
+# D5035-01 Firmware Update Guide for Windows
 
 Ensure you have [dfu-util](http://dfu-util.sourceforge.net/releases/) available.
 
