@@ -1,4 +1,4 @@
-# SuperCAN Firmware Update
+# SuperCAN Firmware Update Guide for Windows
 
 Ensure you have [dfu-util](http://dfu-util.sourceforge.net/releases/) available.
 
