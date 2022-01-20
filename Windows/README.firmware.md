@@ -1,15 +1,30 @@
 # SuperCAN Firmware Update
 
-Ensure you have [Zadig](https://zadig.akeo.ie/) available as well as [dfu-util](http://dfu-util.sourceforge.net/releases/).
+Ensure you have [dfu-util](http://dfu-util.sourceforge.net/releases/) available.
 
-Below you'll find the steps that worked for me on my Windows 10 (x64) machine. Your mileage may vary.
+## SuperCAN Firmware Update Guide
+
+_Do you know if your devices uses the CAN application and bootloader found in [Release 1.0.11](https://github.com/jgressmann/supercan/releases/tag/v1.0.11) or better?_
 
 
-## Steps
+*Yes: Follow theses steps:*
+
+1. Plug in the device.
+2. Open a terminal window (`cmd.exe`).
+3. Flash the CAN application.
+
+	`dfu-util -d 1d50:5035,:5036 -R -D supercan.dfu`
+
+
+*No: follow the steps in the next section.*
+
+### Zadig Driver Setup and Firmware Update
+
+Ensure you have [Zadig](https://zadig.akeo.ie/) available on your system.
 
 1. Plug in the device.
 2. Open Zadig (as Administrator).
-3. From the menu, select _Options_ -> _List All Devices_
+3. From the menu, select _Options_ -> _List All Devices_.
 4. Select USB DFU 1.1 in the combo box.
 
 	Select `WinUSB (v6.1)` as the new driver, then press `Replace Driver`.
@@ -17,7 +32,7 @@ Below you'll find the steps that worked for me on my Windows 10 (x64) machine. Y
 
 	![USB DFU 1.1 selected in Zadig](doc/zadig-runtime-mode-replace-v10-v6.png)
 
-5. Open an administrative terminal (cmd.exe, _Run as Administrator_)
+5. Open an administrative terminal (`cmd.exe`, _Run as Administrator_)
 
 6. Reset the device and (try to) flash the CAN application firmware.
 
@@ -39,7 +54,7 @@ Below you'll find the steps that worked for me on my Windows 10 (x64) machine. Y
 
 Its not always rainbows and unicorns though, is it?
 
-### **Step 6** fails with `Lost device after RESET?`
+### **Step 6** of _Firmware Update with Zadig_ fails with `Lost device after RESET?`
 
 ![dfu-util: Lost device after RESET?](doc/cmd-dfu-util-flash-lost-device-after-reset.png)
 
@@ -62,14 +77,14 @@ This version seems to misinterpret the vendor/product ID found in the suffix of 
 Strangely enough, _dfu-suffix_ reports the proper values:
 
 ```
-dfu-suffix.exe -c ..\Downloads\supercan\d5035-01\03\supercan.dfu
+dfu-suffix.exe -c supercan.dfu
 dfu-suffix (dfu-util) 0.10
 
 Copyright 2011-2012 Stefan Schmidt, 2013-2020 Tormod Volden
 This program is Free Software and has ABSOLUTELY NO WARRANTY
 Please report bugs to http://sourceforge.net/p/dfu-util/tickets/
 
-The file ..\Downloads\supercan\d5035-01\03\supercan.dfu contains a DFU suffix with the following properties:
+The file supercan.dfu contains a DFU suffix with the following properties:
 BCD device:     0xFFFF
 Product ID:     0x5035
 Vendor ID:      0x1D50
@@ -78,9 +93,9 @@ Length:         16
 CRC:            0xF30CA4DD
 ```
 
-### Fix
+#### Fix
 
-Use version 0.9 of dfu-util.
+Use version 0.9 of dfu-util or version 0.11.
 
 ## Hints
 
@@ -91,7 +106,7 @@ Use version 0.9 of dfu-util.
 
 ## SuperDFU Firmware Update
 
-The bootloader can be updated starting for SuperDFU version 0.3.3.
+The bootloader can be updated starting from SuperDFU version 0.3.3.
 
 To update the bootloader follow the instructions for flashing the CAN application but use `superdfu.dfu` instead of `supercan.dfu`.
 
