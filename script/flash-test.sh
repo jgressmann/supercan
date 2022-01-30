@@ -15,7 +15,7 @@ dfu_util_detach_options="-R -e"
 
 usage()
 {
-	echo $(basename $0) \[OPTIONS\] BL_FW_FILE app_dfu_file
+	echo $(basename $0) \[OPTIONS\] BL_FW_FILE BL_DFU_FILE APP_DFU_FILE
 	echo
 	echo
 }
