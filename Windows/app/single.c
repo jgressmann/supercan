@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,9 +33,21 @@
 
 #define CMD_TIMEOUT_MS 1000
 
+
+struct can_echo {
+    uint32_t can_id;
+    uint8_t dlc;
+    uint8_t flags;
+    uint8_t data[64];
+};
+
 struct can_state {
     sc_dev_t* dev;
+    sc_can_stream_t* stream;
     struct sc_dev_time_tracker tt;
+    uint8_t available_track_id_buffer[256];
+    size_t available_track_id_count;
+    struct can_echo echos[256];
 };
 
 
@@ -191,7 +203,6 @@ static bool process_buffer(
             uint32_t timestamp_us = s->dev->dev_to_host32(rx->timestamp_us);
             uint8_t len = dlc_to_len(rx->dlc);
             uint8_t bytes = sizeof(*rx);
-
             uint64_t ts_us = sc_tt_track(&s->tt, timestamp_us);
 
             if (!(rx->flags & SC_CAN_FRAME_FLAG_RTR)) {
@@ -229,21 +240,43 @@ static bool process_buffer(
         } break;
         case SC_MSG_CAN_TXR: {
             struct sc_msg_can_txr const* txr = (struct sc_msg_can_txr const*)msg;
+            uint32_t timestamp_us = 0;
+            uint64_t ts_us = 0;
+            struct can_echo const* echo = NULL;
+
             if (msg->len < sizeof(*txr)) {
                 fprintf(stderr, "malformed sc_msg_can_txr\n");
                 return false;
             }
 
-            uint32_t timestamp_us = s->dev->dev_to_host32(txr->timestamp_us);
+            timestamp_us = s->dev->dev_to_host32(txr->timestamp_us);
+            ts_us = sc_tt_track(&s->tt, timestamp_us);
+            echo = &s->echos[txr->track_id];
 
-            sc_tt_track(&s->tt, timestamp_us);
+            if (s->available_track_id_count == _countof(s->available_track_id_buffer)) {
+                fprintf(stderr, "TXR track id buffer overrun\n");
+                return false;
+            }
 
-            if (!ac->candump && (ac->log_flags & LOG_FLAG_TXR)) {
-                if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
-                    fprintf(stdout, "tracked message %#02x was dropped @ %08x\n", txr->track_id, timestamp_us);
+            // return track id
+            s->available_track_id_buffer[s->available_track_id_count++] = txr->track_id;
+
+            if (ac->candump) {
+                log_candump(ac, stdout, ts_us, echo->can_id, echo->flags, echo->dlc, echo->data);
+            }
+            else {
+                if (ac->log_flags & LOG_FLAG_TXR) {
+                    if (txr->flags & SC_CAN_FRAME_FLAG_DRP) {
+                        fprintf(stdout, "TXR %#08x was dropped @ %016llx\n", txr->track_id, ts_us);
+                    }
+                    else {
+                        fprintf(stdout, "TXR %#08x was sent @ %016llx\n", txr->track_id, ts_us);
+                    }
                 }
-                else {
-                    fprintf(stdout, "tracked message %#02x was sent @ %08x\n", txr->track_id, timestamp_us);
+
+                if ((ac->log_flags & LOG_FLAG_TX_MSG)) {
+                    fprintf(stdout, "TX ");
+                    log_msg(ac, echo->can_id, echo->flags, echo->dlc, echo->data);
                 }
             }
         } break;
@@ -272,28 +305,114 @@ static int process_can(
     return 0;
 }
 
+
+static int tx(struct app_ctx* ac, struct tx_job* job)
+{
+    uint32_t buffer[24];
+    struct can_state* can_state = ac->priv;
+    struct sc_msg_can_tx* tx = (struct sc_msg_can_tx*)buffer;
+    uint16_t bytes = sizeof(*tx);
+    uint8_t track_id = 0;
+    uint8_t const data_len = dlc_to_len(job->dlc);
+    struct can_echo* echo = NULL;
+    int result = 0;
+    
+    if (!can_state->available_track_id_count) {
+        goto exit_result;
+    }
+
+    track_id = can_state->available_track_id_buffer[--can_state->available_track_id_count];
+    echo = &can_state->echos[track_id];
+
+    echo->flags = job->flags;
+    echo->can_id = job->can_id;
+    echo->dlc = job->dlc;
+    
+
+    if (job->flags & SC_CAN_FRAME_FLAG_RTR) {
+
+    }
+    else {
+        bytes += data_len;
+        memcpy(tx->data, job->data, data_len);
+        memcpy(echo->data, job->data, data_len);
+    }
+
+    if (bytes & (SC_MSG_CAN_LEN_MULTIPLE - 1)) {
+        bytes += SC_MSG_CAN_LEN_MULTIPLE - (bytes & (SC_MSG_CAN_LEN_MULTIPLE - 1));
+    }
+
+    tx->id = SC_MSG_CAN_TX;
+    tx->len = (uint8_t)bytes;
+    tx->can_id = can_state->dev->dev_to_host32(job->can_id);
+    tx->dlc = job->dlc;
+    tx->flags = job->flags;
+    tx->track_id = track_id;
+
+    for (int i = 0; i < 2; ++i) {
+        size_t added = 0;
+        auto error = sc_can_stream_tx_batch_add(
+            can_state->stream,
+            &(uint8_t*)tx,
+            &bytes,
+            1,
+            &added);
+
+        if (error) {
+            fprintf(stderr, "sc_can_stream_tx failed: %s (%d)\n", sc_strerror(error), error);
+            result = -1;
+            goto exit_return_track_id;
+        }
+
+        if (added) {
+            result = 1;
+            goto exit_result;
+        }
+
+        // full
+        error = sc_can_stream_tx_batch_end(can_state->stream);
+        if (error) {
+            fprintf(stderr, "sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
+            result = -1;
+            goto exit_return_track_id;
+        }
+
+        error = sc_can_stream_tx_batch_begin(can_state->stream);
+        if (error) {
+            fprintf(stderr, "sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
+            result = -1;
+            goto exit_return_track_id;
+        }
+    }
+
+exit_return_track_id:
+    can_state->available_track_id_buffer[can_state->available_track_id_count++] = track_id;
+exit_result:
+    return result;
+}
+
 int run_single(struct app_ctx* ac)
 {
     int error = SC_DLL_ERROR_NONE;
     struct can_state can_state;
     uint32_t count = 0;
-    sc_dev_t* dev = NULL;
     sc_cmd_ctx_t cmd_ctx;
-    sc_can_stream_t* stream = NULL;
     struct can_bit_timing_settings nominal_settings, data_settings;
     struct can_bit_timing_hw_contraints nominal_hw_constraints, data_hw_constraints;
-
-    
-    PUCHAR msg_tx_buffer = NULL;
     struct sc_msg_dev_info dev_info;
     struct sc_msg_can_info can_info;
     DWORD transferred = 0;
     char serial_str[1 + sizeof(dev_info.sn_bytes) * 2] = { 0 };
     char name_str[1 + sizeof(dev_info.name_bytes)] = { 0 };
-    uint8_t track_id = 0;
 
     memset(&can_state, 0, sizeof(can_state));
     memset(&cmd_ctx, 0, sizeof(cmd_ctx));
+
+    for (size_t i = 0; i < _countof(can_state.available_track_id_buffer); ++i) {
+        can_state.available_track_id_buffer[i] = i;
+    }
+
+    can_state.available_track_id_count = _countof(can_state.available_track_id_buffer);
 
     sc_tt_init(&can_state.tt);
 
@@ -329,19 +448,17 @@ int run_single(struct app_ctx* ac)
         goto Exit;
     }
 
-    error = sc_dev_open_by_index(ac->device_index, &dev);
+    error = sc_dev_open_by_index(ac->device_index, &can_state.dev);
     if (error) {
         fprintf(stderr, "sc_dev_open failed: %s (%d)\n", sc_strerror(error), error);
         goto Exit;
     }
 
-    can_state.dev = dev;
-
     if (!ac->candump) {
-        fprintf(stdout, "cmd epp %#02x, can epp %#02x\n", dev->cmd_epp, dev->can_epp);
+        fprintf(stdout, "cmd epp %#02x, can epp %#02x\n", can_state.dev->cmd_epp, can_state.dev->can_epp);
     }
 
-    error = sc_cmd_ctx_init(&cmd_ctx, dev);
+    error = sc_cmd_ctx_init(&cmd_ctx, can_state.dev);
     if (error) {
         fprintf(stderr, "failed to initialize command context: %s (%d)\n", sc_strerror(error), error);
         goto Exit;
@@ -368,8 +485,8 @@ int run_single(struct app_ctx* ac)
 
         memcpy(&dev_info, cmd_ctx.rx_buffer, sizeof(dev_info));
 
-        dev_info.feat_perm = dev->dev_to_host16(dev_info.feat_perm);
-        dev_info.feat_conf = dev->dev_to_host16(dev_info.feat_conf);
+        dev_info.feat_perm = can_state.dev->dev_to_host16(dev_info.feat_perm);
+        dev_info.feat_conf = can_state.dev->dev_to_host16(dev_info.feat_conf);
 
         if (!ac->candump) {
             fprintf(stdout, "device features perm=%#04x conf=%#04x\n", dev_info.feat_perm, dev_info.feat_conf);
@@ -409,10 +526,10 @@ int run_single(struct app_ctx* ac)
 
         memcpy(&can_info, cmd_ctx.rx_buffer, sizeof(can_info));
 
-        can_info.can_clk_hz = dev->dev_to_host32(can_info.can_clk_hz);
-        can_info.msg_buffer_size = dev->dev_to_host16(can_info.msg_buffer_size);
-        can_info.nmbt_brp_max = dev->dev_to_host16(can_info.nmbt_brp_max);
-        can_info.nmbt_tseg1_max = dev->dev_to_host16(can_info.nmbt_tseg1_max);
+        can_info.can_clk_hz = can_state.dev->dev_to_host32(can_info.can_clk_hz);
+        can_info.msg_buffer_size = can_state.dev->dev_to_host16(can_info.msg_buffer_size);
+        can_info.nmbt_brp_max = can_state.dev->dev_to_host16(can_info.nmbt_brp_max);
+        can_info.nmbt_tseg1_max = can_state.dev->dev_to_host16(can_info.nmbt_tseg1_max);
 
 
     }
@@ -492,9 +609,9 @@ int run_single(struct app_ctx* ac)
         memset(bt, 0, sizeof(*bt));
         bt->id = SC_MSG_NM_BITTIMING;
         bt->len = sizeof(*bt);
-        bt->brp = dev->dev_to_host16(nominal_settings.brp);
+        bt->brp = can_state.dev->dev_to_host16(nominal_settings.brp);
         bt->sjw = nominal_settings.sjw;
-        bt->tseg1 = dev->dev_to_host16(nominal_settings.tseg1);
+        bt->tseg1 = can_state.dev->dev_to_host16(nominal_settings.tseg1);
         bt->tseg2 = nominal_settings.tseg2;
         cmd_tx_ptr += bt->len;
         ++cmd_count;
@@ -506,9 +623,9 @@ int run_single(struct app_ctx* ac)
             memset(bt, 0, sizeof(*bt));
             bt->id = SC_MSG_DT_BITTIMING;
             bt->len = sizeof(*bt);
-            bt->brp = dev->dev_to_host16(data_settings.brp);
+            bt->brp = can_state.dev->dev_to_host16(data_settings.brp);
             bt->sjw = data_settings.sjw;
-            bt->tseg1 = dev->dev_to_host16(data_settings.tseg1);
+            bt->tseg1 = can_state.dev->dev_to_host16(data_settings.tseg1);
             bt->tseg2 = data_settings.tseg2;
             cmd_tx_ptr += bt->len;
             ++cmd_count;
@@ -518,7 +635,7 @@ int run_single(struct app_ctx* ac)
         memset(bus_on, 0, sizeof(*bus_on));
         bus_on->id = SC_MSG_BUS;
         bus_on->len = sizeof(*bus_on);
-        bus_on->arg = dev->dev_to_host16(1);
+        bus_on->arg = can_state.dev->dev_to_host16(1);
         cmd_tx_ptr += bus_on->len;
         ++cmd_count;
 
@@ -547,26 +664,21 @@ int run_single(struct app_ctx* ac)
         }
     }
 
-    error = sc_can_stream_init(dev, can_info.msg_buffer_size, ac, process_can, -1, &stream);
+    error = sc_can_stream_init(can_state.dev, can_info.msg_buffer_size, ac, process_can, -1, &can_state.stream);
     if (error) {
         fprintf(stderr, "failed to initialize CAN stream: %s (%d)\n", sc_strerror(error), error);
         goto Exit;
     }
 
-    stream->user_handle = ac->shutdown_event;
-
-    msg_tx_buffer = malloc(can_info.msg_buffer_size);
-    if (!msg_tx_buffer) {
-        error = SC_DLL_ERROR_OUT_OF_MEM;
-        goto Exit;
-    }
+    can_state.stream->user_handle = ac->shutdown_event;
 
     DWORD timeout_ms = 0;
+    bool was_full = false;
 
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
     while (1) {
-        error = sc_can_stream_rx(stream, timeout_ms);
+        error = sc_can_stream_rx(can_state.stream, timeout_ms);
         if (error) {
             if (SC_DLL_ERROR_USER_HANDLE_SIGNALED == error) {
                 break;
@@ -582,7 +694,7 @@ int run_single(struct app_ctx* ac)
             timeout_ms = 0xffffffff;
             ULONGLONG now = GetTickCount64();
             
-            error = sc_can_stream_tx_batch_begin(stream);
+            error = sc_can_stream_tx_batch_begin(can_state.stream);
             if (error) {
                 fprintf(stderr, "sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
                 goto Exit;
@@ -590,74 +702,46 @@ int run_single(struct app_ctx* ac)
 
             for (size_t i = 0; i < ac->tx_job_count; ++i) {
                 struct tx_job* job = &ac->tx_jobs[i];
-                if (0 == job->last_tx_ts_ms ||
-                    (job->interval_ms >= 0 && now - job->last_tx_ts_ms >= (unsigned)job->interval_ms)) {
+
+                if ((job->interval_ms >= 0 &&
+                    (0 == job->last_tx_ts_ms || now - job->last_tx_ts_ms >= (unsigned)job->interval_ms)) ||
+                    (job->interval_ms < 0 && job->count > 0)) {
+                    auto const count = job->count;
+
                     job->last_tx_ts_ms = now;
 
-                    struct sc_msg_can_tx* tx = (struct sc_msg_can_tx*)msg_tx_buffer;
-                    uint16_t bytes = sizeof(*tx);
-                    if (job->flags & SC_CAN_FRAME_FLAG_RTR) {
+                    while (job->count > 0) {
+                        auto result = tx(ac, job);
 
-                    }
-                    else {
-                        bytes += dlc_to_len(job->dlc);
-                        memcpy(tx->data, job->data, dlc_to_len(job->dlc));
-                    }
-
-                    if (bytes & (SC_MSG_CAN_LEN_MULTIPLE - 1)) {
-                        bytes += SC_MSG_CAN_LEN_MULTIPLE - (bytes & (SC_MSG_CAN_LEN_MULTIPLE - 1));
-                    }
-
-                    tx->id = SC_MSG_CAN_TX;
-                    tx->len = (uint8_t)bytes;
-                    tx->can_id = dev->dev_to_host32(job->can_id);
-                    tx->dlc = job->dlc;
-                    tx->flags = job->flags;
-                    tx->track_id = track_id++;
-
-                    while (1) {
-                        size_t added = 0;
-                        error = sc_can_stream_tx_batch_add(
-                            stream,
-                            &msg_tx_buffer,
-                            &bytes,
-                            1,
-                            &added);
-
-                        if (error) {
-                            fprintf(stderr, "sc_can_stream_tx failed: %s (%d)\n", sc_strerror(error), error);
+                        switch (result) {
+                        case -1:
                             goto Exit;
-                        }
-
-                        if (added) {
-                            if (ac->log_flags & LOG_FLAG_TX_MSG) {
-                                fprintf(stdout, "TX ");
-                                log_msg(ac, job->can_id, job->flags, job->dlc, job->data);
+                        case 0:
+                            if (!was_full) {
+                                was_full = true;
+                                fprintf(stderr, "ERROR: TX buffer full\n");
+                                job->count = 0;
                             }
                             break;
-                        }
-
-                        // full
-                        error = sc_can_stream_tx_batch_end(stream);
-                        if (error) {
-                            fprintf(stderr, "sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
-                            goto Exit;
-                        }
-
-                        error = sc_can_stream_tx_batch_begin(stream);
-                        if (error) {
-                            fprintf(stderr, "sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
-                            goto Exit;
+                        case 1:
+                            --job->count;
+                            was_full = false;
+                            break;
                         }
                     }
 
-                    if (job->interval_ms >= 0 && (DWORD)job->interval_ms < timeout_ms) {
-                        timeout_ms = job->interval_ms;
+                    if (job->interval_ms >= 0) {
+                        // reload count
+                        job->count = count;
+
+                        if (job->interval_ms >= 0 && (DWORD)job->interval_ms < timeout_ms) {
+                            timeout_ms = job->interval_ms;
+                        }
                     }
                 }
             }
 
-            error = sc_can_stream_tx_batch_end(stream);
+            error = sc_can_stream_tx_batch_end(can_state.stream);
             if (error) {
                 fprintf(stderr, "sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
                 goto Exit;
@@ -670,14 +754,12 @@ int run_single(struct app_ctx* ac)
 
 
 Exit:
-    sc_can_stream_uninit(stream);
+    sc_can_stream_uninit(can_state.stream);
 
-    if (dev) {
+    if (can_state.dev) {
         sc_cmd_ctx_uninit(&cmd_ctx);
-        sc_dev_close(dev);
+        sc_dev_close(can_state.dev);
     }
-
-    free(msg_tx_buffer);
 
     sc_uninit();
 

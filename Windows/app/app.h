@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -60,6 +60,7 @@ struct tx_job {
     uint64_t last_tx_ts_ms;
     uint32_t can_id;
     int interval_ms;
+    int count;
     uint8_t flags;
     uint8_t dlc;
     uint8_t data[64];

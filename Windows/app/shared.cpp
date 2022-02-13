@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -98,6 +98,7 @@ struct com_dev_ctx {
     SuperCANDeviceData dev_data;
     sc_mm_data rx;
     sc_mm_data tx;
+    uint32_t track_id;
 };
 
 
@@ -237,18 +238,23 @@ void process_rx(app_ctx* ac)
             case SC_CAN_DATA_TYPE_TX: {
                 auto* tx = &com_ctx->rx.hdr->elements[index].tx;
 
-                if (!ac->candump && !tx->echo && (ac->log_flags & LOG_FLAG_TXR)) {
-                    if (tx->flags & SC_CAN_FRAME_FLAG_DRP) {
-                        fprintf(stdout, "TXR %#08x was dropped @ %016llx\n", tx->track_id, tx->timestamp_us);
-                    }
-                    else {
-                        fprintf(stdout, "TXR %#08x was sent @ %016llx\n", tx->track_id, tx->timestamp_us);
-                    }
+                if (ac->candump) {
+                    log_candump(ac, stdout, tx->timestamp_us, tx->can_id, tx->flags, tx->dlc, tx->data);
                 }
+                else {
+                    if (!tx->echo && (ac->log_flags & LOG_FLAG_TXR)) {
+                        if (tx->flags & SC_CAN_FRAME_FLAG_DRP) {
+                            fprintf(stdout, "TXR %#08x was dropped @ %016llx\n", tx->track_id, tx->timestamp_us);
+                        }
+                        else {
+                            fprintf(stdout, "TXR %#08x was sent @ %016llx\n", tx->track_id, tx->timestamp_us);
+                        }
+                    }
 
-                if (!ac->candump && (ac->log_flags & LOG_FLAG_TX_MSG)) {
-                    fprintf(stdout, "TX ");
-                    log_msg(ac, tx->can_id, tx->flags, tx->dlc, tx->data);
+                    if ((ac->log_flags & LOG_FLAG_TX_MSG)) {
+                        fprintf(stdout, "TX ");
+                        log_msg(ac, tx->can_id, tx->flags, tx->dlc, tx->data);
+                    }
                 }
             } break;
             case SC_CAN_DATA_TYPE_ERROR: {
@@ -293,6 +299,44 @@ void process_rx(app_ctx* ac)
 
         com_ctx->rx.hdr->get_index = gi;
     }
+}
+
+static bool tx(app_ctx* ac, struct tx_job* job)
+{
+    com_dev_ctx* com_ctx = static_cast<com_dev_ctx*>(ac->priv);
+    auto gi = com_ctx->tx.hdr->get_index;
+    auto pi = com_ctx->tx.hdr->put_index;
+    auto used = pi - gi;
+
+   if (used > com_ctx->tx.elements) {
+        fprintf(stderr, "ERROR: TX mm data mismatch (pi=%lu gi=%u used=%u elements=%u)\n",
+            static_cast<unsigned long>(pi),
+            static_cast<unsigned long>(gi),
+            static_cast<unsigned long>(used),
+            static_cast<unsigned long>(com_ctx->tx.elements));
+    }
+    else if (used == com_ctx->tx.elements) {
+        // full
+    }
+    else {
+        auto index = pi % com_ctx->tx.elements;
+        auto* tx = &com_ctx->tx.hdr->elements[index].tx;
+
+        tx->type = SC_CAN_DATA_TYPE_TX;
+        tx->can_id = job->can_id;
+        tx->flags = job->flags;
+        tx->track_id = com_ctx->track_id++;
+        tx->dlc = job->dlc;
+        if (!(job->flags & SC_CAN_FRAME_FLAG_RTR)) {
+            memcpy(tx->data, job->data, dlc_to_len(job->dlc));
+        }
+
+        com_ctx->tx.hdr->put_index = pi + 1;
+
+        return true;
+    }
+
+   return false;
 }
 
 int run(app_ctx* ac)
@@ -416,14 +460,9 @@ int run(app_ctx* ac)
     };
 
     DWORD timeout_ms = 0;
-    uint32_t track_id = 0;
     bool was_full = false;
 
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-
-    // throw out any messages that might have been
-    // queued while not active
-    com_ctx->rx.hdr->get_index = com_ctx->rx.hdr->put_index;
 
     while (1) {
 
@@ -457,48 +496,37 @@ int run(app_ctx* ac)
 
             for (size_t i = 0; i < ac->tx_job_count; ++i) {
                 struct tx_job* job = &ac->tx_jobs[i];
-                if (0 == job->last_tx_ts_ms ||
-                    (job->interval_ms >= 0 && now - job->last_tx_ts_ms >= (unsigned)job->interval_ms)) {
+
+                if ((job->interval_ms >= 0 &&
+                    (0 == job->last_tx_ts_ms || now - job->last_tx_ts_ms >= (unsigned)job->interval_ms)) ||
+                    (job->interval_ms < 0 && job->count > 0)) {
+                    auto const count = job->count;
+
                     job->last_tx_ts_ms = now;
 
-                    auto gi = com_ctx->tx.hdr->get_index;
-                    auto pi = com_ctx->tx.hdr->put_index;
-                    auto used = pi - gi;
-                    if (used > com_ctx->tx.elements) {
-                        fprintf(stderr, "ERROR: TX mm data mismatch (pi=%lu gi=%u used=%u elements=%u)\n",
-                            static_cast<unsigned long>(pi),
-                            static_cast<unsigned long>(gi),
-                            static_cast<unsigned long>(used),
-                            static_cast<unsigned long>(com_ctx->tx.elements));
-                    }
-                    else if (used == com_ctx->tx.elements) {
-                        if (!was_full) {
-                            was_full = true;
-                            fprintf(stderr, "ERROR: TX ring full\n");
+                    while (job->count > 0) {
+                        if (tx(ac, job)) {
+                            --job->count;
+                            queued = true;
+                            was_full = false;
+                        }
+                        else {
+                            if (!was_full) {
+                                was_full = true;
+                                fprintf(stderr, "ERROR: TX ring full\n");
+                                break;
+                            }
                         }
                     }
-                    else {
-                        was_full = false;
 
-                        auto index = pi % com_ctx->tx.elements;
-                        auto* tx = &com_ctx->tx.hdr->elements[index].tx;
-                        tx->type = SC_CAN_DATA_TYPE_TX;
-                        tx->can_id = job->can_id;
-                        tx->flags = job->flags;
-                        tx->track_id = track_id++;
-                        tx->dlc = job->dlc;
-                        if (!(job->flags & SC_CAN_FRAME_FLAG_RTR)) {
-                            memcpy(tx->data, job->data, dlc_to_len(job->dlc));
+                    if (job->interval_ms >= 0) {
+                        // reload count
+                        job->count = count;
+
+                        if (job->interval_ms >= 0 && (DWORD)job->interval_ms < timeout_ms) {
+                            timeout_ms = job->interval_ms;
                         }
-
-                        com_ctx->tx.hdr->put_index = pi + 1;
-
-                        queued = true;
                     }
-                }
-
-                if (job->interval_ms >= 0 && (DWORD)job->interval_ms < timeout_ms) {
-                    timeout_ms = job->interval_ms;
                 }
             }
 
