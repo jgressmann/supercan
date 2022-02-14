@@ -28,7 +28,7 @@ xcopy /y /f Windows\x64\Release\supercan64.dll bin\x64\
 xcopy /y /f Windows\x64\Release\supercan_app64.exe bin\x64\
 xcopy /y /f Windows\x64\Release\supercan64.lib lib\x64\
 xcopy /y /f /s Windows\inc inc\
-xcopy /y /f Windows\Win32\Release\supercan_srv32.exe bin\x64\
+xcopy /y /f Windows\Win32\Release\supercan_srv32.exe bin\x86\
 xcopy /y /f Windows\x64\Release\supercan_srv64.exe bin\x64\
 xcopy /y /f qt\32\plugins\canbus\*.dll bin\x86\
 xcopy /y /f qt\64\plugins\canbus\*.dll bin\x64\
