@@ -33,8 +33,8 @@
 !endif
 
 !define INSTALLER_MAJOR 1
-!define INSTALLER_MINOR 0
-!define INSTALLER_PATCH 2
+!define INSTALLER_MINOR 1
+!define INSTALLER_PATCH 0
 !define INSTALLER_BUILD ${SC_VERSION_BUILD}
 
 
@@ -126,7 +126,7 @@ RequestExecutionLevel admin
   ;the actual installation should be stored first in the data block,
   ;because this will make your installer start faster.
   
-  !insertmacro MUI_RESERVEFILE_LANGDLL
+!insertmacro MUI_RESERVEFILE_LANGDLL
 
 
 
@@ -147,11 +147,15 @@ LangString sec_base_name ${LANG_ENGLISH} "Drivers"
 LangString sec_base_name ${LANG_GERMAN} "Treiber"
 LangString sec_dev_name ${LANG_ENGLISH} "Program Development Support"
 LangString sec_dev_name ${LANG_GERMAN} "Unterstützung für Anwendungsentwicklung"
+LangString sec_dbg_name ${LANG_ENGLISH} "Debugging Support"
+LangString sec_dbg_name ${LANG_GERMAN} "Debug-Unterstützung"
 
 LangString desc_sec_base ${LANG_ENGLISH} "Installs components for shared access (multiple processes) to SuperCAN devices."
 LangString desc_sec_base ${LANG_GERMAN} "Installiert Komponenten für den Zugriff auf SuperCAN Geräte aus verschiedenen Anwendungen heraus."
 LangString desc_sec_dev ${LANG_ENGLISH} "Installs header and libraries for application development."
 LangString desc_sec_dev ${LANG_GERMAN} "Installiert Header and Bibliotheken für die Anwendungsentwicklung."
+LangString desc_sec_dbg ${LANG_ENGLISH} "Installs symbols for debugging."
+LangString desc_sec_dbg ${LANG_GERMAN} "Installiert Debug-Symbole."
 
 LangString mb_query_continue_installation ${LANG_ENGLISH} "${SC_NAME} still seems to be installed.$\n$\nContinue with installation?"
 LangString mb_query_continue_installation ${LANG_GERMAN} "${SC_NAME} scheint nicht installiert zu sein.$\n$\nMit dieser Installation fortfahren?"
@@ -254,6 +258,18 @@ Section /o "$(sec_dev_name)" sec_dev
 
 SectionEnd
 
+Section /o "$(sec_dbg_name)" sec_dbg
+	SectionInstType ${it_max}
+
+	SetOutPath "$INSTDIR\pdb"
+	File ..\Win32\Release\supercan32.pdb
+	File ..\Win32\Release\supercan_app32.pdb
+	File ..\x64\Release\supercan64.pdb
+	File ..\x64\Release\supercan_app64.pdb
+	File ..\x64\Release\supercan_srv64.pdb
+	
+SectionEnd
+
 Section "" sec_hidden
 	SectionInstType ${it_min} ${it_max}
 
@@ -279,6 +295,7 @@ Section "Uninstall"
 	RMDir /r "$INSTDIR\inc"
 	RMDir /r "$INSTDIR\lib"
 	RMDir /r "$INSTDIR\src"
+	RMDir /r "$INSTDIR\pdb"
 
 	RMDir "$INSTDIR"
 
@@ -293,7 +310,7 @@ VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductName" "${INSTALLER_NAME}"
 ;VIAddVersionKey /LANG=${LANG_ENGLISH} "Comments" "A test comment"
 ;VIAddVersionKey /LANG=${LANG_ENGLISH} "CompanyName" "Fake company"
 ;VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalTrademarks" "Test Application is a trademark of Fake company"
-VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "Copyright (c) 2020-2021, Jean Gressmann. All rights reserved."
+VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "Copyright (c) 2020-2022, Jean Gressmann. All rights reserved."
 VIAddVersionKey /LANG=${LANG_ENGLISH} "FileDescription" "${INSTALLER_NAME}"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductVersion" "${SC_VERSION_MAJOR}.${SC_VERSION_MINOR}.${SC_VERSION_PATCH}.${SC_VERSION_BUILD}"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "FileVersion" "${INSTALLER_MAJOR}.${INSTALLER_MINOR}.${INSTALLER_PATCH}.${INSTALLER_BUILD}"
@@ -397,6 +414,7 @@ FunctionEnd
 
 	!insertmacro MUI_DESCRIPTION_TEXT ${sec_base} "$(desc_sec_base)"
 	!insertmacro MUI_DESCRIPTION_TEXT ${sec_dev} "$(desc_sec_dev)"
+	!insertmacro MUI_DESCRIPTION_TEXT ${sec_dbg} "$(desc_sec_dbg)"
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
