@@ -1,6 +1,9 @@
 SETLOCAL EnableDelayedExpansion
 SET
 
+REM Store commit
+git rev-parse HEAD >COMMIT
+
 REM Visual Studio Build
 msbuild %MSBUILD_OPTIONS% -p:Platform=x86 %SOLUTION% || exit /b !ERRORLEVEL!
 msbuild %MSBUILD_OPTIONS% -p:Platform=x64 %SOLUTION% || exit /b !ERRORLEVEL!
@@ -42,7 +45,7 @@ xcopy /y /f Windows\x64\Release\supercan_app64.pdb pdb\x64\
 xcopy /y /f Windows\x64\Release\supercan64.pdb pdb\x64\
 xcopy /y /f Windows\Win32\Release\supercan_srv32.pdb pdb\x86\
 xcopy /y /f Windows\x64\Release\supercan_srv64.pdb pdb\x64\
-(7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src pdb) || exit /b !ERRORLEVEL!
+(7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src pdb LICENSE COMMIT) || exit /b !ERRORLEVEL!
 REM installer
 makensis /DSC_VERSION_MAJOR=%PRODUCT_VERSION_MAJOR% /DSC_VERSION_MINOR=%PRODUCT_VERSION_MINOR% /DSC_VERSION_PATCH=%PRODUCT_VERSION_PATCH% /DSC_VERSION_BUILD=%PRODUCT_VERSION_BUILD% Windows\NSIS\supercan.nsi || exit /b !ERRORLEVEL!
 move Windows\NSIS\supercan_inst.exe .

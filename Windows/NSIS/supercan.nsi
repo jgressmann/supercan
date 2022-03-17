@@ -12,6 +12,7 @@
 !define SC_NAME "SuperCAN"
 !define SC_GUID "{8688E45F-740D-4B9D-B876-9650E29F2AD7}"
 !define LICENSE_FILE_PATH ..\..\LICENSE
+!define COMMIT_FILE_PATH ..\..\COMMIT
 !define INSTALLER_NAME "${SC_NAME}"
 !define APP_INSTALL_PATH "Software\Microsoft\Windows\CurrentVersion\Uninstall\${SC_GUID}"
 
@@ -213,6 +214,7 @@ Section "$(sec_base_name)" sec_base
 
 	SetOutPath "$INSTDIR"
 	File ${LICENSE_FILE_PATH}
+	File ${COMMIT_FILE_PATH}
 
 	SetOutPath "$INSTDIR\bin"
 	File ..\Win32\Release\supercan32.dll
@@ -289,6 +291,7 @@ Section "Uninstall"
 	!insertmacro UnInstallLib REGEXE NOTSHARED NOREBOOT_PROTECTED "$INSTDIR\bin\supercan_srv64.exe"
 
 	Delete "$INSTDIR\LICENSE"
+	Delete "$INSTDIR\COMMIT"
 	Delete "$INSTDIR\uninstall.exe"
 
 	RMDir /r "$INSTDIR\bin"
