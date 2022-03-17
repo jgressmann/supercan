@@ -20,6 +20,8 @@ mkdir bin\x86
 mkdir bin\x64
 mkdir lib\x86
 mkdir lib\x64
+mkdir pdb\x86
+mkdir pdb\x64
 mkdir inc
 xcopy /y /f Windows\Win32\Release\supercan32.dll bin\x86\
 xcopy /y /f Windows\Win32\Release\supercan_app32.exe bin\x86\
@@ -32,7 +34,15 @@ xcopy /y /f Windows\Win32\Release\supercan_srv32.exe bin\x86\
 xcopy /y /f Windows\x64\Release\supercan_srv64.exe bin\x64\
 xcopy /y /f qt\32\plugins\canbus\*.dll bin\x86\
 xcopy /y /f qt\64\plugins\canbus\*.dll bin\x64\
-(7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src) || exit /b !ERRORLEVEL!
+xcopy /y /f Windows\Win32\Release\supercan32.pdb pdb\x86\
+xcopy /y /f Windows\Win32\Release\supercan_app32.pdb pdb\x86\
+xcopy /y /f Windows\Win32\Release\supercan32.pdb pdb\x86\
+xcopy /y /f Windows\x64\Release\supercan64.pdb pdb\x64\
+xcopy /y /f Windows\x64\Release\supercan_app64.pdb pdb\x64\
+xcopy /y /f Windows\x64\Release\supercan64.pdb pdb\x64\
+xcopy /y /f Windows\Win32\Release\supercan_srv32.pdb pdb\x86\
+xcopy /y /f Windows\x64\Release\supercan_srv64.pdb pdb\x64\
+(7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src pdb) || exit /b !ERRORLEVEL!
 REM installer
 makensis /DSC_VERSION_MAJOR=%PRODUCT_VERSION_MAJOR% /DSC_VERSION_MINOR=%PRODUCT_VERSION_MINOR% /DSC_VERSION_PATCH=%PRODUCT_VERSION_PATCH% /DSC_VERSION_BUILD=%PRODUCT_VERSION_BUILD% Windows\NSIS\supercan.nsi || exit /b !ERRORLEVEL!
 move Windows\NSIS\supercan_inst.exe .
