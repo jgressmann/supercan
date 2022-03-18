@@ -11,6 +11,8 @@
 #define SC_BUILD_NUMBER 0
 #endif
 
+#include "commit.h"
+
 #define APSTUDIO_READONLY_SYMBOLS
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -53,10 +55,10 @@ BEGIN
             VALUE "FileDescription", "SuperCAN"
             VALUE "FileVersion", STR(SC_DLL_VERSION_MAJOR) "." STR(SC_DLL_VERSION_MINOR) "." STR(SC_DLL_VERSION_PATCH) "." STR(SC_BUILD_NUMBER)
             VALUE "InternalName", "supercan.dll"
-            VALUE "LegalCopyright", "Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>"
+            VALUE "LegalCopyright", "Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>"
             VALUE "OriginalFilename", "supercan.dll"
             VALUE "ProductName", "SuperCAN"
-            VALUE "ProductVersion", STR(SC_DLL_VERSION_MAJOR) "." STR(SC_DLL_VERSION_MINOR) "." STR(SC_DLL_VERSION_PATCH) "." STR(SC_BUILD_NUMBER)
+            VALUE "ProductVersion", STR(SC_DLL_VERSION_MAJOR) "." STR(SC_DLL_VERSION_MINOR) "." STR(SC_DLL_VERSION_PATCH) "." STR(SC_BUILD_NUMBER) "-" SC_COMMIT
         END
     END
     BLOCK "VarFileInfo"

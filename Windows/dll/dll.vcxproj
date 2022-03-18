@@ -75,20 +75,24 @@
     <TargetName>supercan32</TargetName>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <CustomBuildBeforeTargets>BuildGenerateSources</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <TargetName>supercan32</TargetName>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <CustomBuildBeforeTargets>BuildGenerateSources</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <TargetName>supercan64</TargetName>
+    <CustomBuildBeforeTargets>BuildGenerateSources</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
     <TargetName>supercan64</TargetName>
+    <CustomBuildBeforeTargets>BuildGenerateSources</CustomBuildBeforeTargets>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -105,9 +109,18 @@
       <AdditionalDependencies>winusb.lib;Cfgmgr32.lib</AdditionalDependencies>
     </Link>
     <ResourceCompile>
-      <AdditionalIncludeDirectories>../inc</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../inc;$(IntDir)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_UNICODE;UNICODE;$(ResourcesExtraDefines)%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
+    <CustomBuildStep>
+      <Command>..\commit.cmd &gt;$(IntDir)commit.h</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Store Git Commit</Message>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Outputs>$(IntDir)commit.h</Outputs>
+    </CustomBuildStep>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -129,9 +142,18 @@
       <AdditionalDependencies>winusb.lib;Cfgmgr32.lib</AdditionalDependencies>
     </Link>
     <ResourceCompile>
-      <AdditionalIncludeDirectories>../inc</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../inc;$(IntDir)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_UNICODE;UNICODE;$(ResourcesExtraDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
+    <CustomBuildStep>
+      <Command>..\commit.cmd &gt;$(IntDir)commit.h</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Store Git Commit</Message>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Outputs>$(IntDir)commit.h</Outputs>
+    </CustomBuildStep>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -148,9 +170,18 @@
       <AdditionalDependencies>winusb.lib;Cfgmgr32.lib</AdditionalDependencies>
     </Link>
     <ResourceCompile>
-      <AdditionalIncludeDirectories>../inc</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../inc;$(IntDir)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_UNICODE;UNICODE;$(ResourcesExtraDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
+    <CustomBuildStep>
+      <Command>..\commit.cmd &gt;$(IntDir)commit.h</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Store Git Commit</Message>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Outputs>$(IntDir)commit.h</Outputs>
+    </CustomBuildStep>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -171,9 +202,18 @@
       <AdditionalDependencies>winusb.lib;Cfgmgr32.lib</AdditionalDependencies>
     </Link>
     <ResourceCompile>
-      <AdditionalIncludeDirectories>../inc</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../inc;$(IntDir)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_UNICODE;UNICODE;$(ResourcesExtraDefines);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
+    <CustomBuildStep>
+      <Command>..\commit.cmd &gt;$(IntDir)commit.h</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Store Git Commit</Message>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Outputs>$(IntDir)commit.h</Outputs>
+    </CustomBuildStep>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\inc\supercan_dll.h" />

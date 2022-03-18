@@ -1,6 +1,7 @@
 // Microsoft Visual C++ generated resource script.
 //
 #include "resource.h"
+#include "commit.h"
 
 #define APSTUDIO_READONLY_SYMBOLS
 /////////////////////////////////////////////////////////////////////////////
@@ -72,7 +73,7 @@ BEGIN
             VALUE "LegalCopyright", "Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>"
             VALUE "OriginalFilename", "supercan_app.exe"
             VALUE "ProductName", "SuperCAN demo application"
-            VALUE "ProductVersion", "1.5.5.0"
+            VALUE "ProductVersion", "1.5.5.0-" SC_COMMIT
         END
     END
     BLOCK "VarFileInfo"

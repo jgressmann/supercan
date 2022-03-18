@@ -75,20 +75,24 @@
     <TargetName>supercan_app32</TargetName>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <CustomBuildBeforeTargets>BuildGenerateSources</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <TargetName>supercan_app32</TargetName>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <CustomBuildBeforeTargets>BuildGenerateSources</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <TargetName>supercan_app64</TargetName>
+    <CustomBuildBeforeTargets>BuildGenerateSources</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
     <TargetName>supercan_app64</TargetName>
+    <CustomBuildBeforeTargets>BuildGenerateSources</CustomBuildBeforeTargets>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -105,6 +109,18 @@
       <AdditionalDependencies>supercan32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(OutDir)</AdditionalLibraryDirectories>
     </Link>
+    <CustomBuildStep>
+      <Command>..\commit.cmd &gt;$(IntDir)commit.h</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Store Git Commit</Message>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Outputs>$(IntDir)commit.h</Outputs>
+    </CustomBuildStep>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(IntDir)</AdditionalIncludeDirectories>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -125,6 +141,18 @@
       <AdditionalDependencies>supercan32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(OutDir)</AdditionalLibraryDirectories>
     </Link>
+    <CustomBuildStep>
+      <Command>..\commit.cmd &gt;$(IntDir)commit.h</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Store Git Commit</Message>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Outputs>$(IntDir)commit.h</Outputs>
+    </CustomBuildStep>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(IntDir)</AdditionalIncludeDirectories>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -141,6 +169,18 @@
       <AdditionalDependencies>supercan64.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(OutDir)</AdditionalLibraryDirectories>
     </Link>
+    <CustomBuildStep>
+      <Command>..\commit.cmd &gt;$(IntDir)commit.h</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Store Git Commit</Message>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Outputs>$(IntDir)commit.h</Outputs>
+    </CustomBuildStep>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(IntDir)</AdditionalIncludeDirectories>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -161,6 +201,18 @@
       <AdditionalDependencies>supercan64.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(OutDir)</AdditionalLibraryDirectories>
     </Link>
+    <CustomBuildStep>
+      <Command>..\commit.cmd &gt;$(IntDir)commit.h</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Store Git Commit</Message>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Outputs>$(IntDir)commit.h</Outputs>
+    </CustomBuildStep>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(IntDir)</AdditionalIncludeDirectories>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\can_bit_timing.c" />

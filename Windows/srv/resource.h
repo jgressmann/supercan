@@ -2,12 +2,11 @@
 // Microsoft Visual C++ generated include file.
 // Used by supercan_srv.rc
 //
-
 #define IDS_PROJNAME                    100
-#define IDR_SUPERCANSRV      101
+#define IDR_SUPERCANSRV                 101
 
 // Next default values for new objects
-//
+// 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        201

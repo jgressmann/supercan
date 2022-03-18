@@ -72,6 +72,7 @@
     <IgnoreImportLibrary>true</IgnoreImportLibrary>
     <LinkIncremental>false</LinkIncremental>
     <TargetName>supercan_srv64</TargetName>
+    <CustomBuildBeforeTargets>BuildGenerateSources</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <IgnoreImportLibrary>true</IgnoreImportLibrary>
@@ -79,11 +80,13 @@
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
     <TargetName>supercan_srv32</TargetName>
+    <CustomBuildBeforeTargets>BuildGenerateSources</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <IgnoreImportLibrary>true</IgnoreImportLibrary>
     <LinkIncremental>true</LinkIncremental>
     <TargetName>supercan_srv64</TargetName>
+    <CustomBuildBeforeTargets>BuildGenerateSources</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <IgnoreImportLibrary>true</IgnoreImportLibrary>
@@ -91,6 +94,7 @@
     <TargetName>supercan_srv32</TargetName>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
+    <CustomBuildBeforeTargets>BuildGenerateSources</CustomBuildBeforeTargets>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -124,6 +128,15 @@
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalDependencies>winusb.lib;Cfgmgr32.lib</AdditionalDependencies>
     </Link>
+    <CustomBuildStep>
+      <Command>..\commit.cmd &gt;$(IntDir)commit.h</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Store Git Commit</Message>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Outputs>$(IntDir)commit.h</Outputs>
+    </CustomBuildStep>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -158,6 +171,15 @@
     </Link>
     <Manifest />
     <Manifest />
+    <CustomBuildStep>
+      <Command>..\commit.cmd &gt;$(IntDir)commit.h</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Store Git Commit</Message>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Outputs>$(IntDir)commit.h</Outputs>
+    </CustomBuildStep>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -189,6 +211,13 @@
       <SubSystem>Windows</SubSystem>
       <AdditionalDependencies>winusb.lib;Cfgmgr32.lib</AdditionalDependencies>
     </Link>
+    <CustomBuildStep>
+      <Command>..\commit.cmd &gt;$(IntDir)commit.h</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Outputs>$(IntDir)commit.h</Outputs>
+      <Message>Store Git Commit</Message>
+    </CustomBuildStep>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -223,6 +252,15 @@
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalDependencies>winusb.lib;Cfgmgr32.lib</AdditionalDependencies>
     </Link>
+    <CustomBuildStep>
+      <Command>..\commit.cmd &gt;$(IntDir)commit.h</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Store Git Commit</Message>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Outputs>$(IntDir)commit.h</Outputs>
+    </CustomBuildStep>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\supercan_misc.h" />
