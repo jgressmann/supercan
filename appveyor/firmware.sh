@@ -20,7 +20,7 @@ export TARGET_DIR=$APPVEYOR_BUILD_FOLDER/tmp
 
 
 # install build dependencies
-sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz
+sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz python3
 
 # init submodules
 git submodule update --init --depth 1 --recursive
@@ -77,9 +77,9 @@ for i in $hw_revs; do
 done
 unset hw_revs
 
-################
-# Other Boards #
-################
+##########################
+# Other Boards (bin/hex) #
+##########################
 
 
 boards="teensy_40 d5035_03 same54xplainedpro"
@@ -90,8 +90,24 @@ for board in $boards; do
 
 	make $MAKE_ARGS
 
-	cp _build/$BOARD/${project}.hex $TARGET_DIR/supercan/$BOARD/supercan.hex
-	cp _build/$BOARD/${project}.bin $TARGET_DIR/supercan/$BOARD/supercan.bin
+	cp _build/$BOARD/${project}.hex $TARGET_DIR/supercan/$BOARD/
+	cp _build/$BOARD/${project}.bin $TARGET_DIR/supercan/$BOARD/
+	rm -rf _build
+done
+
+######################
+# Other Boards (uf2) #
+######################
+
+boards="feather_m4_can_express"
+for board in $boards; do
+	export BOARD=$board
+
+	mkdir -p $TARGET_DIR/supercan/$BOARD
+
+	make $MAKE_ARGS uf2
+
+	cp _build/$BOARD/${project}.uf2 $TARGET_DIR/supercan/$BOARD/
 	rm -rf _build
 done
 
