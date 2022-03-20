@@ -2030,16 +2030,20 @@ CSuperCAN::~CSuperCAN()
 		if (0 == m_Instance->Release()) {
 			s_Instance = nullptr;
 		}
+
+		m_Instance = nullptr;
 	}
 }
 
 CSuperCAN::CSuperCAN()
+: m_Instance(nullptr)
 {
 	ATL::ModuleLockHelper g;
 
 	if (nullptr == s_Instance) {
 		ATL::CComObject<XSuperCAN>* instance = nullptr;
 		HRESULT hr = ATL::CComObject<XSuperCAN>::CreateInstance(&instance);
+
 		if (SUCCEEDED(hr)) {
 			s_Instance = instance;
 		}
