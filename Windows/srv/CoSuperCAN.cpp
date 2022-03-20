@@ -499,6 +499,8 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 {
 	sc_msg_header* msg = const_cast<sc_msg_header*>(_msg);
 
+	(void)bytes; // fingers crossed
+
 	switch (msg->id) {
 	case SC_MSG_CAN_TXR: {
 		sc_msg_can_txr *txr = reinterpret_cast<sc_msg_can_txr*>(msg);
@@ -508,7 +510,7 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 		txr->timestamp_us = m_Device->dev_to_host32(txr->timestamp_us);
 		ts = sc_tt_track(&m_TimeTracker, txr->timestamp_us);
 
-		tx_com_dev_index = m_TxrMap[txr->track_id].index.load(std::memory_order_acquire);
+		tx_com_dev_index = static_cast<sc_com_dev_index_t>(m_TxrMap[txr->track_id].index.load(std::memory_order_acquire));
 
 		if (tx_com_dev_index < MAX_COM_DEVICES_PER_SC_DEVICE) {
 			auto const* echo = &m_TxEchoMap[txr->track_id];
@@ -716,7 +718,7 @@ void ScDev::Unmap()
 	m_Mapped = false;
 
 	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceData); ++i) {
-		auto* data = &m_ComDeviceData[i];
+		//auto* data = &m_ComDeviceData[i];
 		auto* priv = &m_ComDeviceDataPrivate[i];
 
 		if (priv->rx.hdr) {
@@ -843,8 +845,6 @@ error_exit:
 
 int ScDev::Init(std::wstring&& name)
 {
-	DWORD thread_id = 0;
-
 	Uninit();
 
 	m_Name = std::move(name);
@@ -1353,8 +1353,8 @@ void ScDev::TxMain()
 {
 	const unsigned TX_HANDLE_OFFSET = 1;
 	HANDLE handles[TX_HANDLE_OFFSET + MAX_COM_DEVICES_PER_SC_DEVICE];
-	uint32_t buffer[24];
-	sc_msg_can_tx* tx = reinterpret_cast<sc_msg_can_tx*>(buffer);
+	uint32_t aligned_sc_msg_can_tx_buffer[24];
+	sc_msg_can_tx* tx = reinterpret_cast<sc_msg_can_tx*>(aligned_sc_msg_can_tx_buffer);
 	sc_com_dev_index_t live_com_dev_buffer[MAX_COM_DEVICES_PER_SC_DEVICE];
 	sc_com_dev_index_t live_com_dev_count = 0;
 
@@ -1370,7 +1370,6 @@ void ScDev::TxMain()
 
 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
-	sc_com_dev_index_t start_index = 0;
 	auto batch_started = false;
 
 	for (;;) {
@@ -1943,7 +1942,7 @@ STDMETHODIMP XSuperCAN::DeviceScan(unsigned long* count)
 					new_devices.emplace_back(std::move(ptr));
 				} else {
 					ptr = std::make_shared<ScDev>();
-					auto error = ptr->Init(std::wstring(str.data(), str.data() + len));
+					error = ptr->Init(std::wstring(str.data(), str.data() + len));
 					if (error) {
 						LOG_ERROR("failed to initialize SuperCAN device: %s (%d)\n", sc_strerror(error), error);
 					}
