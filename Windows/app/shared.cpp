@@ -682,7 +682,7 @@ extern "C" int run_shared(struct app_ctx* ac)
         ISuperCANDevicePtr device_ptr;
         hr = sc->DeviceOpen(ac->device_index, (ISuperCANDevice**)&device_ptr);
         if (FAILED(hr)) {
-            fprintf(stderr, "ERROR: failed to open device index=0 (hr=%lx)\n", hr);
+            fprintf(stderr, "ERROR: failed to open device index=%u (hr=%lx)\n", ac->device_index, hr);
             return map_hr_to_error(hr);
         }
 

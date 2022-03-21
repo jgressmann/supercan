@@ -3,6 +3,19 @@
 #include "resource.h"
 #include "commit.h"
 
+
+#define STR2(x) #x
+#define STR(x) STR2(x)
+
+#define SC_APP_VERSION_MAJOR 1
+#define SC_APP_VERSION_MINOR 5
+#define SC_APP_VERSION_PATCH 6
+
+
+#ifndef SC_BUILD_NUMBER
+#define SC_BUILD_NUMBER 0
+#endif
+
 #define APSTUDIO_READONLY_SYMBOLS
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -52,8 +65,8 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,5,5,0
- PRODUCTVERSION 1,5,5,0
+ FILEVERSION SC_APP_VERSION_MAJOR, SC_APP_VERSION_MINOR, SC_APP_VERSION_PATCH, SC_BUILD_NUMBER
+ PRODUCTVERSION SC_APP_VERSION_MAJOR, SC_APP_VERSION_MINOR, SC_APP_VERSION_PATCH, SC_BUILD_NUMBER
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -68,12 +81,12 @@ BEGIN
     BEGIN
         BLOCK "000004b0"
         BEGIN
-            VALUE "FileVersion", "1.5.5.0"
+            VALUE "FileVersion", STR(SC_APP_VERSION_MAJOR) "." STR(SC_APP_VERSION_MINOR) "." STR(SC_APP_VERSION_PATCH) "." STR(SC_BUILD_NUMBER)
             VALUE "InternalName", "supercan_app.exe"
             VALUE "LegalCopyright", "Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>"
             VALUE "OriginalFilename", "supercan_app.exe"
             VALUE "ProductName", "SuperCAN demo application"
-            VALUE "ProductVersion", "1.5.5.0-" SC_COMMIT
+            VALUE "ProductVersion", STR(SC_APP_VERSION_MAJOR) "." STR(SC_APP_VERSION_MINOR) "." STR(SC_APP_VERSION_PATCH) "." STR(SC_BUILD_NUMBER) "-" SC_COMMIT
         END
     END
     BLOCK "VarFileInfo"

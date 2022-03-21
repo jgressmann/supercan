@@ -449,7 +449,7 @@ int run_single(struct app_ctx* ac)
 
     error = sc_dev_open_by_index(ac->device_index, &can_state.dev);
     if (error) {
-        fprintf(stderr, "sc_dev_open failed: %s (%d)\n", sc_strerror(error), error);
+        fprintf(stderr, "sc_dev_open for device index %u failed: %s (%d)\n", ac->device_index, sc_strerror(error), error);
         goto Exit;
     }
 
