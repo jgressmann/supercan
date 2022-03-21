@@ -343,6 +343,8 @@ ScDev::ScDev()
 	m_ConfigurationAccessIndex = MAX_COM_DEVICES_PER_SC_DEVICE;
 	m_RxThreadNotificationCode = NOTIFICATION_NONE;
 	m_TxThreadNotificationCode = NOTIFICATION_NONE;
+	m_RxThreadNotificationValue = 0;
+	m_TxThreadNotificationValue = 0;
 	
 
 	ZeroMemory(m_ComDeviceData, sizeof(m_ComDeviceData));
@@ -388,7 +390,10 @@ ScDev::ScDev()
 	ZeroMemory(&m_TimeTracker, sizeof(m_TimeTracker));
 	m_Mapped = false;
 	ZeroMemory(m_TxEchoMap, sizeof(m_TxEchoMap));
+	ZeroMemory(m_TxrMap, sizeof(m_TxrMap));
 	m_RxThreadLiveComDevCount = 0;
+	ZeroMemory(m_RxThreadLiveComDevBuffer, sizeof(m_RxThreadLiveComDevBuffer));
+
 }
 
 bool ScDev::VerifyConfigurationAccess(sc_com_dev_index_t index) const
