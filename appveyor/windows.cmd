@@ -1,6 +1,25 @@
 SETLOCAL EnableDelayedExpansion
 SET
 
+REM Try to set version string from AppVeyor
+if "%APPVEYOR_REPO_TAG%" EQU "true" (
+    set VERSION_STR=!APPVEYOR_REPO_TAG_NAME:~1!.%APPVEYOR_BUILD_NUMBER%
+) else (
+    if "%APPVEYOR_BUILD_VERSION%" NEQ "" (
+        set VERSION_STR=0.%APPVEYOR_BUILD_VERSION%
+    ) else (
+        set VERSION_STR=0.0.0.0
+    )
+)
+
+for /F "tokens=1,2,3,4 delims=." %%a in ("!VERSION_STR!") do (
+    set SC_VERSION_MAJOR=%%a
+    set SC_VERSION_MINOR=%%b
+    set SC_VERSION_PATCH=%%c
+    set SC_VERSION_BUILD=%%d
+)
+
+
 REM Store commit
 git rev-parse HEAD >COMMIT
 
@@ -47,5 +66,5 @@ xcopy /y /f Windows\Win32\Release\supercan_srv32.pdb pdb\x86\
 xcopy /y /f Windows\x64\Release\supercan_srv64.pdb pdb\x64\
 (7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src pdb LICENSE COMMIT) || exit /b !ERRORLEVEL!
 REM installer
-makensis /DSC_VERSION_MAJOR=%PRODUCT_VERSION_MAJOR% /DSC_VERSION_MINOR=%PRODUCT_VERSION_MINOR% /DSC_VERSION_PATCH=%PRODUCT_VERSION_PATCH% /DSC_VERSION_BUILD=%PRODUCT_VERSION_BUILD% Windows\NSIS\supercan.nsi || exit /b !ERRORLEVEL!
+makensis /DSC_VERSION_MAJOR=!SC_VERSION_MAJOR! /DSC_VERSION_MINOR=!DSC_VERSION_MINOR! /DSC_VERSION_PATCH=!SC_VERSION_PATCH! /DSC_VERSION_BUILD=!SC_VERSION_BUILD! Windows\NSIS\supercan.nsi || exit /b !ERRORLEVEL!
 move Windows\NSIS\supercan_inst.exe .
