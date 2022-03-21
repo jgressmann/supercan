@@ -19,6 +19,12 @@ for /F "tokens=1,2,3,4 delims=." %%a in ("!VERSION_STR!") do (
     set SC_VERSION_BUILD=%%d
 )
 
+echo SC_VERSION_MAJOR=!SC_VERSION_MAJOR!
+echo SC_VERSION_MINOR=!SC_VERSION_MINOR!
+echo SC_VERSION_PATCH=!SC_VERSION_PATCH!
+echo SC_VERSION_BUILD=!SC_VERSION_BUILD!
+
+exit /b 0
 
 REM Store commit
 git rev-parse HEAD >COMMIT

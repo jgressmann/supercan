@@ -10,10 +10,6 @@ environment:
   SOLUTION: Windows\supercan.sln
   MSBUILD_OPTIONS: -noLogo -m -t:Build -p:Configuration=Release
   ResourcesExtraDefines: SC_BUILD_NUMBER=$(APPVEYOR_BUILD_NUMBER)
-  PRODUCT_VERSION_MAJOR: 1
-  PRODUCT_VERSION_MINOR: 0
-  PRODUCT_VERSION_PATCH: 1
-  PRODUCT_VERSION_BUILD: $(APPVEYOR_BUILD_NUMBER)
   VCVARS32: C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars32.bat
   VCVARS64: C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat
   QT_BASE_DIR32: C:\Qt\5.15.2\msvc2019
