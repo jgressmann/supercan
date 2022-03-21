@@ -14,19 +14,21 @@ if "%APPVEYOR_REPO_TAG%" EQU "true" (
 
 for /F "tokens=1,2,3,4 delims=." %%a in ("!VERSION_STR!") do (
     set SC_VERSION_MAJOR=%%a
-    set SC_VERSION_MINOR=%%b
+    set SC_VERSION_MIN=%%b
     set SC_VERSION_PATCH=%%c
     set SC_VERSION_BUILD=%%d
 )
 
+REM SC_VERSION_MINOR looses content for some reason
 echo SC_VERSION_MAJOR=!SC_VERSION_MAJOR!
-echo SC_VERSION_MINOR=!SC_VERSION_MINOR!
+echo SC_VERSION_MIN=!SC_VERSION_MIN!
 echo SC_VERSION_PATCH=!SC_VERSION_PATCH!
 echo SC_VERSION_BUILD=!SC_VERSION_BUILD!
 
-REM Protect NSIS arguments
-set NSIS_SC_VERION_ARGS=/DSC_VERSION_MAJOR=!SC_VERSION_MAJOR! /DSC_VERSION_MINOR=!DSC_VERSION_MINOR! /DSC_VERSION_PATCH=!SC_VERSION_PATCH! /DSC_VERSION_BUILD=!SC_VERSION_BUILD!
-
+REM NSIS vversion args
+set NSIS_SC_VERSION_ARGS=/DSC_VERSION_MAJOR=!SC_VERSION_MAJOR! /DSC_VERSION_MINOR=!SC_VERSION_MIN! /DSC_VERSION_PATCH=!SC_VERSION_PATCH! /DSC_VERSION_BUILD=!SC_VERSION_BUILD!
+echo !NSIS_SC_VERSION_ARGS!
+exit /b 0
 REM Store commit
 git rev-parse HEAD >COMMIT
 
@@ -73,5 +75,5 @@ xcopy /y /f Windows\Win32\Release\supercan_srv32.pdb pdb\x86\
 xcopy /y /f Windows\x64\Release\supercan_srv64.pdb pdb\x64\
 (7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src pdb LICENSE COMMIT) || exit /b !ERRORLEVEL!
 REM installer
-makensis !NSIS_SC_VERION_ARGS! Windows\NSIS\supercan.nsi || exit /b !ERRORLEVEL!
+makensis !NSIS_SC_VERSION_ARGS! Windows\NSIS\supercan.nsi || exit /b !ERRORLEVEL!
 move Windows\NSIS\supercan_inst.exe .
