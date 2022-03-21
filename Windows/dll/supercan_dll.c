@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1134,7 +1134,7 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
 {
     int error = SC_DLL_ERROR_NONE;
     DWORD dw = 0;
-    unsigned prev_index = (stream->tx_index + 1) & 0x1;
+    uint8_t prev_index = (stream->tx_index + 1) & 0x1;
 
     dw = WaitForSingleObject(stream->tx_ovs[prev_index].hEvent, INFINITE);
     if (WAIT_OBJECT_0 == dw) {
