@@ -18,12 +18,13 @@ install:
 # scripts to run before build
 before_build:
  - git submodule update --init --recursive Linux
- - cd Linux && git checkout pre-v5.13 && cd ..
+ #- cd Linux && git checkout pre-v5.13 && cd ..
 
 
 build_script:
   # - pwd
   # - find
+  - uname -a
   - export SUPERCAN_DIR=$(find "$APPVEYOR_BUILD_FOLDER/Linux" -type d -name 'supercan_usb-*' | head)
   # - /bin/echo "SUPERCAN_DIR: $SUPERCAN_DIR" # <-- does not work
   - env
