@@ -188,11 +188,11 @@ void process_rx(app_ctx* ac)
                     bool log = false;
                     bool irq_queue_full = status->flags & SC_CAN_STATUS_FLAG_IRQ_QUEUE_FULL;
                     bool desync = status->flags & SC_CAN_STATUS_FLAG_TXR_DESYNC;
-                    auto rx_lost = status->rx_lost;
+                    auto rx_lost2 = status->rx_lost;
                     auto tx_dropped = status->tx_dropped;
 
                     if (ac->log_on_change) {
-                        log = ac->usb_rx_lost != rx_lost ||
+                        log = ac->usb_rx_lost != rx_lost2 ||
                             ac->usb_tx_dropped != tx_dropped ||
                             irq_queue_full || desync;
                     }
@@ -200,11 +200,11 @@ void process_rx(app_ctx* ac)
                         log = true;
                     }
 
-                    ac->usb_rx_lost = rx_lost;
+                    ac->usb_rx_lost = rx_lost2;
                     ac->usb_tx_dropped = tx_dropped;
 
                     if (log) {
-                        fprintf(stdout, "CAN->USB rx lost=%u USB->CAN tx dropped=%u irqf=%u desync=%u\n", rx_lost, tx_dropped, irq_queue_full, desync);
+                        fprintf(stdout, "CAN->USB rx lost=%u USB->CAN tx dropped=%u irqf=%u desync=%u\n", rx_lost2, tx_dropped, irq_queue_full, desync);
                     }
                 }
             } break;
@@ -355,8 +355,8 @@ int run(app_ctx* ac)
     memset(&data_hw_constraints, 0, sizeof(data_hw_constraints));
 
     if (ac->config) {
-        unsigned long timeout_ms = 0;
-        hr = dev->AcquireConfigurationAccess(&config_access, &timeout_ms);
+        unsigned long access_timeout_ms = 0;
+        hr = dev->AcquireConfigurationAccess(&config_access, &access_timeout_ms);
         if (FAILED(hr)) {
             fprintf(stderr, "ERROR: failed acquire config access (hr=%lx)\n", hr);
             return map_hr_to_error(hr);
@@ -415,10 +415,10 @@ int run(app_ctx* ac)
             return SC_DLL_ERROR_UNKNOWN;
         }
 
-        params.brp = nominal_settings.brp;
-        params.sjw = nominal_settings.sjw;
-        params.tseg1 = nominal_settings.tseg1;
-        params.tseg2 = nominal_settings.tseg2;
+        params.brp = static_cast<unsigned short>(nominal_settings.brp);
+        params.sjw = static_cast<unsigned char>(nominal_settings.sjw);
+        params.tseg1 = static_cast<unsigned short>(nominal_settings.tseg1);
+        params.tseg2 = static_cast<unsigned char>(nominal_settings.tseg2);
         hr = dev->SetNominalBitTiming(params);
         if (FAILED(hr)) {
             fprintf(stderr, "ERROR: failed to set nominal bit timing (hr=%lx)\n", hr);
@@ -429,10 +429,10 @@ int run(app_ctx* ac)
         if (ac->fdf) {
             features |= SC_FEATURE_FLAG_FDF;
 
-            params.brp = data_settings.brp;
-            params.sjw = data_settings.sjw;
-            params.tseg1 = data_settings.tseg1;
-            params.tseg2 = data_settings.tseg2;
+            params.brp = static_cast<unsigned short>(data_settings.brp);
+            params.sjw = static_cast<unsigned char>(data_settings.sjw);
+            params.tseg1 = static_cast<unsigned short>(data_settings.tseg1);
+            params.tseg2 = static_cast<unsigned char>(data_settings.tseg2);
             hr = dev->SetDataBitTiming(params);
             if (FAILED(hr)) {
                 fprintf(stderr, "ERROR: failed to set data bit timing (hr=%lx)\n", hr);
@@ -540,8 +540,8 @@ int run(app_ctx* ac)
     }
 
     if (ac->config) {
-        unsigned long timeout_ms = 0;
-        hr = dev->AcquireConfigurationAccess(&config_access, &timeout_ms);
+        unsigned long access_timeout_ms = 0;
+        hr = dev->AcquireConfigurationAccess(&config_access, &access_timeout_ms);
         if (FAILED(hr)) {
             fprintf(stderr, "ERROR: failed acquire config access (hr=%lx)\n", hr);
             return map_hr_to_error(hr);

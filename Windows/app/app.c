@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2021 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2021-2022 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -59,7 +59,7 @@ void log_msg(
         }
     }
 
-    auto len = dlc_to_len(dlc);
+    uint8_t len = dlc_to_len(dlc);
 
     if (ctx->rx_has_xtd_frame) {
         fprintf(stdout, "%8X ", can_id);

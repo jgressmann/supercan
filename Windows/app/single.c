@@ -351,7 +351,7 @@ static int tx(struct app_ctx* ac, struct tx_job* job)
 
     for (int i = 0; i < 2; ++i) {
         size_t added = 0;
-        auto error = sc_can_stream_tx_batch_add(
+        int error = sc_can_stream_tx_batch_add(
             can_state->stream,
             &(uint8_t*)tx,
             &bytes,
@@ -401,7 +401,6 @@ int run_single(struct app_ctx* ac)
     struct can_bit_timing_hw_contraints nominal_hw_constraints, data_hw_constraints;
     struct sc_msg_dev_info dev_info;
     struct sc_msg_can_info can_info;
-    DWORD transferred = 0;
     char serial_str[1 + sizeof(dev_info.sn_bytes) * 2] = { 0 };
     char name_str[1 + sizeof(dev_info.name_bytes)] = { 0 };
 
@@ -409,7 +408,7 @@ int run_single(struct app_ctx* ac)
     memset(&cmd_ctx, 0, sizeof(cmd_ctx));
 
     for (size_t i = 0; i < _countof(can_state.available_track_id_buffer); ++i) {
-        can_state.available_track_id_buffer[i] = i;
+        can_state.available_track_id_buffer[i] = (uint8_t)i;
     }
 
     can_state.available_track_id_count = _countof(can_state.available_track_id_buffer);
@@ -609,10 +608,10 @@ int run_single(struct app_ctx* ac)
         memset(bt, 0, sizeof(*bt));
         bt->id = SC_MSG_NM_BITTIMING;
         bt->len = sizeof(*bt);
-        bt->brp = can_state.dev->dev_to_host16(nominal_settings.brp);
-        bt->sjw = nominal_settings.sjw;
-        bt->tseg1 = can_state.dev->dev_to_host16(nominal_settings.tseg1);
-        bt->tseg2 = nominal_settings.tseg2;
+        bt->brp = can_state.dev->dev_to_host16((uint16_t)nominal_settings.brp);
+        bt->sjw = (uint8_t)nominal_settings.sjw;
+        bt->tseg1 = can_state.dev->dev_to_host16((uint16_t)nominal_settings.tseg1);
+        bt->tseg2 = (uint8_t)nominal_settings.tseg2;
         cmd_tx_ptr += bt->len;
         ++cmd_count;
 
@@ -623,10 +622,10 @@ int run_single(struct app_ctx* ac)
             memset(bt, 0, sizeof(*bt));
             bt->id = SC_MSG_DT_BITTIMING;
             bt->len = sizeof(*bt);
-            bt->brp = can_state.dev->dev_to_host16(data_settings.brp);
-            bt->sjw = data_settings.sjw;
-            bt->tseg1 = can_state.dev->dev_to_host16(data_settings.tseg1);
-            bt->tseg2 = data_settings.tseg2;
+            bt->brp = can_state.dev->dev_to_host16((uint16_t)data_settings.brp);
+            bt->sjw = (uint8_t)data_settings.sjw;
+            bt->tseg1 = can_state.dev->dev_to_host16((uint16_t)data_settings.tseg1);
+            bt->tseg2 = (uint8_t)data_settings.tseg2;
             cmd_tx_ptr += bt->len;
             ++cmd_count;
         }
@@ -706,12 +705,12 @@ int run_single(struct app_ctx* ac)
                 if ((job->interval_ms >= 0 &&
                     (0 == job->last_tx_ts_ms || now - job->last_tx_ts_ms >= (unsigned)job->interval_ms)) ||
                     (job->interval_ms < 0 && job->count > 0)) {
-                    auto const count = job->count;
+                    const int job_count = job->count;
 
                     job->last_tx_ts_ms = now;
 
                     while (job->count > 0) {
-                        auto result = tx(ac, job);
+                        int result = tx(ac, job);
 
                         switch (result) {
                         case -1:
@@ -732,7 +731,7 @@ int run_single(struct app_ctx* ac)
 
                     if (job->interval_ms >= 0) {
                         // reload count
-                        job->count = count;
+                        job->count = job_count;
 
                         if (job->interval_ms >= 0 && (DWORD)job->interval_ms < timeout_ms) {
                             timeout_ms = job->interval_ms;

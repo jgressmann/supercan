@@ -157,7 +157,7 @@ static void parse_tx_job(struct tx_job* job, char* str)
             }
         }
         else if (0 == _stricmp(key, "len")) {
-            unsigned len = strtoul(value, NULL, 10);
+            uint8_t len = (uint8_t)strtoul(value, NULL, 10);
             job->dlc = len_to_dlc(len);
         }
         else if (0 == _stricmp(key, "dlc")) {
