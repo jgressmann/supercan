@@ -24,6 +24,9 @@ echo SC_VERSION_MINOR=!SC_VERSION_MINOR!
 echo SC_VERSION_PATCH=!SC_VERSION_PATCH!
 echo SC_VERSION_BUILD=!SC_VERSION_BUILD!
 
+REM Protect NSIS arguments
+set NSIS_SC_VERION_ARGS=/DSC_VERSION_MAJOR=!SC_VERSION_MAJOR! /DSC_VERSION_MINOR=!DSC_VERSION_MINOR! /DSC_VERSION_PATCH=!SC_VERSION_PATCH! /DSC_VERSION_BUILD=!SC_VERSION_BUILD!
+
 REM Store commit
 git rev-parse HEAD >COMMIT
 
@@ -70,5 +73,5 @@ xcopy /y /f Windows\Win32\Release\supercan_srv32.pdb pdb\x86\
 xcopy /y /f Windows\x64\Release\supercan_srv64.pdb pdb\x64\
 (7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src pdb LICENSE COMMIT) || exit /b !ERRORLEVEL!
 REM installer
-makensis /DSC_VERSION_MAJOR=!SC_VERSION_MAJOR! /DSC_VERSION_MINOR=!DSC_VERSION_MINOR! /DSC_VERSION_PATCH=!SC_VERSION_PATCH! /DSC_VERSION_BUILD=!SC_VERSION_BUILD! Windows\NSIS\supercan.nsi || exit /b !ERRORLEVEL!
+makensis !NSIS_SC_VERION_ARGS! Windows\NSIS\supercan.nsi || exit /b !ERRORLEVEL!
 move Windows\NSIS\supercan_inst.exe .
