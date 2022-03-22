@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -50,7 +50,7 @@ extern "C" {
 
 #define SC_DLL_VERSION_MAJOR 0
 #define SC_DLL_VERSION_MINOR 4
-#define SC_DLL_VERSION_PATCH 3
+#define SC_DLL_VERSION_PATCH 4
 
 
 
@@ -76,6 +76,13 @@ extern "C" {
 #define SC_DLL_ERROR_ACCESS_DENIED          19  ///< access denied
 #define SC_DLL_ERROR_INVALID_OPERATION      20  ///< operation not possible in current state
 
+typedef struct sc_version {
+    char const* commit;
+    uint16_t major;
+    uint16_t minor;
+    uint16_t patch;
+    uint16_t build;
+} sc_version_t;
 
 typedef uint16_t(*sc_dev_to_host16)(uint16_t value);
 typedef uint32_t(*sc_dev_to_host32)(uint32_t value);
@@ -88,6 +95,13 @@ typedef struct sc_dev {
     uint8_t cmd_epp;
     uint8_t can_epp;
 } sc_dev_t;
+
+
+/** Retrieve library version
+ *
+ * This function is thread-safe.
+ */
+SC_DLL_API void sc_version(sc_version_t *version);
 
 /** Initializes the library
  *

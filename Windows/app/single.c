@@ -396,6 +396,7 @@ int run_single(struct app_ctx* ac)
     int error = SC_DLL_ERROR_NONE;
     struct can_state can_state;
     uint32_t count = 0;
+    sc_version_t version;
     sc_cmd_ctx_t cmd_ctx;
     struct can_bit_timing_settings nominal_settings, data_settings;
     struct can_bit_timing_hw_contraints nominal_hw_constraints, data_hw_constraints;
@@ -406,6 +407,7 @@ int run_single(struct app_ctx* ac)
 
     memset(&can_state, 0, sizeof(can_state));
     memset(&cmd_ctx, 0, sizeof(cmd_ctx));
+    memset(&version, 0, sizeof(version));
 
     for (size_t i = 0; i < _countof(can_state.available_track_id_buffer); ++i) {
         can_state.available_track_id_buffer[i] = (uint8_t)i;
@@ -418,6 +420,10 @@ int run_single(struct app_ctx* ac)
     ac->priv = &can_state;
     
     sc_init();
+
+    sc_version(&version);
+
+    fprintf(stdout, "DLL version %u.%u.%u.%u, commit '%s'\n", version.major, version.minor, version.patch, version.build, version.commit);
 
     error = sc_dev_scan();
     if (error) {

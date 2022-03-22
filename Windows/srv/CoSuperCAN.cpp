@@ -1281,6 +1281,8 @@ DWORD ScDev::RxMain(void* self)
 
 void ScDev::RxMain()
 {
+	auto device_error_set = false;
+
 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
 	for (bool done = false; !done; ) {
@@ -1340,9 +1342,13 @@ void ScDev::RxMain()
 			}
 		} break;
 		default:
-			SetDeviceError(error);
+			if (!device_error_set) {
+				SetDeviceError(error);
+			}
+			
 			LOG_ERROR("sc_can_stream_rx failed: %s (%d)\n", sc_strerror(error), error);
-			done = true;
+
+			// Do continue to service requests, especially the ones that require acknowledge.
 			break;
 		}
 	}
@@ -1362,6 +1368,7 @@ void ScDev::TxMain()
 	sc_msg_can_tx* tx = reinterpret_cast<sc_msg_can_tx*>(aligned_sc_msg_can_tx_buffer);
 	sc_com_dev_index_t live_com_dev_buffer[MAX_COM_DEVICES_PER_SC_DEVICE];
 	sc_com_dev_index_t live_com_dev_count = 0;
+	auto has_error = false;
 
 	tx->id = SC_MSG_CAN_TX;
 
@@ -1436,7 +1443,12 @@ void ScDev::TxMain()
 
 			SetDeviceError(map_win_error(e));
 			LOG_ERROR("WaitForMultipleObjects failed: %lu (error=%lu)\n", r, e);
-			break;
+			has_error = true;
+		}
+
+		if (has_error) {
+			// Do continue to serice requests that require acknowledge.
+			goto service_end;
 		}
 
 		if (!batch_started) {
@@ -1444,7 +1456,8 @@ void ScDev::TxMain()
 
 			if (error) {
 				SetDeviceError(error);
-				return;
+				has_error = true;
+				goto service_end;
 			}
 
 			batch_started = true;
@@ -1545,13 +1558,15 @@ void ScDev::TxMain()
 								if (error) {
 									LOG_ERROR("sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
 									SetDeviceError(error);
-									return;
+									has_error = true;
+									goto service_end;
 								}
 
 								error = sc_can_stream_tx_batch_begin(m_Stream);
 								if (error) {
 									LOG_ERROR("sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
-									return;
+									has_error = true;
+									goto service_end;
 								}
 							}
 
@@ -1571,7 +1586,8 @@ void ScDev::TxMain()
 						}
 						else {
 							SetDeviceError(map_win_error(GetLastError()));
-							return;
+							has_error = true;
+							goto service_end;
 						}
 					}
 					else {
@@ -1599,11 +1615,15 @@ void ScDev::TxMain()
 			if (error) {
 				LOG_ERROR("sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
 				SetDeviceError(error);
-				return;
+				has_error = true;
+				goto service_end;
 			}
 
 			batch_started = false;
 		}
+
+service_end:
+		;
 	}
 }
 

@@ -53,11 +53,26 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 #include <supercan_winapi.h>
 #include <stdio.h>
 
+#include "commit.h"
 
 // I am going to assume Windows on ARM is little endian
 #define NATIVE_BYTE_ORDER SC_BYTE_ORDER_LE
 #define SC_CAN_STREAM_MAX_RX_WAIT_HANDLES 64
 #define SC_CAN_STREAM_DEFAULT_RX_WAIT_HANDLES 32
+
+#define LOG2(prefix, ...) \
+	do { \
+		char buf[256] = {0}; \
+		_snprintf_s(buf, sizeof(buf), _TRUNCATE, prefix __VA_ARGS__); \
+		OutputDebugStringA(buf); \
+	} while (0)
+
+#define LOG_DEBUG(...) LOG2("DEBUG: ", __VA_ARGS__)
+#define LOG_INFO(...) LOG2("INFO: ", __VA_ARGS__)
+#define LOG_WARN(...) LOG2("WARN: ", __VA_ARGS__)
+#define LOG_ERROR(...) LOG2("ERROR: ", __VA_ARGS__)
+
+#define SC_DLL_VERSION_BUILD 0
 
 static struct sc_data {
     wchar_t *dev_list;
@@ -134,6 +149,7 @@ static inline int HrToError(HRESULT hr)
         return SC_DLL_ERROR_NONE;
     }
 
+    LOG_ERROR("HR: %08x\n", hr);
 
     switch (hr) {
     case E_OUTOFMEMORY:
@@ -148,6 +164,15 @@ static inline int HrToError(HRESULT hr)
     default:
         return SC_DLL_ERROR_UNKNOWN;
     }
+}
+
+SC_DLL_API void sc_version(sc_version_t* version)
+{
+    version->major = SC_DLL_VERSION_MAJOR;
+    version->minor = SC_DLL_VERSION_MINOR;
+    version->patch = SC_DLL_VERSION_PATCH;
+    version->build = SC_DLL_VERSION_BUILD;
+    version->commit = SC_COMMIT;
 }
 
 

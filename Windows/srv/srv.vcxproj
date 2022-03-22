@@ -106,7 +106,7 @@
       <SDLCheck>true</SDLCheck>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalIncludeDirectories>../inc;../../src</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../inc;../../src;$(IntDir)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Midl>
@@ -148,7 +148,7 @@
       <SDLCheck>true</SDLCheck>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalIncludeDirectories>../inc;../../src</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../inc;../../src;$(IntDir)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Midl>
@@ -191,7 +191,7 @@
       <SDLCheck>true</SDLCheck>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalIncludeDirectories>../inc;../../src</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../inc;../../src;$(IntDir)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Midl>
@@ -229,7 +229,7 @@
       <SDLCheck>true</SDLCheck>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalIncludeDirectories>../inc;../../src</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../inc;../../src;$(IntDir)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Midl>
