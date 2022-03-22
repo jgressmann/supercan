@@ -500,7 +500,7 @@ int main(int argc, char** argv)
             ++i;
         }
         else if (0 == strcmp("--candump", argv[i])) {
-            ac.candump = true;;
+            ac.candump = true;
             ++i;
         }
         else if (0 == strcmp("--config", argv[i])) {
