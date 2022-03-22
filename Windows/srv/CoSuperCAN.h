@@ -49,13 +49,12 @@ public:
 	CSuperCAN();
 
 public:
+	STDMETHOD(GetVersion)(SuperCANVersion* version);
 	STDMETHOD(DeviceScan)(unsigned long* count);
 	STDMETHOD(DeviceGetCount)(unsigned long* count);
 	STDMETHOD(DeviceOpen)(
 		unsigned long index, 
 		ISuperCANDevice** dev);
-
-	STDMETHOD(GetVersion)(SuperCANVersion* version);
 
 private:
 	ISuperCAN* m_Instance;

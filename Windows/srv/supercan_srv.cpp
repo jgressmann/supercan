@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@ class CSuperCANSrvModule : public ATL::CAtlExeModuleT< CSuperCANSrvModule >
 {
 public :
 	DECLARE_LIBID(LIBID_SuperCAN)
-	DECLARE_REGISTRY_APPID_RESOURCEID(IDR_SUPERCANSRV, "{fd71338b-9533-4785-8c2f-664ece4bebee}")
+	DECLARE_REGISTRY_APPID_RESOURCEID(IDR_SUPERCANSRV, "{945BB09D-DA86-4183-9C9A-D85220638156}")
 };
 
 

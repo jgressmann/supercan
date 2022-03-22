@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,9 +28,9 @@ import "oaidl.idl";
 import "ocidl.idl";
 
 [
-	uuid(fd71338b-9533-4785-8c2f-664ece4bebee),
-	version(1.1),
-	helpstring("SuperCAN 1.1 Type Library"),
+	uuid(945BB09D-DA86-4183-9C9A-D85220638156),
+	version(1.0),
+	helpstring("SuperCAN 1.0 Type Library"),
 ]
 library SuperCAN
 {
@@ -118,7 +118,7 @@ library SuperCAN
 
 
 	[
-		uuid(E6214AB1-56AD-4215-8688-095D3816F260),
+		uuid(9D73516D-E9AB-4BF0-B931-07F012EF5AB4),
 		helpstring("SuperCAN class"),
 	]
 	coclass CSuperCAN
