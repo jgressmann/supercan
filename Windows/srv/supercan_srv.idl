@@ -29,8 +29,8 @@ import "ocidl.idl";
 
 [
 	uuid(fd71338b-9533-4785-8c2f-664ece4bebee),
-	version(1.0),
-	helpstring("SuperCAN 1.0 Type Library"),
+	version(1.1),
+	helpstring("SuperCAN 1.1 Type Library"),
 ]
 library SuperCAN
 {
@@ -64,6 +64,15 @@ library SuperCAN
 		byte fw_ver_patch;
 		byte sn_bytes[16];
 		byte sn_length;
+	};
+
+	struct SuperCANVersion
+	{
+		BSTR commit;
+		unsigned short major;
+		unsigned short minor;
+		unsigned short patch;
+		unsigned short build;
 	};
 
 	[
@@ -103,6 +112,8 @@ library SuperCAN
 		HRESULT DeviceOpen(
 			[in] unsigned long index, 
 			[out] ISuperCANDevice** dev);
+
+		HRESULT GetVersion(struct SuperCANVersion* version);
 	};
 
 

@@ -632,6 +632,7 @@ extern "C" int run_shared(struct app_ctx* ac)
 {
     com_dev_ctx com_ctx;
     SuperCANRingBufferMapping rx_mm_data, tx_mm_data;
+    SuperCANVersion version;
     
     int error = SC_DLL_ERROR_NONE;
     wchar_t serial_str[1 + sizeof(com_ctx.dev_data.sn_bytes) * 2] = { 0 };
@@ -639,11 +640,14 @@ extern "C" int run_shared(struct app_ctx* ac)
     memset(&com_ctx, 0, sizeof(com_ctx));
     memset(&rx_mm_data, 0, sizeof(rx_mm_data));
     memset(&tx_mm_data, 0, sizeof(tx_mm_data));
+    memset(&version, 0, sizeof(version));
     
     ac->priv = &com_ctx;
 
     try {
+        bstr_t com_string;
         HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+
         if (FAILED(hr)) {
             fprintf(stderr, "ERROR: failed to initialze COM (hr=%lx)\n", hr);
             return map_hr_to_error(hr);
@@ -657,6 +661,17 @@ extern "C" int run_shared(struct app_ctx* ac)
             fprintf(stderr, "ERROR: failed to created instance of SuperCAN (hr=%lx)\n", hr);
             return map_hr_to_error(hr);
         }
+
+        hr = sc->GetVersion(&version);
+        if (FAILED(hr)) {
+            fprintf(stderr, "ERROR: failed to get version (hr=%lx)\n", hr);
+            return map_hr_to_error(hr);
+        }
+
+        com_string.Attach(version.commit);
+        version.commit = nullptr;
+
+        fprintf(stdout, "COM server version %u.%u.%u.%u, commit '%s'\n", version.major, version.minor, version.patch, version.build, (const char*)com_string);
 
         unsigned long dev_count = 0;
         hr = sc->DeviceScan(&dev_count);

@@ -27,13 +27,13 @@
 #include "pch.h"
 
 #include "CoSuperCAN.h"
+#include "commit.h"
 
 
 #include "../inc/supercan_dll.h"
 #include "../inc/supercan_winapi.h"
 #include "../inc/supercan_srv.h"
 #include "../src/supercan_misc.h"
-
 
 
 #ifdef min
@@ -312,6 +312,7 @@ public:
 	STDMETHOD(DeviceOpen)(
 		unsigned long index, 
 		ISuperCANDevice** dev);
+	STDMETHOD(GetVersion)(SuperCANVersion* version);
 
 private:
 	std::vector<ScDevPtr> m_Devices;
@@ -2037,6 +2038,16 @@ STDMETHODIMP XSuperCAN::DeviceOpen(
 	return S_OK;
 }
 
+STDMETHODIMP XSuperCAN::GetVersion(SuperCANVersion* version)
+{
+	version->major = SC_SRV_VERSION_MAJOR;
+	version->minor = SC_SRV_VERSION_MINOR;
+	version->patch = SC_SRV_VERSION_PATCH;
+	version->build = 0;
+	version->commit = SysAllocString(_T(SC_COMMIT));
+
+	return S_OK;
+}
 
 } // anon
 
@@ -2107,4 +2118,13 @@ STDMETHODIMP CSuperCAN::DeviceOpen(
 	}
 
 	return m_Instance->DeviceOpen(index, dev);
+}
+
+STDMETHODIMP CSuperCAN::GetVersion(SuperCANVersion* version)
+{
+	if (!m_Instance) {
+		return E_OUTOFMEMORY;
+	}
+
+	return m_Instance->GetVersion(version);
 }
