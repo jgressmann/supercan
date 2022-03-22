@@ -31,9 +31,16 @@
 #include "supercansrv_i.h"
 
 
+/* Lock in ATL / COM context means reference count, NOT 
+ * thread-safety.
+ * 
+ * Because we define _ATL_FREE_THREADED, ATL::CComObjectRoot 
+ * uses the multi-threaded base which provides thread-safe 
+ * reference counting.
+ */
+
 class ATL_NO_VTABLE CSuperCAN :
-    //public ATL::CComObjectRootEx<ATL::CComSingleThreadModel>,
-	public ATL::CComObjectRoot, // doesn't matter, uses module lock
+	public ATL::CComObjectRoot, // see above comment
     public ATL::CComCoClass<CSuperCAN, &CLSID_CSuperCAN>,
     public ISuperCAN
 {

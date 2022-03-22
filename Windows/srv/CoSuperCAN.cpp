@@ -257,7 +257,7 @@ using ScDevPtr = std::shared_ptr<ScDev>;
 
 
 class ATL_NO_VTABLE XSuperCANDevice :
-	public ATL::CComObjectRootEx<ATL::CComMultiThreadModel>, // need lock for ScDev
+	public ATL::CComObjectRoot, // need lock for ScDev
 	public ISuperCANDevice
 {
 public:
@@ -1644,8 +1644,25 @@ void ScDev::SetDeviceError(int error)
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
-ATL::CComObject<XSuperCAN>* s_Instance;
+void DestroyInstanceLock();
+ATL::CComObject<XSuperCAN>* CreateInstanceLock();
 
+CRITICAL_SECTION s_Lock;
+ATL::CComObject<XSuperCAN>* s_Instance = CreateInstanceLock();
+
+ATL::CComObject<XSuperCAN>* CreateInstanceLock()
+{
+	InitializeCriticalSection(&s_Lock);
+
+	std::atexit(DestroyInstanceLock);
+
+	return nullptr;
+}
+
+void DestroyInstanceLock()
+{
+	DeleteCriticalSection(&s_Lock);
+}
 
 XSuperCANDevice::~XSuperCANDevice()
 {
@@ -2057,10 +2074,10 @@ STDMETHODIMP XSuperCAN::GetVersion(SuperCANVersion* version)
 ///////////////////////////////////////////////////////////////////////////////
 
 
-
 CSuperCAN::~CSuperCAN()
 {
-	ATL::ModuleLockHelper g;
+	// ATL::ModuleLockHelper locks the module (prevents unloaded, not a thread-safety measure)
+	Guard g(s_Lock);
 
 	if (m_Instance) {
 		if (0 == m_Instance->Release()) {
@@ -2074,7 +2091,7 @@ CSuperCAN::~CSuperCAN()
 CSuperCAN::CSuperCAN()
 : m_Instance(nullptr)
 {
-	ATL::ModuleLockHelper g;
+	Guard g(s_Lock);
 
 	if (nullptr == s_Instance) {
 		ATL::CComObject<XSuperCAN>* instance = nullptr;
