@@ -101,7 +101,7 @@ library SuperCAN
 
 	[
 		object, // The [object] interface attribute identifies a COM interface. else DCE RPC
-		uuid(8F8C4375-2DFE-4335-8947-036F965BD927),
+		uuid(A1FD436A-2EF9-4066-8093-28100133428D),
 		pointer_default(unique),
 		oleautomation, // either this or 'dual' are required for COM
 	]
