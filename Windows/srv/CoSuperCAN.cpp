@@ -192,7 +192,8 @@ private:
 	void ComDeviceRemovedTx(sc_com_dev_index_t index);
 	void ComDeviceRemovedRx(sc_com_dev_index_t index);
 	void Notify(uint8_t code, uint8_t value);
-
+	void ProcessRxNotification(bool* done);
+	
 
 private:
 	struct com_device_mm_data_private {
@@ -1282,76 +1283,88 @@ DWORD ScDev::RxMain(void* self)
 
 void ScDev::RxMain()
 {
-	auto device_error_set = false;
+	auto stream_error = false;
 
 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
 	for (bool done = false; !done; ) {
-		auto error = sc_can_stream_rx(m_Stream, INFINITE);
-
-		switch (error) {
-		case SC_DLL_ERROR_TIMEOUT:
-		case SC_DLL_ERROR_NONE:
-			break;
-		case SC_DLL_ERROR_USER_HANDLE_SIGNALED: {
-			auto const code = m_RxThreadNotificationCode.exchange(NOTIFICATION_NONE);
-			auto const value = m_RxThreadNotificationValue.load(std::memory_order_consume);
-
-			switch (code) {
-			case NOTIFICATION_SHUTDOWN:
-				done = true;
-				break;
-			case NOTIFICATION_SET:
-				for (sc_com_dev_index_t i = 0; i < MAX_COM_DEVICES_PER_SC_DEVICE; ++i) {
-					if (value & (sc_com_dev_index_t(1) << i)) {
-						m_RxThreadLiveComDevBuffer[m_RxThreadLiveComDevCount++] = i;
-					}
-				}
-
-				ReleaseSemaphore(m_ThreadNotificationAcknowledgeCount, 1, NULL);
-				break;
-			case NOTIFICATION_ADD:
-				m_RxThreadLiveComDevBuffer[m_RxThreadLiveComDevCount++] = static_cast<sc_com_dev_index_t>(value);
-				ReleaseSemaphore(m_ThreadNotificationAcknowledgeCount, 1, NULL);
-				break;
-			case NOTIFICATION_REMOVE: {
-				ComDeviceRemovedRx(static_cast<sc_com_dev_index_t>(value));
-
-				for (sc_com_dev_index_t i = 0; i < m_RxThreadLiveComDevCount; ++i) {
-					if (value == m_RxThreadLiveComDevBuffer[i]) {
-						m_RxThreadLiveComDevBuffer[i] = m_RxThreadLiveComDevBuffer[--m_RxThreadLiveComDevCount];
-						break;
-					}
-				}
-
-				// free any outstanding track ids occupied by the past COM dev
-				for (size_t i = 0; i < _countof(m_TxrMap); ++i) {
-					auto const com_dev_index = m_TxrMap[i].index.load(std::memory_order_acquire);
-
-					if (value == com_dev_index) {
-						m_TxrMap[i].index.store(MAX_COM_DEVICES_PER_SC_DEVICE, std::memory_order_release);
-						ReleaseSemaphore(m_TxFifoAvailable, 1, nullptr);
-					}
-				}
-
-				ReleaseSemaphore(m_ThreadNotificationAcknowledgeCount, 1, nullptr);
-			} break;
-			case NOTIFICATION_NONE:
-				// for manual reset event this could be active a bit
-				Sleep(0); // yield
-				break;
-			}
-		} break;
-		default:
-			if (!device_error_set) {
-				SetDeviceError(error);
-			}
-			
-			LOG_ERROR("sc_can_stream_rx failed: %s (%d)\n", sc_strerror(error), error);
-
+		if (stream_error) {
 			// Do continue to service requests, especially the ones that require acknowledge.
-			break;
+			ProcessRxNotification(&done);
 		}
+		else {
+			auto error = sc_can_stream_rx(m_Stream, INFINITE);
+
+			switch (error) {
+			case SC_DLL_ERROR_TIMEOUT:
+			case SC_DLL_ERROR_NONE:
+				break;
+			case SC_DLL_ERROR_USER_HANDLE_SIGNALED:
+				ProcessRxNotification(&done);
+				break;
+			default:
+				SetDeviceError(error);
+				LOG_ERROR("sc_can_stream_rx failed: %s (%d)\n", sc_strerror(error), error);
+				stream_error = true;
+				break;
+			}
+		}
+	}
+}
+
+void ScDev::ProcessRxNotification(bool *done)
+{
+	uint8_t code = 0;
+	uint8_t value = 0;
+
+	ATLASSERT(done);
+
+	code = m_RxThreadNotificationCode.exchange(NOTIFICATION_NONE);
+	value = m_RxThreadNotificationValue.load(std::memory_order_consume);
+
+	switch (code) {
+	case NOTIFICATION_SHUTDOWN:
+		*done = true;
+		break;
+	case NOTIFICATION_SET:
+		for (sc_com_dev_index_t i = 0; i < MAX_COM_DEVICES_PER_SC_DEVICE; ++i) {
+			if (value & (sc_com_dev_index_t(1) << i)) {
+				m_RxThreadLiveComDevBuffer[m_RxThreadLiveComDevCount++] = i;
+			}
+		}
+
+		ReleaseSemaphore(m_ThreadNotificationAcknowledgeCount, 1, NULL);
+		break;
+	case NOTIFICATION_ADD:
+		m_RxThreadLiveComDevBuffer[m_RxThreadLiveComDevCount++] = static_cast<sc_com_dev_index_t>(value);
+		ReleaseSemaphore(m_ThreadNotificationAcknowledgeCount, 1, nullptr);
+		break;
+	case NOTIFICATION_REMOVE: {
+		ComDeviceRemovedRx(static_cast<sc_com_dev_index_t>(value));
+
+		for (sc_com_dev_index_t i = 0; i < m_RxThreadLiveComDevCount; ++i) {
+			if (value == m_RxThreadLiveComDevBuffer[i]) {
+				m_RxThreadLiveComDevBuffer[i] = m_RxThreadLiveComDevBuffer[--m_RxThreadLiveComDevCount];
+				break;
+			}
+		}
+
+		// free any outstanding track ids occupied by the past COM dev
+		for (size_t i = 0; i < _countof(m_TxrMap); ++i) {
+			auto const com_dev_index = m_TxrMap[i].index.load(std::memory_order_acquire);
+
+			if (value == com_dev_index) {
+				m_TxrMap[i].index.store(MAX_COM_DEVICES_PER_SC_DEVICE, std::memory_order_release);
+				ReleaseSemaphore(m_TxFifoAvailable, 1, nullptr);
+			}
+		}
+
+		ReleaseSemaphore(m_ThreadNotificationAcknowledgeCount, 1, nullptr);
+	} break;
+	case NOTIFICATION_NONE:
+		// for manual reset event this could be active a bit
+		Sleep(0); // yield
+		break;
 	}
 }
 
@@ -1369,7 +1382,7 @@ void ScDev::TxMain()
 	sc_msg_can_tx* tx = reinterpret_cast<sc_msg_can_tx*>(aligned_sc_msg_can_tx_buffer);
 	sc_com_dev_index_t live_com_dev_buffer[MAX_COM_DEVICES_PER_SC_DEVICE];
 	sc_com_dev_index_t live_com_dev_count = 0;
-	auto has_error = false;
+	auto stream_error = false;
 
 	tx->id = SC_MSG_CAN_TX;
 
@@ -1444,10 +1457,10 @@ void ScDev::TxMain()
 
 			SetDeviceError(map_win_error(e));
 			LOG_ERROR("WaitForMultipleObjects failed: %lu (error=%lu)\n", r, e);
-			has_error = true;
+			stream_error = true;
 		}
 
-		if (has_error) {
+		if (stream_error) {
 			// Do continue to serice requests that require acknowledge.
 			goto service_end;
 		}
@@ -1457,7 +1470,7 @@ void ScDev::TxMain()
 
 			if (error) {
 				SetDeviceError(error);
-				has_error = true;
+				stream_error = true;
 				goto service_end;
 			}
 
@@ -1559,14 +1572,14 @@ void ScDev::TxMain()
 								if (error) {
 									LOG_ERROR("sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
 									SetDeviceError(error);
-									has_error = true;
+									stream_error = true;
 									goto service_end;
 								}
 
 								error = sc_can_stream_tx_batch_begin(m_Stream);
 								if (error) {
 									LOG_ERROR("sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
-									has_error = true;
+									stream_error = true;
 									goto service_end;
 								}
 							}
@@ -1587,7 +1600,7 @@ void ScDev::TxMain()
 						}
 						else {
 							SetDeviceError(map_win_error(GetLastError()));
-							has_error = true;
+							stream_error = true;
 							goto service_end;
 						}
 					}
@@ -1616,7 +1629,7 @@ void ScDev::TxMain()
 			if (error) {
 				LOG_ERROR("sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
 				SetDeviceError(error);
-				has_error = true;
+				stream_error = true;
 				goto service_end;
 			}
 
