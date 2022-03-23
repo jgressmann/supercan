@@ -65,10 +65,10 @@ OBJECT_ENTRY_AUTO(CLSID_CSuperCAN, CSuperCAN)
 		OutputDebugStringA(buf); \
 	} while (0)
 
-#define LOG_DEBUG(...) LOG2("DEBUG: ", __VA_ARGS__)
-#define LOG_INFO(...) LOG2("INFO: ", __VA_ARGS__)
-#define LOG_WARN(...) LOG2("WARN: ", __VA_ARGS__)
-#define LOG_ERROR(...) LOG2("ERROR: ", __VA_ARGS__)
+#define LOG_DEBUG(...) LOG2("SC SRV DEBUG: ", __VA_ARGS__)
+#define LOG_INFO(...) LOG2("SC SRV INFO: ", __VA_ARGS__)
+#define LOG_WARN(...) LOG2("SC SRV WARN: ", __VA_ARGS__)
+#define LOG_ERROR(...) LOG2("SC SRV ERROR: ", __VA_ARGS__)
 
 namespace
 {

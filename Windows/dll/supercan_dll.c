@@ -67,10 +67,10 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 		OutputDebugStringA(buf); \
 	} while (0)
 
-#define LOG_DEBUG(...) LOG2("DEBUG: ", __VA_ARGS__)
-#define LOG_INFO(...) LOG2("INFO: ", __VA_ARGS__)
-#define LOG_WARN(...) LOG2("WARN: ", __VA_ARGS__)
-#define LOG_ERROR(...) LOG2("ERROR: ", __VA_ARGS__)
+#define LOG_DEBUG(...) LOG2("SC DLL DEBUG: ", __VA_ARGS__)
+#define LOG_INFO(...) LOG2("SC DLL INFO: ", __VA_ARGS__)
+#define LOG_WARN(...) LOG2("SC DLL WARN: ", __VA_ARGS__)
+#define LOG_ERROR(...) LOG2("SC DLL ERROR: ", __VA_ARGS__)
 
 #define SC_DLL_VERSION_BUILD 0
 #define SC_CMD_TIMEOUT_MS 3000
