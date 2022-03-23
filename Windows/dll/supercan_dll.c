@@ -1125,18 +1125,28 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
     }
 
     uint8_t index = stream->rx_next;
-    HANDLE wait_handles[2] = { stream->rx_ovs[index].hEvent, stream->exposed.user_handle };
+    HANDLE const wait_handles[] = {
+        /* Put user handle first, so wait returns it when set.
+         * Otherwise, we'd have to explicitly poll the handle on each 
+         * successful wait.
+         */
+        stream->exposed.user_handle,
+        stream->rx_ovs[index].hEvent, 
+    };
     DWORD wait_count = 1 + (stream->exposed.user_handle != NULL);
         
     DWORD result = WaitForMultipleObjects(wait_count, wait_handles, FALSE, timeout_ms);
 
     if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + wait_count) {
+        int user_error = SC_DLL_ERROR_NONE;
+        DWORD transferred = 0;
         DWORD handle_index = result - WAIT_OBJECT_0;
-        if (1 == handle_index) {
+        HANDLE handle = wait_handles[handle_index];
+
+        if (stream->exposed.user_handle == handle) {
             return SC_DLL_ERROR_USER_HANDLE_SIGNALED;
         }
-
-        DWORD transferred = 0;
+        
         if (!WinUsb_GetOverlappedResult(
             stream->dev->usb_handle,
             &stream->rx_ovs[index],
@@ -1148,8 +1158,7 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
             stream->error = error;
             return error;
         }
-
-        int user_error = SC_DLL_ERROR_NONE;
+        
         if (transferred) {
             PUCHAR ptr = stream->rx_buffers + stream->buffer_size * index;
 
