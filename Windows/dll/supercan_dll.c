@@ -73,8 +73,8 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 #define LOG_ERROR(...) LOG2("ERROR: ", __VA_ARGS__)
 
 #define SC_DLL_VERSION_BUILD 0
-#define SC_CMD_TIMEOUT_MS 1000
-#define SC_STREAM_TIMEOUT_MS 3000
+#define SC_CMD_TIMEOUT_MS 3000
+#define SC_STREAM_TIMEOUT_MS 5000
 
 static struct sc_data {
     wchar_t *dev_list;
