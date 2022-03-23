@@ -1126,14 +1126,10 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
 
     uint8_t index = stream->rx_next;
     HANDLE const wait_handles[] = {
-        /* Put user handle first, so wait returns it when set.
-         * Otherwise, we'd have to explicitly poll the handle on each 
-         * successful wait.
-         */
-        stream->exposed.user_handle,
         stream->rx_ovs[index].hEvent, 
+        stream->exposed.user_handle
     };
-    DWORD wait_count = 1 + (stream->exposed.user_handle != NULL);
+    DWORD const wait_count = 1 + (stream->exposed.user_handle != NULL);
         
     DWORD result = WaitForMultipleObjects(wait_count, wait_handles, FALSE, timeout_ms);
 
@@ -1141,9 +1137,9 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
         int user_error = SC_DLL_ERROR_NONE;
         DWORD transferred = 0;
         DWORD handle_index = result - WAIT_OBJECT_0;
-        HANDLE handle = wait_handles[handle_index];
 
-        if (stream->exposed.user_handle == handle) {
+        if (1 == handle_index || 
+            (stream->exposed.user_handle && WaitForSingleObject(stream->exposed.user_handle, 0) == WAIT_OBJECT_0)) {
             return SC_DLL_ERROR_USER_HANDLE_SIGNALED;
         }
         
