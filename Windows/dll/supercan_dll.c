@@ -1114,7 +1114,7 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
 {
     struct sc_stream* stream = (struct sc_stream*)_stream;
     int error = SC_DLL_ERROR_NONE;
-    
+    DWORD dw = 0;
 
     if (!stream) {
         return SC_DLL_ERROR_INVALID_PARAM;
@@ -1124,24 +1124,37 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
         return stream->error;
     }
 
-    uint8_t index = stream->rx_next;
-    HANDLE const wait_handles[] = {
-        stream->rx_ovs[index].hEvent, 
-        stream->exposed.user_handle
-    };
-    DWORD const wait_count = 1 + (stream->exposed.user_handle != NULL);
-        
-    DWORD result = WaitForMultipleObjects(wait_count, wait_handles, FALSE, timeout_ms);
+    uint8_t const index = stream->rx_next;
 
-    if (result >= WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + wait_count) {
+    if (stream->exposed.user_handle) {
+        HANDLE const wait_handles[] = {
+            stream->exposed.user_handle,
+            stream->rx_ovs[index].hEvent
+        };
+        DWORD const wait_count = _countof(wait_handles);
+
+        dw = WaitForMultipleObjects(wait_count, wait_handles, FALSE, timeout_ms);
+
+        switch (dw) {
+        case WAIT_OBJECT_0:
+            return SC_DLL_ERROR_USER_HANDLE_SIGNALED;
+        case WAIT_OBJECT_0 + 1:
+            /* Looks like we actually need to check this, sigh */
+            if (WaitForSingleObject(stream->exposed.user_handle, 0) == WAIT_OBJECT_0) {
+                return SC_DLL_ERROR_USER_HANDLE_SIGNALED;
+            }
+
+            dw = WAIT_OBJECT_0;
+            break;
+        }
+    }
+    else {
+        dw = WaitForSingleObject(stream->rx_ovs[index].hEvent, timeout_ms);
+    }
+   
+    if (WAIT_OBJECT_0 == dw) {
         int user_error = SC_DLL_ERROR_NONE;
         DWORD transferred = 0;
-        DWORD handle_index = result - WAIT_OBJECT_0;
-
-        if (1 == handle_index || 
-            (stream->exposed.user_handle && WaitForSingleObject(stream->exposed.user_handle, 0) == WAIT_OBJECT_0)) {
-            return SC_DLL_ERROR_USER_HANDLE_SIGNALED;
-        }
         
         if (!WinUsb_GetOverlappedResult(
             stream->dev->usb_handle,
@@ -1172,7 +1185,7 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
             return user_error;
         }
     }
-    else if (WAIT_TIMEOUT == result) {
+    else if (WAIT_TIMEOUT == dw) {
         // nothing to do
         return SC_DLL_ERROR_TIMEOUT;
     }
