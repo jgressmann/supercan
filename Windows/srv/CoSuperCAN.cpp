@@ -869,7 +869,7 @@ int ScDev::Init(std::wstring&& name)
 		goto error_exit;
 	}
 
-	
+	error = sc_dev_open_by_id(m_Name.c_str(), &m_Device);
 	if (error) {
 		goto error_exit;
 	}
