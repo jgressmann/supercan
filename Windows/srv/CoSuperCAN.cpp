@@ -193,6 +193,7 @@ private:
 	void ComDeviceRemovedRx(sc_com_dev_index_t index);
 	void Notify(uint8_t code, uint8_t value);
 	void ProcessRxNotification(bool* done);
+	void ResetTxrMap();
 	
 
 private:
@@ -392,10 +393,17 @@ ScDev::ScDev()
 	ZeroMemory(&m_TimeTracker, sizeof(m_TimeTracker));
 	m_Mapped = false;
 	ZeroMemory(m_TxEchoMap, sizeof(m_TxEchoMap));
-	ZeroMemory(m_TxrMap, sizeof(m_TxrMap));
 	m_RxThreadLiveComDevCount = 0;
 	ZeroMemory(m_RxThreadLiveComDevBuffer, sizeof(m_RxThreadLiveComDevBuffer));
+	ResetTxrMap();
 
+}
+
+void ScDev::ResetTxrMap()
+{
+	for (size_t i = 0; i < _countof(m_TxrMap); ++i) {
+		m_TxrMap[i].index.store(MAX_COM_DEVICES_PER_SC_DEVICE, std::memory_order_relaxed);
+	}
 }
 
 bool ScDev::VerifyConfigurationAccess(sc_com_dev_index_t index) const
@@ -862,11 +870,6 @@ int ScDev::Init(std::wstring&& name)
 	}
 
 	
-	for (size_t i = 0; i < _countof(m_TxrMap); ++i) {
-		m_TxrMap[i].index.store(MAX_COM_DEVICES_PER_SC_DEVICE, std::memory_order_relaxed);
-	}
-
-	error = sc_dev_open_by_id(m_Name.c_str(), &m_Device);
 	if (error) {
 		goto error_exit;
 	}
@@ -1018,9 +1021,7 @@ void ScDev::SetBusOff()
 
 	memset(&m_TimeTracker, 0, sizeof(m_TimeTracker));
 
-	for (size_t i = 0; i < _countof(m_TxrMap); ++i) {
-		m_TxrMap[i].index.store(MAX_COM_DEVICES_PER_SC_DEVICE, std::memory_order_relaxed);
-	}
+	ResetTxrMap();
 
 	if (m_Mapped) {
 		for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
@@ -1031,8 +1032,6 @@ void ScDev::SetBusOff()
 		}
 	}
 
-	m_RxThreadNotificationCode.store(NOTIFICATION_NONE, std::memory_order_relaxed);
-	m_TxThreadNotificationCode.store(NOTIFICATION_NONE, std::memory_order_relaxed);
 	m_RxThreadLiveComDevCount = 0;
 }
 
@@ -1081,6 +1080,7 @@ int ScDev::SetBusOn()
 
 	m_Stream->user_handle = m_RxThreadNotificationEvent;
 
+	// CreateSemaphoreW fails if max count <= 0, https://docs.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createsemaphorew
 	m_TxFifoAvailable = CreateSemaphoreW(nullptr, can_info.tx_fifo_size, can_info.tx_fifo_size, nullptr);
 	if (!m_TxFifoAvailable) {
 		error = SC_DLL_ERROR_OUT_OF_MEM;
