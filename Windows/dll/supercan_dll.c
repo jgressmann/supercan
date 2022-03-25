@@ -1001,8 +1001,8 @@ SC_DLL_API int sc_can_stream_init(
 
     // create and submit all IN tokens
     for (size_t i = 0; i < (size_t)rreqs; ++i) {
+        HANDLE h = CreateEventW(NULL, TRUE, FALSE, NULL);
 
-        HANDLE h = CreateEventW(NULL, FALSE, FALSE, NULL);
         if (!h) {
             DWORD e = GetLastError();
             HRESULT hr = HRESULT_FROM_WIN32(e);
@@ -1174,7 +1174,13 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
             user_error = sc_process_rx_buffer(stream, ptr, (uint16_t)transferred);
         }
 
-        // keep stream processing, return user error later on
+        /* Keep stream processing, return user error later on.
+         * 
+         * NOTE: Manually reset the event here, because I don't
+         * NOTE: know when exactly the event will automatically reset.
+         */
+        ResetEvent(stream->exposed.user_handle);
+
         error = sc_rx_submit(stream);
         if (error) {
             stream->error = error;
