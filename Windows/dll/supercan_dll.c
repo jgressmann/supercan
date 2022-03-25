@@ -1184,6 +1184,8 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
         if (user_error) {
             return user_error;
         }
+
+        LOG_DEBUG("rxs submit %u\n", index);
     }
     else if (WAIT_TIMEOUT == dw) {
         // nothing to do
