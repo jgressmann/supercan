@@ -645,7 +645,6 @@ extern "C" int run_shared(struct app_ctx* ac)
     ac->priv = &com_ctx;
 
     try {
-        bstr_t com_string;
         HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
 
         if (FAILED(hr)) {
@@ -662,16 +661,25 @@ extern "C" int run_shared(struct app_ctx* ac)
             return map_hr_to_error(hr);
         }
 
-        hr = sc->GetVersion(&version);
-        if (FAILED(hr)) {
-            fprintf(stderr, "ERROR: failed to get version (hr=%lx)\n", hr);
-            return map_hr_to_error(hr);
+        {
+            ISuperCAN2Ptr sc2;
+
+            hr = sc->QueryInterface(&sc2);
+            if (SUCCEEDED(hr)) {
+                bstr_t com_string;
+
+                hr = sc2->GetVersion(&version);
+                if (FAILED(hr)) {
+                    fprintf(stderr, "ERROR: failed to get version (hr=%lx)\n", hr);
+                    return map_hr_to_error(hr);
+                }
+
+                com_string.Attach(version.commit);
+                version.commit = nullptr;
+
+                fprintf(stdout, "COM server version %u.%u.%u.%u, commit '%s'\n", version.major, version.minor, version.patch, version.build, (const char*)com_string);
+            }
         }
-
-        com_string.Attach(version.commit);
-        version.commit = nullptr;
-
-        fprintf(stdout, "COM server version %u.%u.%u.%u, commit '%s'\n", version.major, version.minor, version.patch, version.build, (const char*)com_string);
 
         unsigned long dev_count = 0;
         hr = sc->DeviceScan(&dev_count);

@@ -300,7 +300,7 @@ private:
 // that's why the interface map is empty.
 class ATL_NO_VTABLE XSuperCAN :
 	public ATL::CComObjectRoot,
-	public ISuperCAN
+	public ISuperCAN2
 {
 public:
 	BEGIN_COM_MAP(XSuperCAN)

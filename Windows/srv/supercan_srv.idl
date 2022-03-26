@@ -28,7 +28,7 @@ import "oaidl.idl";
 import "ocidl.idl";
 
 [
-	uuid(945BB09D-DA86-4183-9C9A-D85220638156),
+	uuid(fd71338b-9533-4785-8c2f-664ece4bebee),
 	version(1.0),
 	helpstring("SuperCAN 1.0 Type Library"),
 ]
@@ -84,24 +84,23 @@ library SuperCAN
 	interface ISuperCANDevice : IUnknown
 	{
 		HRESULT AcquireConfigurationAccess(
-			[out] boolean* config_access, 
+			[out] boolean* config_access,
 			[out] unsigned long* timeout_ms);
 		HRESULT ReleaseConfigurationAccess();
 		HRESULT GetRingBufferMappings(
-			[out] struct SuperCANRingBufferMapping* rx, 
+			[out] struct SuperCANRingBufferMapping* rx,
 			[out] struct SuperCANRingBufferMapping* tx);
 		HRESULT GetDeviceData([out] struct SuperCANDeviceData* data);
-		
+
 		HRESULT SetBus([in] boolean on);
 		HRESULT SetFeatureFlags([in] unsigned long flags);
 		HRESULT SetNominalBitTiming([in] struct SuperCANBitTimingParams param);
-		HRESULT SetDataBitTiming([in] struct SuperCANBitTimingParams param);		
+		HRESULT SetDataBitTiming([in] struct SuperCANBitTimingParams param);
 	};
-
 
 	[
 		object, // The [object] interface attribute identifies a COM interface. else DCE RPC
-		uuid(A1FD436A-2EF9-4066-8093-28100133428D),
+		uuid(8F8C4375-2DFE-4335-8947-036F965BD927),
 		pointer_default(unique),
 		oleautomation, // either this or 'dual' are required for COM
 	]
@@ -110,15 +109,23 @@ library SuperCAN
 		HRESULT DeviceScan([out] unsigned long* count);
 		HRESULT DeviceGetCount([out] unsigned long* count);
 		HRESULT DeviceOpen(
-			[in] unsigned long index, 
+			[in] unsigned long index,
 			[out] ISuperCANDevice** dev);
+	};
 
+	[
+		object, // The [object] interface attribute identifies a COM interface. else DCE RPC
+		uuid(DA4C7005-6D21-4AB7-9933-5EAA959F0621),
+		pointer_default(unique),
+		oleautomation, // either this or 'dual' are required for COM
+	]
+	interface ISuperCAN2 : ISuperCAN
+	{
 		HRESULT GetVersion(struct SuperCANVersion* version);
 	};
 
-
 	[
-		uuid(9D73516D-E9AB-4BF0-B931-07F012EF5AB4),
+		uuid(E6214AB1-56AD-4215-8688-095D3816F260),
 		helpstring("SuperCAN class"),
 	]
 	coclass CSuperCAN

@@ -42,13 +42,14 @@
 class ATL_NO_VTABLE CSuperCAN :
 	public ATL::CComObjectRoot, // see above comment
     public ATL::CComCoClass<CSuperCAN, &CLSID_CSuperCAN>,
-    public ISuperCAN
+    public ISuperCAN2
 {
 public:
 	DECLARE_REGISTRY_RESOURCEID(IDR_SUPERCANSRV)
 
 	BEGIN_COM_MAP(CSuperCAN)
 		COM_INTERFACE_ENTRY(ISuperCAN)
+		COM_INTERFACE_ENTRY(ISuperCAN2)
 	END_COM_MAP()
 
 public:
@@ -64,7 +65,7 @@ public:
 		ISuperCANDevice** dev);
 
 private:
-	ISuperCAN* m_Instance;
+	ISuperCAN2* m_Instance;
 };
 
 
