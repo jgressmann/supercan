@@ -50,6 +50,18 @@ struct can_state {
     struct can_echo echos[256];
 };
 
+static void log(void* ctx, int level, char const* msg, size_t size)
+{
+    struct app_ctx* ac = (struct app_ctx*)ctx;
+
+    (void)level;
+    (void)size;
+
+    if (!ac->candump) {
+        fprintf(stderr, "%s", msg);
+    }
+}
+
 
 static bool process_buffer(
     struct app_ctx* ac,
@@ -315,9 +327,10 @@ static int tx(struct app_ctx* ac, struct tx_job* job)
     uint8_t track_id = 0;
     uint8_t const data_len = dlc_to_len(job->dlc);
     struct can_echo* echo = NULL;
-    int result = 0;
+    int error = SC_DLL_ERROR_NONE;
     
     if (!can_state->available_track_id_count) {
+        error = SC_DLL_ERROR_AGAIN;
         goto exit_result;
     }
 
@@ -351,7 +364,7 @@ static int tx(struct app_ctx* ac, struct tx_job* job)
 
     for (int i = 0; i < 2; ++i) {
         size_t added = 0;
-        int error = sc_can_stream_tx_batch_add(
+        error = sc_can_stream_tx_batch_add(
             can_state->stream,
             &(uint8_t*)tx,
             &bytes,
@@ -360,12 +373,10 @@ static int tx(struct app_ctx* ac, struct tx_job* job)
 
         if (error) {
             fprintf(stderr, "sc_can_stream_tx failed: %s (%d)\n", sc_strerror(error), error);
-            result = -1;
             goto exit_return_track_id;
         }
 
         if (added) {
-            result = 1;
             goto exit_result;
         }
 
@@ -373,14 +384,12 @@ static int tx(struct app_ctx* ac, struct tx_job* job)
         error = sc_can_stream_tx_batch_end(can_state->stream);
         if (error) {
             fprintf(stderr, "sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
-            result = -1;
             goto exit_return_track_id;
         }
 
         error = sc_can_stream_tx_batch_begin(can_state->stream);
         if (error) {
             fprintf(stderr, "sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
-            result = -1;
             goto exit_return_track_id;
         }
     }
@@ -388,7 +397,7 @@ static int tx(struct app_ctx* ac, struct tx_job* job)
 exit_return_track_id:
     can_state->available_track_id_buffer[can_state->available_track_id_count++] = track_id;
 exit_result:
-    return result;
+    return error;
 }
 
 int run_single(struct app_ctx* ac)
@@ -420,6 +429,9 @@ int run_single(struct app_ctx* ac)
     ac->priv = &can_state;
     
     sc_init();
+
+    sc_log_set_callback(ac, &log);
+    sc_log_set_level(ac->debug_log_level);
 
     sc_version(&version);
 
@@ -716,22 +728,22 @@ int run_single(struct app_ctx* ac)
                     job->last_tx_ts_ms = now;
 
                     while (job->count > 0) {
-                        int result = tx(ac, job);
+                        error = tx(ac, job);
 
-                        switch (result) {
-                        case -1:
-                            goto Exit;
-                        case 0:
-                            if (!was_full) {
-                                was_full = true;
-                                fprintf(stderr, "ERROR: TX buffer full\n");
-                                job->count = 0;
-                            }
-                            break;
-                        case 1:
+                        switch (error) {
+                        case SC_DLL_ERROR_NONE:
                             --job->count;
                             was_full = false;
                             break;
+                        case SC_DLL_ERROR_AGAIN:
+                            if (!was_full) {
+                                was_full = true;
+                                fprintf(stderr, "ERROR: TX buffer full\n");        
+                            }
+                            job->count = 0;
+                            break;
+                        default:
+                            goto Exit;
                         }
                     }
 

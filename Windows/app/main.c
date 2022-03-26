@@ -80,6 +80,7 @@ static void usage(FILE* stream)
     fprintf(stream, "--single       request exclusive device access\n");
     fprintf(stream, "--config BOOL  request config level access (defaults to on)\n");
     fprintf(stream, "--candump      log received messages in candump log format (overrides other log flags)\n");
+    fprintf(stream, "--debug-log-level  LEVEL   debug log level, default OFF (-1)\n");
 }
 
 
@@ -241,6 +242,7 @@ int main(int argc, char** argv)
     ac.can_tx_errors_last = -1;
     ac.can_bus_state_last = -1;
     ac.candump = false;
+    ac.debug_log_level = SC_DLL_LOG_LEVEL_OFF;
 
     cia_fd_cbt_init_default_real(&ac.nominal_user_constraints, &ac.data_user_constraints);
 
@@ -521,6 +523,24 @@ int main(int argc, char** argv)
             }
             else {
                 fprintf(stderr, "ERROR %s expects a boolean argument\n", argv[i]);
+                error = SC_DLL_ERROR_INVALID_PARAM;
+                goto Exit;
+            }
+        }
+        else if (0 == strcmp("--debug-log-level", argv[i])) {
+            if (i + 1 < argc) {
+                char* end = NULL;
+                ac.debug_log_level = (int)strtol(argv[i + 1], &end, 10);
+                if (!end || end == argv[i + 1]) {
+                    fprintf(stderr, "ERROR failed to convert '%s' to int\n", argv[i + 1]);
+                    error = SC_DLL_ERROR_INVALID_PARAM;
+                    goto Exit;
+                }
+
+                i += 2;
+            }
+            else {
+                fprintf(stderr, "ERROR %s expects an integer argument\n", argv[i]);
                 error = SC_DLL_ERROR_INVALID_PARAM;
                 goto Exit;
             }

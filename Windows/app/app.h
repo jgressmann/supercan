@@ -80,6 +80,7 @@ struct app_ctx {
     int can_rx_errors_last;
     int usb_rx_lost;
     int usb_tx_dropped;
+    int debug_log_level;
     bool rx_has_xtd_frame;
     bool rx_has_fdf_frame;
     bool fdf;

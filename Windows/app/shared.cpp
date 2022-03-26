@@ -37,6 +37,8 @@
 #endif
 
 #include <algorithm>
+#include <vector>
+
 
 using namespace SuperCAN;
 
@@ -106,22 +108,22 @@ void process_rx(app_ctx* ac)
 {
     com_dev_ctx* com_ctx = static_cast<com_dev_ctx*>(ac->priv);
 
-    auto rx_lost = InterlockedExchange(&com_ctx->rx.hdr->lost_rx, 0);
+    auto rx_lost = InterlockedExchange(&com_ctx->rx.hdr->can_lost_rx, 0);
     if (rx_lost) {
         fprintf(stderr, "ERROR: %lu rx messages lost\n", rx_lost);
     }
 
-    auto tx_lost = InterlockedExchange(&com_ctx->rx.hdr->lost_tx, 0);
+    auto tx_lost = InterlockedExchange(&com_ctx->rx.hdr->can_lost_tx, 0);
     if (tx_lost) {
         fprintf(stderr, "ERROR: %lu tx messages lost\n", tx_lost);
     }
 
-    auto status_lost = InterlockedExchange(&com_ctx->rx.hdr->lost_status, 0);
+    auto status_lost = InterlockedExchange(&com_ctx->rx.hdr->can_lost_status, 0);
     if (status_lost) {
         fprintf(stderr, "ERROR: %lu status messages lost\n", status_lost);
     }
 
-    auto error_lost = InterlockedExchange(&com_ctx->rx.hdr->lost_error, 0);
+    auto error_lost = InterlockedExchange(&com_ctx->rx.hdr->can_lost_error, 0);
     if (error_lost) {
         fprintf(stderr, "ERROR: ERROR %lu error messages lost\n", error_lost);
     }
@@ -143,7 +145,7 @@ void process_rx(app_ctx* ac)
             auto* hdr = &com_ctx->rx.hdr->elements[index].hdr;
 
             switch (hdr->type) {
-            case SC_CAN_DATA_TYPE_STATUS: {
+            case SC_MM_DATA_TYPE_CAN_STATUS: {
                 auto* status = &com_ctx->rx.hdr->elements[index].status;
                 
                 if (!ac->candump && (ac->log_flags & LOG_FLAG_CAN_STATE)) {
@@ -208,7 +210,7 @@ void process_rx(app_ctx* ac)
                     }
                 }
             } break;
-            case SC_CAN_DATA_TYPE_RX: {
+            case SC_MM_DATA_TYPE_CAN_RX: {
                 auto* rx = &com_ctx->rx.hdr->elements[index].rx;
 
                 if (ac->candump) {
@@ -235,7 +237,7 @@ void process_rx(app_ctx* ac)
                     }
                 }
             } break;
-            case SC_CAN_DATA_TYPE_TX: {
+            case SC_MM_DATA_TYPE_CAN_TX: {
                 auto* tx = &com_ctx->rx.hdr->elements[index].tx;
 
                 if (ac->candump) {
@@ -257,7 +259,7 @@ void process_rx(app_ctx* ac)
                     }
                 }
             } break;
-            case SC_CAN_DATA_TYPE_ERROR: {
+            case SC_MM_DATA_TYPE_CAN_ERROR: {
                 auto* error = &com_ctx->rx.hdr->elements[index].error;
 
                 if (SC_CAN_ERROR_NONE != error->error) {
@@ -291,6 +293,13 @@ void process_rx(app_ctx* ac)
                     fprintf(stdout, "error\n");
                 }
             } break;
+            case SC_MM_DATA_TYPE_LOG_DATA: {
+                if (!ac->candump) {
+                    auto* log_data = &com_ctx->rx.hdr->elements[index].log_data;
+
+                    fprintf(stderr, "%s: %s", log_data->src == SC_LOG_DATA_SRC_DLL ? "DLL" : "SRV", log_data->data);
+                }
+            } break;
             default: {
                 fprintf(stderr, "WARN: unhandled msg id=%02x\n", hdr->type);
             } break;
@@ -322,7 +331,7 @@ static bool tx(app_ctx* ac, struct tx_job* job)
         auto index = pi % com_ctx->tx.elements;
         auto* tx = &com_ctx->tx.hdr->elements[index].tx;
 
-        tx->type = SC_CAN_DATA_TYPE_TX;
+        tx->type = SC_MM_DATA_TYPE_CAN_TX;
         tx->can_id = job->can_id;
         tx->flags = job->flags;
         tx->track_id = com_ctx->track_id++;
@@ -356,6 +365,8 @@ int run(app_ctx* ac)
 
     if (ac->config) {
         unsigned long access_timeout_ms = 0;
+
+
         hr = dev->AcquireConfigurationAccess(&config_access, &access_timeout_ms);
         if (FAILED(hr)) {
             fprintf(stderr, "ERROR: failed acquire config access (hr=%lx)\n", hr);
@@ -366,7 +377,26 @@ int run(app_ctx* ac)
             fprintf(stderr, "ERROR: failed to get configuration access\n");
             return SC_DLL_ERROR_ACCESS_DENIED;
         }
-    
+
+        {
+            ISuperCANDevice2Ptr device_ptr2;
+
+            hr = dev->QueryInterface(&device_ptr2);
+            if (SUCCEEDED(hr)) {
+                hr = device_ptr2->SetLogLevel(ac->debug_log_level);
+                if (FAILED(hr)) {
+                    fprintf(stderr, "ERROR: failed to set device log level (hr=%lx)\n", hr);
+                    return map_hr_to_error(hr);
+                }
+            }
+            else if (E_NOINTERFACE == hr) {
+                // ok, unsupported
+            }
+            else {
+                fprintf(stderr, "ERROR: failed to query interface for ISuperCANDevice2 (hr=%lx)\n", hr);
+                return map_hr_to_error(hr);
+            }
+        }
     
         SuperCANBitTimingParams params;
         memset(&params, 0, sizeof(params));
@@ -678,6 +708,19 @@ extern "C" int run_shared(struct app_ctx* ac)
                 version.commit = nullptr;
 
                 fprintf(stdout, "COM server version %u.%u.%u.%u, commit '%s'\n", version.major, version.minor, version.patch, version.build, (const char*)com_string);
+
+                hr = sc2->SetLogLevel(ac->debug_log_level);
+                if (FAILED(hr)) {
+                    fprintf(stderr, "ERROR: failed to set library log level (hr=%lx)\n", hr);
+                    return map_hr_to_error(hr);
+                }
+            }
+            else if (E_NOINTERFACE == hr) {
+                // ok, unsupported
+            }
+            else {
+                fprintf(stderr, "ERROR: failed to query interface for ISuperCAN2 (hr=%lx)\n", hr);
+                return map_hr_to_error(hr);
             }
         }
 
@@ -707,6 +750,26 @@ extern "C" int run_shared(struct app_ctx* ac)
         if (FAILED(hr)) {
             fprintf(stderr, "ERROR: failed to open device index=%u (hr=%lx)\n", ac->device_index, hr);
             return map_hr_to_error(hr);
+        }
+
+        {
+            ISuperCANDevice2Ptr device_ptr2;
+
+            hr = device_ptr->QueryInterface(&device_ptr2);
+            if (SUCCEEDED(hr)) {
+                hr = device_ptr2->SetLogLevel(ac->debug_log_level);
+                if (FAILED(hr)) {
+                    fprintf(stderr, "ERROR: failed to set device log level (hr=%lx)\n", hr);
+                    return map_hr_to_error(hr);
+                }
+            }
+            else if (E_NOINTERFACE == hr) {
+                // ok, unsupported
+            }
+            else {
+                fprintf(stderr, "ERROR: failed to query interface for ISuperCANDevice2 (hr=%lx)\n", hr);
+                return map_hr_to_error(hr);
+            }
         }
 
         // release SuperCAN to verify the device keeps the COM server loaded
