@@ -1,7 +1,7 @@
 ﻿/*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 
 #include "supercanbackend.h"
 
+#include <supercan_dll.h>
 
 
 using namespace std;
@@ -379,7 +380,7 @@ void SuperCanBackend::expired()
             ++rx_gi;
 
             switch (s->hdr.type) {
-            case SC_CAN_DATA_TYPE_STATUS: {
+            case SC_MM_DATA_TYPE_CAN_STATUS: {
                 switch (s->status.bus_status) {
                 case SC_CAN_STATUS_BUS_OFF: {
                     QCanBusFrame f(QCanBusFrame::ErrorFrame);
@@ -412,7 +413,7 @@ void SuperCanBackend::expired()
                     break;
                 }
             } break;
-            case SC_CAN_DATA_TYPE_RX: {
+            case SC_MM_DATA_TYPE_CAN_RX: {
                 if (s->rx.flags & SC_CAN_FRAME_FLAG_RTR) {
                     QCanBusFrame f(QCanBusFrame::RemoteRequestFrame);
 
@@ -436,7 +437,7 @@ void SuperCanBackend::expired()
                     received << f;
                 }
             } break;
-            case SC_CAN_DATA_TYPE_TX: {
+            case SC_MM_DATA_TYPE_CAN_TX: {
                 if (!(s->tx.flags & SC_CAN_FRAME_FLAG_DRP) && m_Echo) {
                     if (s->tx.flags & SC_CAN_FRAME_FLAG_RTR) {
                         QCanBusFrame f(QCanBusFrame::RemoteRequestFrame);
@@ -464,7 +465,7 @@ void SuperCanBackend::expired()
                     }
                 }
             } break;
-            case SC_CAN_DATA_TYPE_ERROR: {
+            case SC_MM_DATA_TYPE_CAN_ERROR: {
                 QCanBusFrame f(QCanBusFrame::ErrorFrame);
                 QCanBusFrame::FrameErrors errors = QCanBusFrame::NoError;
 
@@ -493,6 +494,29 @@ void SuperCanBackend::expired()
 
                 f.setError(errors);
                 received << f;
+            } break;
+            case SC_MM_DATA_TYPE_LOG_DATA: {
+                auto const& log_data = s->log_data;
+                char const * src = "SRC?";
+
+                switch (log_data.src) {
+                case SC_LOG_DATA_SRC_DLL:
+                    src = "DLL";
+                    break;
+                case SC_LOG_DATA_SRC_SRV:
+                    src = "SRV"; // COM server
+                    break;
+                }
+
+                if (log_data.level < SC_DLL_LOG_LEVEL_WARNING) {
+                    qCCritical(QT_CANBUS_PLUGINS_SUPERCAN, "%s: %s\n", log_data.data);
+                } else if (log_data.level < SC_DLL_LOG_LEVEL_INFO) {
+                    qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "%s: %s\n", log_data.data);
+                } else if (log_data.level < SC_DLL_LOG_LEVEL_DEBUG) {
+                    qCInfo(QT_CANBUS_PLUGINS_SUPERCAN, "%s: %s\n", log_data.data);
+                } else {
+                    qCDebug(QT_CANBUS_PLUGINS_SUPERCAN, "%s: %s\n", log_data.data);
+                }
             } break;
             default:
                 break;
@@ -550,7 +574,7 @@ void SuperCanBackend::placeFrame(const QCanBusFrame& frame, quint32 index)
 
     Q_ASSERT(payload.size() <= 64);
 
-    s->tx.type = SC_CAN_DATA_TYPE_TX;
+    s->tx.type = SC_MM_DATA_TYPE_CAN_TX;
     s->tx.dlc = len_to_dlc(payload.size());
     s->tx.can_id = frame.frameId();
     s->tx.flags = 0;
