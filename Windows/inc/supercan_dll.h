@@ -55,8 +55,8 @@ extern "C" {
 #endif
 
 #define SC_DLL_VERSION_MAJOR 0
-#define SC_DLL_VERSION_MINOR 4
-#define SC_DLL_VERSION_PATCH 4
+#define SC_DLL_VERSION_MINOR 5
+#define SC_DLL_VERSION_PATCH 0
 
 
 
