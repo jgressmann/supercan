@@ -45,14 +45,27 @@ extern "C" {
  * in host byte order.
  */
 
-enum sc_can_data_type {
-    SC_CAN_DATA_TYPE_NONE,
-    SC_CAN_DATA_TYPE_STATUS,
-    SC_CAN_DATA_TYPE_RX,
-    SC_CAN_DATA_TYPE_TX,
-    SC_CAN_DATA_TYPE_ERROR,
+enum sc_mm_data_type {
+    SC_MM_DATA_TYPE_NONE,
+    SC_MM_DATA_TYPE_CAN_STATUS,
+    SC_MM_DATA_TYPE_CAN_RX,
+    SC_MM_DATA_TYPE_CAN_TX,
+    SC_MM_DATA_TYPE_CAN_ERROR,
+
+
+    SC_MM_DATA_TYPE_LOG_DATA = 0x10,
 };
 
+enum sc_log_data_flags {
+    SC_LOG_DATA_FLAG_MORE = 0x1     ///< more of same log message follows
+};
+
+enum sc_log_data_src {
+    SC_LOG_DATA_SRC_DLL,            ///< message originated in SC DLL
+    SC_LOG_DATA_SRC_SRV             ///< message originated in SC COM server
+};
+
+#define SC_LOG_DATA_BUFFER_SIZE 68
 
 
 struct sc_mm_header {
@@ -102,12 +115,24 @@ struct sc_mm_can_error {
     uint64_t timestamp_us;
 };
 
+struct sc_mm_log_data {
+    uint8_t type;
+    int8_t level;
+    uint8_t flags;
+    uint8_t bytes;
+    uint8_t src;
+    uint8_t reserved[3];
+    uint64_t timestamp_qpc;
+    uint8_t data[SC_LOG_DATA_BUFFER_SIZE];           ///< UTF-8
+};
+
 typedef union sc_can_mm_slot {
     struct sc_mm_header hdr;
     struct sc_mm_can_rx rx;
     struct sc_mm_can_tx tx;
     struct sc_mm_can_status status;
     struct sc_mm_can_error error;
+    struct sc_mm_log_data log_data;
 } sc_can_mm_slot_t;
 
 enum sc_mm_flags {
@@ -130,16 +155,17 @@ struct sc_can_mm_header {
      * 
      * Only valid for RX ring
      */
-    volatile uint32_t lost_rx;      ///< CAN RX frames lost
-    volatile uint32_t lost_status;  ///< CAN status messages lost
-    volatile uint32_t lost_tx;      ///< CAN TX receipt/echo messages lost 
-    volatile uint32_t lost_error;   ///< CAN error messages lost 
+    volatile uint32_t can_lost_rx;      ///< CAN RX frames lost
+    volatile uint32_t can_lost_status;  ///< CAN status messages lost
+    volatile uint32_t can_lost_tx;      ///< CAN TX receipt/echo messages lost 
+    volatile uint32_t can_lost_error;   ///< CAN error messages lost 
                                     
-    volatile uint32_t get_index;    // not an index, need to be %'d
-    volatile uint32_t put_index;    // not an index, need to be %'d
-    volatile int32_t error;         // device error
-    volatile uint32_t flags;        // flags
-    volatile uint32_t reserved1[8]; // reserved for now
+    volatile uint32_t get_index;        ///< not an index, need to be %'d
+    volatile uint32_t put_index;        ///< not an index, need to be %'d
+    volatile int32_t error;             ///< device error
+    volatile uint32_t flags;            ///< flags
+    volatile uint32_t log_lost;         ///< log messages lost
+    volatile uint32_t reserved1[7];     // reserved for now
     sc_can_mm_slot_t elements[0];
 };
 

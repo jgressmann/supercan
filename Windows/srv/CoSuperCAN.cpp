@@ -50,6 +50,7 @@ OBJECT_ENTRY_AUTO(CLSID_CSuperCAN, CSuperCAN)
 #include <cassert>
 #include <cstdio>
 #include <atomic>
+#include <cstdarg>
 
 
 #define CMD_TIMEOUT_MS 3000
@@ -58,17 +59,18 @@ OBJECT_ENTRY_AUTO(CLSID_CSuperCAN, CSuperCAN)
 
 
 
-#define LOG2(prefix, ...) \
+#define LOG2(src, level, ...) \
 	do { \
-		char buf[256] = {0}; \
-		_snprintf_s(buf, sizeof(buf), _TRUNCATE, prefix __VA_ARGS__); \
+		char buf[256]; \
+		int chars = _snprintf_s(buf, sizeof(buf), _TRUNCATE, "SC " src "  LVL=%d: ", level); \
+		_snprintf_s(buf + chars, sizeof(buf) - chars, _TRUNCATE, __VA_ARGS__); \
 		OutputDebugStringA(buf); \
 	} while (0)
 
-#define LOG_DEBUG(...) LOG2("SC SRV DEBUG: ", __VA_ARGS__)
-#define LOG_INFO(...) LOG2("SC SRV INFO: ", __VA_ARGS__)
-#define LOG_WARN(...) LOG2("SC SRV WARN: ", __VA_ARGS__)
-#define LOG_ERROR(...) LOG2("SC SRV ERROR: ", __VA_ARGS__)
+
+
+#define LOG_DLL(level, ...) LOG2("DLL", level, __VA_ARGS__)
+#define LOG_SRV(level, ...) LOG2("SRV", level, __VA_ARGS__)
 
 namespace
 {
@@ -162,6 +164,7 @@ public:
 	bool AcquireConfigurationAccess(sc_com_dev_index_t index, unsigned long* timeout_ms);
 	void ReleaseConfigurationAccess(sc_com_dev_index_t index);
 	int SetBus(sc_com_dev_index_t index, bool on);
+	int SetLogLevel(sc_com_dev_index_t index, int level);
 
 public:
 	const std::wstring& name() const { return m_Name; }
@@ -181,6 +184,8 @@ private:
 	void TxMain();
 	static int OnRx(void* ctx, void const* ptr, uint16_t bytes);
 	int OnRx(sc_msg_header const* ptr, unsigned bytes);
+	static void Log(void* ctx, int level, const char* msg, size_t bytes);
+	void Log(int level, const char* msg, size_t bytes);
 	int Map();
 	void Unmap();
 	void SetDeviceError(int error);
@@ -194,6 +199,8 @@ private:
 	void Notify(uint8_t code, uint8_t value);
 	void ProcessRxNotification(bool* done);
 	void ResetTxrMap();
+	void LogFormatQueue(int level, char const* fmt, ...);
+	void LogFormatDirect(int level, char const* fmt, ...);
 	
 
 private:
@@ -222,6 +229,22 @@ private:
 		NOTIFICATION_REMOVE,
 	};
 
+	enum {
+		LOG_BUFFER_SIZE = 116
+	};
+
+	struct log_entry {
+		uint64_t timestamp_qpc;
+		int8_t level;
+		uint8_t src;
+		uint8_t bytes;
+		uint8_t reserved;
+		char data[LOG_BUFFER_SIZE];
+	};
+
+private:
+	void StoreLogMessage(log_entry const * const e);
+
 private:
 	std::wstring m_Name;
 	sc_dev_t* m_Device;
@@ -234,13 +257,16 @@ private:
 	HANDLE m_RxThread;
 	HANDLE m_TxThread;
 	HANDLE m_TxFifoAvailable;
+	HANDLE m_LogEvent;
 	CRITICAL_SECTION m_Lock;
+	CRITICAL_SECTION m_LogLock;
 	com_device_data m_ComDeviceData[MAX_COM_DEVICES_PER_SC_DEVICE];
 	com_device_data_private m_ComDeviceDataPrivate[MAX_COM_DEVICES_PER_SC_DEVICE];
 	sc_com_dev_index_t m_ConfigurationAccessIndex;
 	com_device_txr_data m_TxrMap[256];
 	sc_mm_can_tx m_TxEchoMap[256];
 	DWORD m_ConfigurationAccessClaimed;
+	std::atomic_int m_LogLevel;
 	std::atomic<uint8_t> m_RxThreadNotificationCode;
 	std::atomic<uint8_t> m_TxThreadNotificationCode;
 	std::atomic<uint8_t> m_RxThreadNotificationValue;
@@ -248,6 +274,10 @@ private:
 	bool m_Mapped;
 	sc_com_dev_index_t m_RxThreadLiveComDevBuffer[MAX_COM_DEVICES_PER_SC_DEVICE];
 	sc_com_dev_index_t m_RxThreadLiveComDevCount;
+	uint32_t m_LogLost;
+	unsigned m_LogRingGetIndex; // full range
+	unsigned m_LogRingPutIndex; // full range
+	log_entry m_LogRingBuffer[64];
 };
 
 using ScDevPtr = std::shared_ptr<ScDev>;
@@ -260,11 +290,12 @@ using ScDevPtr = std::shared_ptr<ScDev>;
 
 class ATL_NO_VTABLE XSuperCANDevice :
 	public ATL::CComObjectRoot, // need lock for ScDev
-	public ISuperCANDevice
+	public ISuperCANDevice2
 {
 public:
 	BEGIN_COM_MAP(XSuperCANDevice)
 		COM_INTERFACE_ENTRY(ISuperCANDevice)
+		COM_INTERFACE_ENTRY(ISuperCANDevice2)
 	END_COM_MAP()
 public:
 	~XSuperCANDevice();
@@ -281,15 +312,16 @@ public:
 	STDMETHOD(SetNominalBitTiming)(SuperCANBitTimingParams params);
 	STDMETHOD(SetDataBitTiming)(SuperCANBitTimingParams params);
 	STDMETHOD(GetDeviceData)(SuperCANDeviceData* data);
+	STDMETHOD(SetLogLevel)(int level);
 	void Init(const ScDevPtr& dev, sc_com_dev_index_t index, com_device_data* mm);
-	void SetSuperCAN(ISuperCAN* sc);
+	void SetSuperCAN(ISuperCAN2* sc);
 
 private:
 	HRESULT _Cmd(uint16_t len) const;
 
 private:
 	ScDevPtr m_SharedDevice;
-	ISuperCAN* m_Sc;
+	ISuperCAN2* m_Sc;
 	com_device_data* m_Mm;
 	sc_com_dev_index_t m_Index;
 };
@@ -315,6 +347,11 @@ public:
 		unsigned long index, 
 		ISuperCANDevice** dev);
 	STDMETHOD(GetVersion)(SuperCANVersion* version);
+	STDMETHOD(SetLogLevel)(int level);
+
+private:
+	static void Log(void* ctx, int level, char const* msg, size_t bytes);
+	void Log(int level, char const* msg, size_t bytes);
 
 private:
 	std::vector<ScDevPtr> m_Devices;
@@ -332,6 +369,11 @@ ScDev::~ScDev()
 	Uninit();
 
 	DeleteCriticalSection(&m_Lock);
+	DeleteCriticalSection(&m_LogLock);
+
+	if (m_LogEvent) {
+		CloseHandle(m_LogEvent);
+	}
 }
 
 ScDev::ScDev()
@@ -342,6 +384,9 @@ ScDev::ScDev()
 	m_RxThread = nullptr;
 	m_TxThread = nullptr;
 	InitializeCriticalSection(&m_Lock);
+	InitializeCriticalSection(&m_LogLock);
+	m_LogEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+	
 	
 	m_ConfigurationAccessIndex = MAX_COM_DEVICES_PER_SC_DEVICE;
 	m_RxThreadNotificationCode = NOTIFICATION_NONE;
@@ -396,7 +441,11 @@ ScDev::ScDev()
 	m_RxThreadLiveComDevCount = 0;
 	ZeroMemory(m_RxThreadLiveComDevBuffer, sizeof(m_RxThreadLiveComDevBuffer));
 	ResetTxrMap();
-
+	m_LogLevel = SC_DLL_LOG_LEVEL_OFF;
+	m_LogRingGetIndex = 0;
+	m_LogRingPutIndex = 0;
+	m_LogLost = 0;
+	ZeroMemory(m_LogRingBuffer, sizeof(m_LogRingBuffer));
 }
 
 void ScDev::ResetTxrMap()
@@ -505,6 +554,78 @@ void ScDev::ReleaseConfigurationAccess(sc_com_dev_index_t index)
 	}
 }
 
+void ScDev::StoreLogMessage(log_entry const * const e)
+{
+	for (size_t offset = 0; offset < e->bytes; ) {
+		uint8_t count = 0;
+		uint8_t flags = 0;
+
+		if (offset + SC_LOG_DATA_BUFFER_SIZE < e->bytes) {
+			flags |= SC_LOG_DATA_FLAG_MORE;
+			count = SC_LOG_DATA_BUFFER_SIZE;
+		}
+		else {
+			count = static_cast<uint8_t>(e->bytes - offset);
+		}
+
+		for (sc_com_dev_index_t i = 0; i < m_RxThreadLiveComDevCount; ++i) {
+			auto com_dev_index = m_RxThreadLiveComDevBuffer[i];
+			auto* data = &m_ComDeviceData[com_dev_index];
+			auto* priv = &m_ComDeviceDataPrivate[com_dev_index];
+			auto gi = priv->rx.hdr->get_index;
+			auto pi = priv->rx.hdr->put_index;
+			auto used = pi - gi;
+
+			if (pi != priv->rx.index || used > data->rx.elements) {
+				// rogue client
+			}
+			else if (used == data->rx.elements) { // just be safe, could be a rogue client
+				InterlockedIncrement(&priv->rx.hdr->log_lost);
+				SetEvent(priv->rx.ev);
+			}
+			else {
+				uint32_t index = priv->rx.index % data->rx.elements;
+				sc_can_mm_slot_t* slot = &priv->rx.hdr->elements[index];
+
+				slot->log_data.type = SC_MM_DATA_TYPE_LOG_DATA;
+				slot->log_data.level = e->level;
+				slot->log_data.src = e->src;
+				slot->log_data.timestamp_qpc = e->timestamp_qpc;
+				slot->log_data.flags = flags;
+				slot->log_data.bytes = count;
+				memcpy(slot->log_data.data, e->data + offset, count);
+
+				++priv->rx.index;
+
+				priv->rx.hdr->put_index = priv->rx.index;
+
+				SetEvent(priv->rx.ev);
+			}
+		}
+
+		offset += count;
+	}
+}
+
+int ScDev::SetLogLevel(sc_com_dev_index_t index, int level)
+{
+	assert(m_Device);
+
+	Guard g1(m_Lock);
+
+	if (!VerifyConfigurationAccess(index)) {
+		return SC_DLL_ERROR_ACCESS_DENIED;
+	}
+
+	Guard g2(m_LogLock);
+
+	m_LogLevel = level;
+
+	sc_dev_log_set_level(m_Device, level);
+
+	return SC_DLL_ERROR_NONE;;
+}
+
 int ScDev::OnRx(void* ctx, void const* ptr, uint16_t bytes)
 {
 	return static_cast<ScDev*>(ctx)->OnRx(static_cast<sc_msg_header const*>(ptr), bytes);
@@ -543,14 +664,14 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 					// rogue client
 				}
 				else if (used == data->rx.elements) { // just be safe, could be a rogue client
-					InterlockedIncrement(&priv->rx.hdr->lost_tx);
+					InterlockedIncrement(&priv->rx.hdr->can_lost_tx);
 					SetEvent(priv->rx.ev);
 				}
 				else {
 					uint32_t const slot_index = priv->rx.index % data->rx.elements;
 					sc_can_mm_slot_t* slot = &priv->rx.hdr->elements[slot_index];
 
-					slot->tx.type = SC_CAN_DATA_TYPE_TX;
+					slot->tx.type = SC_MM_DATA_TYPE_CAN_TX;
 					slot->tx.can_id = echo->can_id;
 					slot->tx.flags = txr->flags;
 					slot->tx.dlc = echo->dlc;
@@ -595,13 +716,13 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 				// rogue client
 			}
 			else if (used == data->rx.elements) { // just be safe, could be a rogue client
-				InterlockedIncrement(&priv->rx.hdr->lost_rx);
+				InterlockedIncrement(&priv->rx.hdr->can_lost_rx);
 				SetEvent(priv->rx.ev);
 			}
 			else {
 				uint32_t index = priv->rx.index % data->rx.elements;
 				sc_can_mm_slot_t* slot = &priv->rx.hdr->elements[index];
-				slot->rx.type = SC_CAN_DATA_TYPE_RX;
+				slot->rx.type = SC_MM_DATA_TYPE_CAN_RX;
 				slot->rx.can_id = rx->can_id;
 				slot->rx.dlc = rx->dlc;
 				slot->rx.flags = rx->flags;
@@ -642,14 +763,14 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 				// rogue client
 			}
 			else if (used == data->rx.elements) { // just be safe, could be a rogue client
-				InterlockedIncrement(&priv->rx.hdr->lost_status);
+				InterlockedIncrement(&priv->rx.hdr->can_lost_status);
 				SetEvent(priv->rx.ev);
 			}
 			else {
 				uint32_t index = priv->rx.index % data->rx.elements;
 				sc_can_mm_slot_t* slot = &priv->rx.hdr->elements[index];
 
-				slot->status.type = SC_CAN_DATA_TYPE_STATUS;
+				slot->status.type = SC_MM_DATA_TYPE_CAN_STATUS;
 				slot->status.flags = status->flags;
 				slot->status.bus_status = status->bus_status;
 				slot->status.timestamp_us = ts;
@@ -688,14 +809,14 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 				// rogue client
 			}
 			else if (used == data->rx.elements) { // just be safe, could be a rogue client
-				InterlockedIncrement(&priv->rx.hdr->lost_error);
+				InterlockedIncrement(&priv->rx.hdr->can_lost_error);
 				SetEvent(priv->rx.ev);
 			}
 			else {
 				uint32_t index = priv->rx.index % data->rx.elements;
 				sc_can_mm_slot_t* slot = &priv->rx.hdr->elements[index];
 
-				slot->error.type = SC_CAN_DATA_TYPE_ERROR;
+				slot->error.type = SC_MM_DATA_TYPE_CAN_ERROR;
 				slot->error.flags = error->flags;
 				slot->error.timestamp_us = ts;
 				slot->error.error = error->error;
@@ -858,6 +979,96 @@ error_exit:
 	goto error_success;
 }
 
+void ScDev::Log(void* ctx, int level, const char* msg, size_t bytes)
+{
+	static_cast<ScDev*>(ctx)->Log(level, msg, bytes);
+}
+
+void ScDev::Log(int level, const char* msg, size_t bytes)
+{
+	Guard g(m_LogLock);
+
+	unsigned used = m_LogRingPutIndex - m_LogRingGetIndex;
+
+	if (used < _countof(m_LogRingBuffer)) {
+		const unsigned index = m_LogRingPutIndex % _countof(m_LogRingBuffer);
+		log_entry* const e = &m_LogRingBuffer[index];
+
+		QueryPerformanceCounter((LARGE_INTEGER*)&e->timestamp_qpc);
+		e->level = static_cast<int8_t>(level);
+		e->src = SC_LOG_DATA_SRC_DLL;
+		e->bytes = static_cast<uint8_t>(std::min(_countof(e->data) - 1, bytes));
+		memcpy(e->data, msg, e->bytes);
+		e->data[e->bytes] = 0;
+
+		++m_LogRingPutIndex;
+
+		SetEvent(m_LogEvent);
+	}
+	else {
+		++m_LogLost;
+
+		OutputDebugStringA("SC SRV: log ring buffer full\n");
+		OutputDebugStringA("SC DLL: ");
+		OutputDebugStringA(msg);
+	}
+}
+
+void ScDev::LogFormatQueue(int level, const char* fmt, ...)
+{
+	if (level <= m_LogLevel.load(std::memory_order_relaxed)) {
+
+		Guard g(m_LogLock);
+
+		unsigned used = m_LogRingPutIndex - m_LogRingGetIndex;
+
+		if (used < _countof(m_LogRingBuffer)) {
+			const unsigned index = m_LogRingPutIndex % _countof(m_LogRingBuffer);
+			log_entry* const e = &m_LogRingBuffer[index];
+			va_list vl;
+
+			e->level = static_cast<int8_t>(level);
+			e->src = SC_LOG_DATA_SRC_SRV;
+			QueryPerformanceCounter((LARGE_INTEGER*)&e->timestamp_qpc);
+
+			va_start(vl, fmt);
+			
+			e->bytes = (uint8_t)_vsnprintf_s(e->data, sizeof(e->data), _TRUNCATE, fmt, vl);
+
+			va_end(vl);
+
+			++m_LogRingPutIndex;
+
+			SetEvent(m_LogEvent);
+		}
+		else {
+			OutputDebugStringA("SC SRV: log ring buffer full\n");
+		}
+	}
+}
+
+
+void ScDev::LogFormatDirect(int level, const char* fmt, ...)
+{
+	if (level <= m_LogLevel.load(std::memory_order_relaxed)) {
+		log_entry e;		
+		va_list vl;
+
+		e.src = SC_LOG_DATA_SRC_SRV;
+		e.level = static_cast<int8_t>(level);
+		QueryPerformanceCounter((LARGE_INTEGER*)&e.timestamp_qpc);
+		
+
+		va_start(vl, fmt);
+
+		e.bytes = (uint8_t)_vsnprintf_s(e.data, sizeof(e.data), _TRUNCATE, fmt, vl);
+
+		va_end(vl);
+
+		StoreLogMessage(&e);
+	}
+}
+
 int ScDev::Init(std::wstring&& name)
 {
 	Uninit();
@@ -870,6 +1081,11 @@ int ScDev::Init(std::wstring&& name)
 	}
 
 	error = sc_dev_open_by_id(m_Name.c_str(), &m_Device);
+	if (error) {
+		goto error_exit;
+	}
+
+	error = sc_dev_log_set_callback(m_Device, this, &ScDev::Log);
 	if (error) {
 		goto error_exit;
 	}
@@ -892,7 +1108,7 @@ int ScDev::Init(std::wstring&& name)
 		}
 
 		if (rep_len < sizeof(dev_info)) {
-			LOG_ERROR("failed to get device info (too short of a reponse len=%u)\n", rep_len);
+			LogFormatQueue(SC_DLL_LOG_LEVEL_ERROR, "failed to get device info (too short of a reponse len=%u)\n", rep_len);
 			error = SC_DLL_ERROR_PROTO_VIOLATION;
 			goto error_exit;
 		}
@@ -903,7 +1119,7 @@ int ScDev::Init(std::wstring&& name)
 		dev_info.feat_conf = m_Device->dev_to_host16(dev_info.feat_conf);
 
 		if (!((dev_info.feat_perm | dev_info.feat_conf) & SC_FEATURE_FLAG_TXR)) {
-			LOG_ERROR("device doesn't support required TXR feature\n");
+			LogFormatQueue(SC_DLL_LOG_LEVEL_ERROR, "device doesn't support required TXR feature\n");
 			error = SC_DLL_ERROR_DEV_UNSUPPORTED;
 			goto error_exit;
 		}
@@ -1077,8 +1293,6 @@ int ScDev::SetBusOn()
 		error = SC_DLL_ERROR_OUT_OF_MEM;
 		goto error_exit;
 	}
-
-	m_Stream->user_handle = m_RxThreadNotificationEvent;
 
 	// CreateSemaphoreW fails if max count <= 0, https://docs.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createsemaphorew
 	m_TxFifoAvailable = CreateSemaphoreW(nullptr, can_info.tx_fifo_size, can_info.tx_fifo_size, nullptr);
@@ -1262,10 +1476,11 @@ void ScDev::ComDeviceRemovedRx(sc_com_dev_index_t index)
 {
 	auto* priv = &m_ComDeviceDataPrivate[index];
 
-	InterlockedExchange(&priv->rx.hdr->lost_rx, 0);
-	InterlockedExchange(&priv->rx.hdr->lost_tx, 0);
-	InterlockedExchange(&priv->rx.hdr->lost_status, 0);
-	InterlockedExchange(&priv->rx.hdr->lost_error, 0);
+	InterlockedExchange(&priv->rx.hdr->can_lost_rx, 0);
+	InterlockedExchange(&priv->rx.hdr->can_lost_tx, 0);
+	InterlockedExchange(&priv->rx.hdr->can_lost_status, 0);
+	InterlockedExchange(&priv->rx.hdr->can_lost_error, 0);
+	InterlockedExchange(&priv->rx.hdr->log_lost, 0);
 
 	priv->rx.hdr->put_index = priv->rx.index;
 	priv->rx.hdr->get_index = priv->rx.index;
@@ -1284,6 +1499,11 @@ DWORD ScDev::RxMain(void* self)
 void ScDev::RxMain()
 {
 	auto stream_error = false;
+	HANDLE handles[] = {
+		m_RxThreadNotificationEvent,
+		m_LogEvent,
+		nullptr,
+	};
 
 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
@@ -1293,20 +1513,70 @@ void ScDev::RxMain()
 			ProcessRxNotification(&done);
 		}
 		else {
-			auto error = sc_can_stream_rx(m_Stream, INFINITE);
+			auto error = sc_can_stream_rx_next_wait_handle(m_Stream, &handles[2]);
 
-			switch (error) {
-			case SC_DLL_ERROR_TIMEOUT:
-			case SC_DLL_ERROR_NONE:
-				break;
-			case SC_DLL_ERROR_USER_HANDLE_SIGNALED:
-				ProcessRxNotification(&done);
-				break;
-			default:
+			if (error) {
 				SetDeviceError(error);
-				LOG_ERROR("sc_can_stream_rx failed: %s (%d)\n", sc_strerror(error), error);
+				LogFormatDirect(SC_DLL_LOG_LEVEL_ERROR, "sc_can_stream_rx_next_wait_handle failed: %s (%d)\n", sc_strerror(error), error);
 				stream_error = true;
-				break;
+			}
+			else {
+				DWORD r = WaitForMultipleObjects(static_cast<DWORD>(_countof(handles)), handles, FALSE, INFINITE);
+
+				if (r >= WAIT_OBJECT_0 && r < WAIT_OBJECT_0 + _countof(handles)) {
+					DWORD handle_index = r - WAIT_OBJECT_0;
+
+					switch (handle_index) {
+					case 0:
+						ProcessRxNotification(&done);
+						break;
+					case 1: {
+						Guard g(m_LogLock);
+
+						ResetEvent(m_LogEvent);
+
+						if (m_LogLost) {
+							for (sc_com_dev_index_t i = 0; i < m_RxThreadLiveComDevCount; ++i) {
+								auto com_dev_index = m_RxThreadLiveComDevBuffer[i];
+								auto* priv = &m_ComDeviceDataPrivate[com_dev_index];
+
+								InterlockedAdd((volatile LONG*)&priv->rx.hdr->log_lost, (LONG)m_LogLost);
+								SetEvent(priv->rx.ev);
+							}
+
+							m_LogLost = 0;
+						}
+
+						while (m_LogRingGetIndex != m_LogRingPutIndex) {
+							const unsigned index = m_LogRingGetIndex++ % _countof(m_LogRingBuffer);
+							log_entry const * const e = &m_LogRingBuffer[index];
+
+							StoreLogMessage(e);
+						}
+					} break;
+					case 2:
+						error = sc_can_stream_rx(m_Stream, 0);
+						if (error) {
+							SetDeviceError(error);
+							LogFormatDirect(SC_DLL_LOG_LEVEL_ERROR, "sc_can_stream_rx failed: %s (%d)\n", sc_strerror(error), error);
+							stream_error = true;
+						}
+						break;
+					default:
+						LogFormatDirect(SC_DLL_LOG_LEVEL_ERROR, "RxMain unhandled handle index %u\n", handle_index);
+						break;
+					}
+				}
+				else if (WAIT_TIMEOUT == r) {
+					// ?
+				}
+				else {
+					auto e = GetLastError();
+
+					SetDeviceError(map_win_error(e));
+					LogFormatDirect(SC_DLL_LOG_LEVEL_ERROR, "WaitForMultipleObjects failed: %lu (error=%lu)\n", r, e);
+					stream_error = true;
+				}
 			}
 		}
 	}
@@ -1456,7 +1726,7 @@ void ScDev::TxMain()
 			auto e = GetLastError();
 
 			SetDeviceError(map_win_error(e));
-			LOG_ERROR("WaitForMultipleObjects failed: %lu (error=%lu)\n", r, e);
+			LogFormatQueue(SC_DLL_LOG_LEVEL_ERROR, "WaitForMultipleObjects failed: %lu (error=%lu)\n", r, e);
 			stream_error = true;
 		}
 
@@ -1490,7 +1760,7 @@ void ScDev::TxMain()
 
 				if (gi != priv->tx.index || used > data->tx.elements) {
 					// rogue client
-					LOG_WARN("TX ring index=%u gi=%lu pi=%lu used=%lu elements=%lu is inconsistent, resetting ring\n",
+					LogFormatQueue(SC_DLL_LOG_LEVEL_WARNING, "TX ring index=%u gi=%lu pi=%lu used=%lu elements=%lu is inconsistent, resetting ring\n",
 						com_dev_index,
 						static_cast<unsigned long>(gi),
 						static_cast<unsigned long>(pi),
@@ -1504,7 +1774,7 @@ void ScDev::TxMain()
 					auto const slot_index = priv->tx.index % data->tx.elements;
 					sc_can_mm_slot_t* slot = &priv->tx.hdr->elements[slot_index];
 
-					if (SC_CAN_DATA_TYPE_TX == slot->tx.type) {
+					if (SC_MM_DATA_TYPE_CAN_TX == slot->tx.type) {
 						// wait with a timeout to prevent spinning
 						r = WaitForSingleObject(m_TxFifoAvailable, 1);
 						if (WAIT_OBJECT_0 == r) {
@@ -1559,7 +1829,7 @@ void ScDev::TxMain()
 									&added);
 
 								if (error) {
-									LOG_ERROR("sc_can_stream_tx_batch_add failed: %s (%d)\n", sc_strerror(error), error);
+									LogFormatQueue(SC_DLL_LOG_LEVEL_ERROR, "sc_can_stream_tx_batch_add failed: %s (%d)\n", sc_strerror(error), error);
 									SetDeviceError(error);
 									return;
 								}
@@ -1570,7 +1840,7 @@ void ScDev::TxMain()
 
 								error = sc_can_stream_tx_batch_end(m_Stream);
 								if (error) {
-									LOG_ERROR("sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
+									LogFormatQueue(SC_DLL_LOG_LEVEL_ERROR, "sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
 									SetDeviceError(error);
 									stream_error = true;
 									goto service_end;
@@ -1578,7 +1848,7 @@ void ScDev::TxMain()
 
 								error = sc_can_stream_tx_batch_begin(m_Stream);
 								if (error) {
-									LOG_ERROR("sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
+									LogFormatQueue(SC_DLL_LOG_LEVEL_ERROR, "sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
 									stream_error = true;
 									goto service_end;
 								}
@@ -1607,7 +1877,7 @@ void ScDev::TxMain()
 					else {
 						// drop
 						//++data->tx.hdr->txr_lost;
-						LOG_WARN("TX ring index=%u unhandled entry type=%d will be ignored\n", slot_index, slot->tx.type);
+						LogFormatQueue(SC_DLL_LOG_LEVEL_WARNING, "TX ring index=%u unhandled entry type=%d will be ignored\n", slot_index, slot->tx.type);
 
 						++priv->tx.index;
 
@@ -1627,7 +1897,7 @@ void ScDev::TxMain()
 		if (finish_batch) {
 			auto error = sc_can_stream_tx_batch_end(m_Stream);
 			if (error) {
-				LOG_ERROR("sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
+				LogFormatQueue(SC_DLL_LOG_LEVEL_ERROR, "sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
 				SetDeviceError(error);
 				stream_error = true;
 				goto service_end;
@@ -1893,7 +2163,7 @@ STDMETHODIMP XSuperCANDevice::SetDataBitTiming(SuperCANBitTimingParams params)
 	return _Cmd(bt->len);
 }
 
-void XSuperCANDevice::SetSuperCAN(ISuperCAN* sc)
+void XSuperCANDevice::SetSuperCAN(ISuperCAN2* sc)
 {
 	ATLASSERT(sc);
 
@@ -1906,6 +2176,20 @@ void XSuperCANDevice::SetSuperCAN(ISuperCAN* sc)
 	m_Sc = sc;
 }
 
+STDMETHODIMP XSuperCANDevice::SetLogLevel(int level)
+{
+	ObjectLock g(this);
+
+	auto error = m_SharedDevice->SetLogLevel(m_Index, level);
+	if (error) {
+		SC_HRESULT_FROM_ERROR(error);
+	}
+
+	return S_OK;
+}
+
+
+
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
@@ -1914,12 +2198,16 @@ XSuperCAN::~XSuperCAN()
 {
 	m_Devices.clear();
 
+	sc_log_set_callback(nullptr, nullptr);
+
 	sc_uninit();
 }
 
 XSuperCAN::XSuperCAN()
 {
 	sc_init();
+
+	sc_log_set_callback(this, XSuperCAN::Log);
 }
 
 
@@ -2000,7 +2288,7 @@ STDMETHODIMP XSuperCAN::DeviceScan(unsigned long* count)
 					ptr = std::make_shared<ScDev>();
 					error = ptr->Init(std::wstring(str.data(), str.data() + len));
 					if (error) {
-						LOG_ERROR("failed to initialize SuperCAN device: %s (%d)\n", sc_strerror(error), error);
+						LOG_SRV(SC_DLL_LOG_LEVEL_ERROR, "failed to initialize SuperCAN device: %s (%d)\n", sc_strerror(error), error);
 					}
 					else {
 						new_devices.emplace_back(std::move(ptr));
@@ -2077,6 +2365,25 @@ STDMETHODIMP XSuperCAN::GetVersion(SuperCANVersion* version)
 	version->commit = SysAllocString(_T(SC_COMMIT));
 
 	return S_OK;
+}
+
+STDMETHODIMP XSuperCAN::SetLogLevel(int level)
+{
+	sc_log_set_level(level);
+
+	return S_OK;
+}
+
+void XSuperCAN::Log(void* ctx, int level, char const* msg, size_t bytes)
+{
+	static_cast<XSuperCAN*>(ctx)->Log(level, msg, bytes);
+}
+
+void XSuperCAN::Log(int level, char const* msg, size_t bytes)
+{
+	(void)bytes;
+
+	LOG_DLL(level, "%s", msg);
 }
 
 } // anon
@@ -2157,4 +2464,13 @@ STDMETHODIMP CSuperCAN::GetVersion(SuperCANVersion* version)
 	}
 
 	return m_Instance->GetVersion(version);
+}
+
+STDMETHODIMP CSuperCAN::SetLogLevel(int level)
+{
+	if (!m_Instance) {
+		return E_OUTOFMEMORY;
+	}
+
+	return m_Instance->SetLogLevel(level);
 }

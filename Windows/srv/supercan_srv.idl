@@ -99,6 +99,17 @@ library SuperCAN
 	};
 
 	[
+		object,
+		uuid(4CF5E694-1111-4719-B6CB-A9B88985E97A),
+		pointer_default(unique),
+		oleautomation,
+	]
+	interface ISuperCANDevice2 : ISuperCANDevice
+	{
+		HRESULT SetLogLevel(int level);
+	};
+
+	[
 		object, // The [object] interface attribute identifies a COM interface. else DCE RPC
 		uuid(8F8C4375-2DFE-4335-8947-036F965BD927),
 		pointer_default(unique),
@@ -122,6 +133,7 @@ library SuperCAN
 	interface ISuperCAN2 : ISuperCAN
 	{
 		HRESULT GetVersion(struct SuperCANVersion* version);
+		HRESULT SetLogLevel(int level);
 	};
 
 	[
