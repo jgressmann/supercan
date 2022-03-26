@@ -1110,6 +1110,8 @@ static inline int sc_rx_submit(
     return SC_DLL_ERROR_NONE;
 }
 
+
+
 SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
 {
     struct sc_stream* stream = (struct sc_stream*)_stream;
@@ -1179,7 +1181,7 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
          * NOTE: Manually reset the event here, because I don't
          * NOTE: know when exactly the event will automatically reset.
          */
-        ResetEvent(stream->exposed.user_handle);
+        ResetEvent(stream->rx_ovs[index].hEvent);
 
         error = sc_rx_submit(stream);
         if (error) {
@@ -1203,6 +1205,19 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
         stream->error = error;
         return error;
     }
+
+    return SC_DLL_ERROR_NONE;
+}
+
+SC_DLL_API int sc_can_stream_rx_next_wait_handle(sc_can_stream_t* _stream, HANDLE* handle)
+{
+    struct sc_stream* stream = (struct sc_stream*)_stream;
+    
+    if (!stream || !handle) {
+        return SC_DLL_ERROR_INVALID_PARAM;
+    }
+
+    *handle = stream->rx_ovs[stream->rx_next].hEvent;
 
     return SC_DLL_ERROR_NONE;
 }

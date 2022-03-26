@@ -301,16 +301,31 @@ SC_DLL_API int sc_can_stream_tx(
     uint8_t const* ptr,
     uint16_t bytes);
 
-/** Receives messages
+/** Receives CAN messages
  *
  * Calls this function repeatedly to implement the message loop.
  *
- * \param stream    CAN stream
+ * \param stream        CAN stream
  * \param timeout_ms    timeout in milliseconds, argument to WaitForMultipleObjects.
  * \returns error code
  */
 SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* stream, DWORD timeout_ms);
 
+
+/** Retrieves the stream's next rx wait handle
+ *
+ * Call this function prior to sc_can_stream_rx to get the wait handle.
+ * Wait for the handle to become signaled, then call sc_can_stream_rx.
+ * 
+ * NOTE: the wait handle may change after a call to sc_can_stream_rx so
+ * make sure to call this function again.
+ *
+ * \param stream        CAN stream
+ * \param handle        the next wait handle to wait upon.
+ * \returns error code
+ */
+
+SC_DLL_API int sc_can_stream_rx_next_wait_handle(sc_can_stream_t* stream, HANDLE* handle);
 
 #ifdef __cplusplus
 }
