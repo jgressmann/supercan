@@ -50,7 +50,7 @@ struct can_state {
     struct can_echo echos[256];
 };
 
-static void log(void* ctx, int level, char const* msg, size_t size)
+static void log_callback(void* ctx, int level, char const* msg, size_t size)
 {
     struct app_ctx* ac = (struct app_ctx*)ctx;
 
@@ -58,7 +58,7 @@ static void log(void* ctx, int level, char const* msg, size_t size)
     (void)size;
 
     if (!ac->candump) {
-        fprintf(stderr, "%s", msg);
+        fprintf(stderr, "DLL: %s", msg);
     }
 }
 
@@ -430,7 +430,7 @@ int run_single(struct app_ctx* ac)
     
     sc_init();
 
-    sc_log_set_callback(ac, &log);
+    sc_log_set_callback(ac, &log_callback);
     sc_log_set_level(ac->debug_log_level);
 
     sc_version(&version);
