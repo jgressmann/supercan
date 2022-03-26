@@ -53,6 +53,7 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 #include <supercan_winapi.h>
 #include <stdio.h>
 
+
 #include "commit.h"
 
 // I am going to assume Windows on ARM is little endian
@@ -60,21 +61,54 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 #define SC_CAN_STREAM_MAX_RX_WAIT_HANDLES 64
 #define SC_CAN_STREAM_DEFAULT_RX_WAIT_HANDLES 32
 
-#define LOG2(prefix, ...) \
+#define LOG_LIB(level, ...) \
 	do { \
-		char buf[256] = {0}; \
-		_snprintf_s(buf, sizeof(buf), _TRUNCATE, prefix __VA_ARGS__); \
-		OutputDebugStringA(buf); \
+        if (level <= s_LogLevel) {\
+		    char buf[256]; \
+		    int chars = _snprintf_s(buf, sizeof(buf), _TRUNCATE, __VA_ARGS__); \
+            s_LogCallback(s_LogCtx, level, buf, chars); \
+        } \
 	} while (0)
 
-#define LOG_DEBUG(...) LOG2("SC DLL DEBUG: ", __VA_ARGS__)
-#define LOG_INFO(...) LOG2("SC DLL INFO: ", __VA_ARGS__)
-#define LOG_WARN(...) LOG2("SC DLL WARN: ", __VA_ARGS__)
-#define LOG_ERROR(...) LOG2("SC DLL ERROR: ", __VA_ARGS__)
+
+#define LOG_DEV(dev, level, ...) \
+	do { \
+        if (level <= (dev)->log_level) { \
+		    char buf[256]; \
+		    int chars = _snprintf_s(buf, sizeof(buf), _TRUNCATE, __VA_ARGS__); \
+            (dev)->log_callback((dev)->log_ctx, level, buf, chars); \
+        } \
+	} while (0)
+
+
+#define LOG_LIB_ERROR(...) LOG_LIB(SC_DLL_LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_LIB_WARN(...) LOG_LIB(SC_DLL_LOG_LEVEL_WARNING, __VA_ARGS__)
+#define LOG_LIB_INFO(...) LOG_LIB(SC_DLL_LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_LIB_DEBUG1(...) LOG_LIB(SC_DLL_LOG_LEVEL_DEBUG, __VA_ARGS__)
+
+#define LOG_DEV_ERROR(dev, ...) LOG_DEV(dev, SC_DLL_LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_DEV_WARN(dev, ...) LOG_DEV(dev, SC_DLL_LOG_LEVEL_WARNING, __VA_ARGS__)
+#define LOG_DEV_INFO(dev, ...) LOG_DEV(dev, SC_DLL_LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_DEV_DEBUG1(dev, ...) LOG_DEV(dev, SC_DLL_LOG_LEVEL_DEBUG, __VA_ARGS__)
+
 
 #define SC_DLL_VERSION_BUILD 0
 #define SC_CMD_TIMEOUT_MS 3000
 #define SC_STREAM_TIMEOUT_MS 5000
+
+static void Nop(sc_dev_t * dev, int level, char const* msg, size_t size)
+{
+    (void)dev;
+    (void)level;
+    (void)msg;
+    (void)size;
+}
+
+static int s_LogLevel = SC_DLL_LOG_LEVEL_OFF;
+static void* s_LogCtx = NULL;
+static sc_log_callback_t s_LogCallback = &Nop;
+
+
 
 static struct sc_data {
     wchar_t *dev_list;
@@ -111,6 +145,9 @@ struct sc_dev_ex {
     sc_dev_t exposed;
     HANDLE dev_handle;
     WINUSB_INTERFACE_HANDLE usb_handle;
+    void* log_ctx;
+    sc_log_callback_t log_callback;
+    int log_level;
 };
 
 struct sc_stream {
@@ -152,8 +189,6 @@ static inline int HrToError(HRESULT hr)
         return SC_DLL_ERROR_NONE;
     }
 
-    LOG_ERROR("HR: %08x\n", hr);
-
     switch (hr) {
     case E_OUTOFMEMORY:
         return SC_DLL_ERROR_OUT_OF_MEM;
@@ -178,6 +213,16 @@ SC_DLL_API void sc_version(sc_version_t* version)
     version->commit = SC_COMMIT;
 }
 
+SC_DLL_API void sc_log_set_level(int level)
+{
+    s_LogLevel = level;
+}
+
+SC_DLL_API void sc_log_set_callback(void* ctx, sc_log_callback_t callback)
+{
+    s_LogCtx = ctx;
+    s_LogCallback = callback ? callback : &Nop;
+}
 
 SC_DLL_API void sc_init(void)
 {
@@ -669,6 +714,9 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         dev->exposed.dev_to_host32 = &Swap32;
     }
 
+    dev->log_callback = &Nop;
+    dev->log_level = SC_DLL_LOG_LEVEL_OFF;
+
     *_dev = (sc_dev_t*)dev;
 
 Cleanup:
@@ -897,6 +945,33 @@ SC_DLL_API int sc_dev_cancel(sc_dev_t *_dev, OVERLAPPED* ov)
     return SC_DLL_ERROR_NONE;
 }
 
+SC_DLL_API int sc_dev_log_set_level(sc_dev_t* _dev, int level)
+{
+    struct sc_dev_ex* dev = (struct sc_dev_ex*)_dev;
+
+    if (!_dev) {
+        return SC_DLL_ERROR_INVALID_PARAM;
+    }
+
+    dev->log_level = level;
+
+    return SC_DLL_ERROR_NONE;
+}
+
+SC_DLL_API int sc_dev_log_set_callback(sc_dev_t* _dev, void* ctx, sc_log_callback_t callback)
+{
+    struct sc_dev_ex* dev = (struct sc_dev_ex*)_dev;
+
+    if (!_dev) {
+        return SC_DLL_ERROR_INVALID_PARAM;
+    }
+
+    dev->log_ctx = ctx;
+    dev->log_callback = callback ? callback : &Nop;
+
+    return SC_DLL_ERROR_NONE;
+}
+
 SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t* _stream)
 {
     struct sc_stream* stream = (struct sc_stream*)_stream;
@@ -1032,6 +1107,8 @@ SC_DLL_API int sc_can_stream_init(
             error = SC_DLL_ERROR_UNKNOWN;
             goto Error;
         }
+
+        LOG_DEV_DEBUG1(stream->dev, "sc_can_stream_init submit %u\n", (unsigned)i);
 
         ++stream->rx_count;
     }
@@ -1193,7 +1270,7 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
             return user_error;
         }
 
-        LOG_DEBUG("rxs submit %u\n", index);
+        LOG_DEV_DEBUG1(stream->dev, "sc_can_stream_rx submit %u\n", index);
     }
     else if (WAIT_TIMEOUT == dw) {
         // nothing to do
@@ -1234,7 +1311,7 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
         ResetEvent(stream->tx_ovs[stream->tx_index].hEvent);
     }
     else if (WAIT_TIMEOUT == dw) {
-        LOG_ERROR("CAN stream tx timed out after %u [ms]\n", SC_STREAM_TIMEOUT_MS);
+        LOG_DEV_ERROR(stream->dev, "CAN stream tx timed out after %u [ms]\n", SC_STREAM_TIMEOUT_MS);
         error = SC_DLL_ERROR_TIMEOUT;
         goto exit_error;
     } 

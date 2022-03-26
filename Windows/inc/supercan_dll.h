@@ -44,6 +44,12 @@
 #   endif
 #endif
 
+#ifdef _MSC_VER
+#   define SC_DEPRECATED __declspec(deprecated)
+#else 
+#   define SC_DEPRECATED 
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -97,11 +103,23 @@ typedef struct sc_dev {
 } sc_dev_t;
 
 
-/** Retrieve library version
+typedef enum {
+    SC_DLL_LOG_LEVEL_OFF = -1,
+    SC_DLL_LOG_LEVEL_ERROR = 0x00,
+    SC_DLL_LOG_LEVEL_WARNING = 0x10,
+    SC_DLL_LOG_LEVEL_INFO = 0x20,
+    SC_DLL_LOG_LEVEL_DEBUG = 0x30
+} sc_log_level_t;
+
+
+/** Log callback prototype
  *
- * This function is thread-safe.
+ * \param ctx   user context
+ * \param msg   log message, always zero-terminated
+ * \param size  size of log message in bytes, excluding trailing zero
  */
-SC_DLL_API void sc_version(sc_version_t *version);
+typedef void (*sc_log_callback_t)(void* ctx, int level, char const* msg, size_t size);
+
 
 /** Initializes the library
  *
@@ -117,6 +135,27 @@ SC_DLL_API void sc_uninit(void);
 
 /** Returns a textual description of the error code */
 SC_DLL_API char const* sc_strerror(int error);
+
+/** Retrieve library version
+ *
+ * This function is thread-safe.
+ */
+SC_DLL_API void sc_version(sc_version_t* version);
+
+
+/** Set library log level
+ *
+ * This function is not thread-safe.
+ * 
+ * After initialization, logging is disabled (off).
+ */
+SC_DLL_API void sc_log_set_level(int level);
+
+/** Set library log callback
+ *
+ * This function is not thread-safe.
+ */
+SC_DLL_API void sc_log_set_callback(void* ctx, sc_log_callback_t callback);
 
 /** Scans the system for devices.
  *
@@ -191,6 +230,14 @@ SC_DLL_API int sc_dev_result(sc_dev_t *dev, DWORD* bytes, OVERLAPPED *ov, int ti
  */
 SC_DLL_API int sc_dev_cancel(sc_dev_t *dev, OVERLAPPED *ov);
 
+/** Sets device log level 
+ * 
+ * After initialization, device logging is disabled (off).
+ */
+SC_DLL_API int sc_dev_log_set_level(sc_dev_t* dev, int level);
+
+/** Sets device log callback */
+SC_DLL_API int sc_dev_log_set_callback(sc_dev_t* dev, void* ctx, sc_log_callback_t callback);
 
 
 typedef struct sc_cmd_ctx {
