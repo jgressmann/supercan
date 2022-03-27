@@ -847,6 +847,8 @@ void ScDev::Uninit()
 	}
 
 	Unmap();
+
+	m_LogLevel = SC_DLL_LOG_LEVEL_OFF;
 }
 
 void ScDev::Unmap()
@@ -1086,6 +1088,11 @@ int ScDev::Init(std::wstring&& name)
 	}
 
 	error = sc_dev_log_set_callback(m_Device, this, &ScDev::Log);
+	if (error) {
+		goto error_exit;
+	}
+
+	error = sc_dev_log_set_level(m_Device, m_LogLevel);
 	if (error) {
 		goto error_exit;
 	}
