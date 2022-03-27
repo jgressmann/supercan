@@ -1013,8 +1013,7 @@ void ScDev::Log(int level, const char* msg, size_t bytes)
 		++m_LogLost;
 
 		OutputDebugStringA("SC SRV: log ring buffer full\n");
-		OutputDebugStringA("SC DLL: ");
-		OutputDebugStringA(msg);
+		// Should we still log?
 	}
 }
 
@@ -1046,6 +1045,8 @@ void ScDev::LogFormatQueue(int level, const char* fmt, ...)
 			SetEvent(m_LogEvent);
 		}
 		else {
+			++m_LogLost;
+
 			OutputDebugStringA("SC SRV: log ring buffer full\n");
 		}
 	}
