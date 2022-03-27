@@ -1076,6 +1076,12 @@ SC_DLL_API int sc_can_stream_init(
 
     // create and submit all IN tokens
     for (size_t i = 0; i < (size_t)rreqs; ++i) {
+        /* Never, never use automatic reset events!!! 
+         *
+         * You never know when exactly the event will automatically 
+         * reset which would prevent any sort of WaitForMultipleObjects
+         * use.
+         */
         HANDLE h = CreateEventW(NULL, TRUE, FALSE, NULL);
 
         if (!h) {
@@ -1187,7 +1193,63 @@ static inline int sc_rx_submit(
     return SC_DLL_ERROR_NONE;
 }
 
+static int sc_can_stream_rx_process_signaled_ex(struct sc_stream* stream)
+{
+    int error = SC_DLL_ERROR_NONE;
+    int user_error = SC_DLL_ERROR_NONE;
+    DWORD transferred = 0;
+    uint8_t const index = stream->rx_next;
 
+    if (!WinUsb_GetOverlappedResult(
+        stream->dev->usb_handle,
+        &stream->rx_ovs[index],
+        &transferred,
+        FALSE)) {
+        DWORD e = GetLastError();
+        HRESULT hr = HRESULT_FROM_WIN32(e);
+        error = HrToError(hr);
+        stream->error = error;
+        return error;
+    }
+
+    if (transferred) {
+        PUCHAR ptr = stream->rx_buffers + stream->buffer_size * index;
+
+        user_error = sc_process_rx_buffer(stream, ptr, (uint16_t)transferred);
+    }
+
+    /* Keep stream processing, return user error later on. */
+    ResetEvent(stream->rx_ovs[index].hEvent);
+
+    error = sc_rx_submit(stream);
+    if (error) {
+        stream->error = error;
+        return error;
+    }
+
+    if (user_error) {
+        return user_error;
+    }
+
+    LOG_DEV_DEBUG1(stream->dev, "sc_can_stream_rx submit %u\n", index);
+
+    return error;
+}
+
+SC_DLL_API int sc_can_stream_rx_process_signaled_wait_handle(sc_can_stream_t* _stream)
+{
+    struct sc_stream* stream = (struct sc_stream*)_stream;
+    
+    if (!stream) {
+        return SC_DLL_ERROR_INVALID_PARAM;
+    }
+
+    if (stream->error) {
+        return stream->error;
+    }
+
+    return sc_can_stream_rx_process_signaled_ex(stream);
+}
 
 SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
 {
@@ -1233,45 +1295,7 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
     }
    
     if (WAIT_OBJECT_0 == dw) {
-        int user_error = SC_DLL_ERROR_NONE;
-        DWORD transferred = 0;
-        
-        if (!WinUsb_GetOverlappedResult(
-            stream->dev->usb_handle,
-            &stream->rx_ovs[index],
-            &transferred,
-            FALSE)) {
-            DWORD e = GetLastError();
-            HRESULT hr = HRESULT_FROM_WIN32(e);
-            error = HrToError(hr);
-            stream->error = error;
-            return error;
-        }
-        
-        if (transferred) {
-            PUCHAR ptr = stream->rx_buffers + stream->buffer_size * index;
-
-            user_error = sc_process_rx_buffer(stream, ptr, (uint16_t)transferred);
-        }
-
-        /* Keep stream processing, return user error later on.
-         * 
-         * NOTE: Manually reset the event here, because I don't
-         * NOTE: know when exactly the event will automatically reset.
-         */
-        ResetEvent(stream->rx_ovs[index].hEvent);
-
-        error = sc_rx_submit(stream);
-        if (error) {
-            stream->error = error;
-            return error;
-        }
-
-        if (user_error) {
-            return user_error;
-        }
-
-        LOG_DEV_DEBUG1(stream->dev, "sc_can_stream_rx submit %u\n", index);
+        return sc_can_stream_rx_process_signaled_ex(stream);
     }
     else if (WAIT_TIMEOUT == dw) {
         // nothing to do

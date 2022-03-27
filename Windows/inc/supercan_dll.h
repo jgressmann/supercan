@@ -371,8 +371,19 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* stream, DWORD timeout_ms);
  * \param handle        the next wait handle to wait upon.
  * \returns error code
  */
-
 SC_DLL_API int sc_can_stream_rx_next_wait_handle(sc_can_stream_t* stream, HANDLE* handle);
+
+/** Process the stream's signaled wait handle
+ *
+ * NOTE: This function doesn't check if the handle is in fact signaled.
+ * NOTE: It is up the the caller to ensure the handle is in the proper
+ * NOTE: state prior to the call.
+ *
+ * \param stream        CAN stream
+ 
+ * \returns error code
+ */
+SC_DLL_API int sc_can_stream_rx_process_signaled_wait_handle(sc_can_stream_t* stream);
 
 #ifdef __cplusplus
 }
