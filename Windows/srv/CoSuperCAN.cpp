@@ -197,7 +197,9 @@ private:
 	void ComDeviceRemovedTx(sc_com_dev_index_t index);
 	void ComDeviceRemovedRx(sc_com_dev_index_t index);
 	void Notify(uint8_t code, uint8_t value);
-	void ProcessRxNotification(bool* done);
+	void ProcessRxNotification(bool* done, bool* performed_work);
+	void ProcessLog(bool* performed_work);
+	void ProcessRxStream(bool* stream_error, bool* performed_work);
 	void ResetTxrMap();
 	void LogFormatQueue(int level, char const* fmt, ...);
 	void LogFormatDirect(int level, char const* fmt, ...);
@@ -1516,8 +1518,15 @@ void ScDev::RxMain()
 
 	for (bool done = false; !done; ) {
 		if (stream_error) {
+			auto rx_notification_had_work = false;
+
 			// Do continue to service requests, especially the ones that require acknowledge.
-			ProcessRxNotification(&done);
+			ProcessRxNotification(&done, &rx_notification_had_work);
+
+
+			if (!rx_notification_had_work) {
+				Sleep(0); // manual reset events could be set for a while
+			}
 		}
 		else {
 			auto error = sc_can_stream_rx_next_wait_handle(m_Stream, &handles[2]);
@@ -1531,47 +1540,23 @@ void ScDev::RxMain()
 				DWORD r = WaitForMultipleObjects(static_cast<DWORD>(_countof(handles)), handles, FALSE, INFINITE);
 
 				if (r >= WAIT_OBJECT_0 && r < WAIT_OBJECT_0 + _countof(handles)) {
-					DWORD handle_index = r - WAIT_OBJECT_0;
+					auto rx_notification_had_work = false;
+					auto log_had_work = false;
+					auto rx_had_work = false;
 
-					switch (handle_index) {
-					case 0:
-						ProcessRxNotification(&done);
-						break;
-					case 1: {
-						Guard g(m_LogLock);
+					/* WaitForMultipleObjects returns first signaled handle,
+					 * but more _could_ be signaled.
+					 *
+					 * https://docs.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitformultipleobjects
+					 */
+					ProcessRxNotification(&done, &rx_notification_had_work);
+					ProcessLog(&log_had_work);
+					ProcessRxStream(&stream_error, &rx_had_work);
 
-						ResetEvent(m_LogEvent);
-
-						if (m_LogLost) {
-							for (sc_com_dev_index_t i = 0; i < m_RxThreadLiveComDevCount; ++i) {
-								auto com_dev_index = m_RxThreadLiveComDevBuffer[i];
-								auto* priv = &m_ComDeviceDataPrivate[com_dev_index];
-
-								InterlockedAdd((volatile LONG*)&priv->rx.hdr->log_lost, (LONG)m_LogLost);
-								SetEvent(priv->rx.ev);
-							}
-
-							m_LogLost = 0;
-						}
-
-						while (m_LogRingGetIndex != m_LogRingPutIndex) {
-							const unsigned index = m_LogRingGetIndex++ % _countof(m_LogRingBuffer);
-							log_entry const * const e = &m_LogRingBuffer[index];
-
-							StoreLogMessage(e);
-						}
-					} break;
-					case 2:
-						error = sc_can_stream_rx(m_Stream, 0);
-						if (error) {
-							SetDeviceError(error);
-							LogFormatDirect(SC_DLL_LOG_LEVEL_ERROR, "sc_can_stream_rx failed: %s (%d)\n", sc_strerror(error), error);
-							stream_error = true;
-						}
-						break;
-					default:
-						LogFormatDirect(SC_DLL_LOG_LEVEL_ERROR, "RxMain unhandled handle index %u\n", handle_index);
-						break;
+					if (!rx_notification_had_work &&
+						!log_had_work &&
+						!rx_had_work) {
+						Sleep(0); // manual reset events could be set for a while
 					}
 				}
 				else if (WAIT_TIMEOUT == r) {
@@ -1589,12 +1574,69 @@ void ScDev::RxMain()
 	}
 }
 
-void ScDev::ProcessRxNotification(bool *done)
+void ScDev::ProcessLog(bool* performed_work)
+{
+	*performed_work = false;
+
+	Guard g(m_LogLock);
+
+	ResetEvent(m_LogEvent);
+
+	if (m_LogLost) {
+		for (sc_com_dev_index_t i = 0; i < m_RxThreadLiveComDevCount; ++i) {
+			auto com_dev_index = m_RxThreadLiveComDevBuffer[i];
+			auto* priv = &m_ComDeviceDataPrivate[com_dev_index];
+
+			InterlockedAdd((volatile LONG*)&priv->rx.hdr->log_lost, (LONG)m_LogLost);
+			SetEvent(priv->rx.ev);
+		}
+
+		m_LogLost = 0;
+
+		*performed_work = true;
+	}
+
+	if (m_LogRingGetIndex != m_LogRingPutIndex) {
+		do {
+			const unsigned index = m_LogRingGetIndex++ % _countof(m_LogRingBuffer);
+			log_entry const* const e = &m_LogRingBuffer[index];
+
+			StoreLogMessage(e);
+		} while (m_LogRingGetIndex != m_LogRingPutIndex);
+
+		*performed_work = true;
+	}
+}
+
+void ScDev::ProcessRxStream(bool* stream_error, bool* performed_work)
+{
+	*performed_work = false;
+
+	auto error = sc_can_stream_rx(m_Stream, 0);
+
+	if (error) {
+		if (SC_DLL_ERROR_TIMEOUT == error) {
+
+		}
+		else {
+			SetDeviceError(error);
+			LogFormatDirect(SC_DLL_LOG_LEVEL_ERROR, "sc_can_stream_rx failed: %s (%d)\n", sc_strerror(error), error);
+			*stream_error = true;
+			*performed_work = true;
+		}
+	}
+	else {
+		*performed_work = true;
+	}
+}
+
+void ScDev::ProcessRxNotification(bool *done, bool* performed_work)
 {
 	uint8_t code = 0;
 	uint8_t value = 0;
 
-	ATLASSERT(done);
+	assert(done);
+	assert(performed_work);
 
 	code = m_RxThreadNotificationCode.exchange(NOTIFICATION_NONE);
 	value = m_RxThreadNotificationValue.load(std::memory_order_consume);
@@ -1603,6 +1645,7 @@ void ScDev::ProcessRxNotification(bool *done)
 	case NOTIFICATION_SHUTDOWN:
 		*done = true;
 		break;
+
 	case NOTIFICATION_SET:
 		for (sc_com_dev_index_t i = 0; i < MAX_COM_DEVICES_PER_SC_DEVICE; ++i) {
 			if (value & (sc_com_dev_index_t(1) << i)) {
@@ -1612,10 +1655,12 @@ void ScDev::ProcessRxNotification(bool *done)
 
 		ReleaseSemaphore(m_ThreadNotificationAcknowledgeCount, 1, NULL);
 		break;
+
 	case NOTIFICATION_ADD:
 		m_RxThreadLiveComDevBuffer[m_RxThreadLiveComDevCount++] = static_cast<sc_com_dev_index_t>(value);
 		ReleaseSemaphore(m_ThreadNotificationAcknowledgeCount, 1, nullptr);
 		break;
+
 	case NOTIFICATION_REMOVE: {
 		ComDeviceRemovedRx(static_cast<sc_com_dev_index_t>(value));
 
@@ -1638,11 +1683,9 @@ void ScDev::ProcessRxNotification(bool *done)
 
 		ReleaseSemaphore(m_ThreadNotificationAcknowledgeCount, 1, nullptr);
 	} break;
-	case NOTIFICATION_NONE:
-		// for manual reset event this could be active a bit
-		Sleep(0); // yield
-		break;
 	}
+
+	*performed_work = NOTIFICATION_NONE != code;
 }
 
 DWORD ScDev::TxMain(void* self)
@@ -1683,6 +1726,11 @@ void ScDev::TxMain()
 			const auto handle_index = r - WAIT_OBJECT_0;
 			const auto handle = handles[handle_index];
 
+			/* WaitForMultipleObjects returns first signaled handle,
+			 * but more _could_ be signaled.
+			 *
+			 * https://docs.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitformultipleobjects
+			 */
 			if (m_TxThreadNotificationEvent == handle) {
 				const auto code = m_TxThreadNotificationCode.exchange(NOTIFICATION_NONE);
 				const auto value = m_TxThreadNotificationValue.load(std::memory_order_consume);

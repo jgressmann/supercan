@@ -1212,17 +1212,18 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
         };
         DWORD const wait_count = _countof(wait_handles);
 
+        /* WaitForMultipleObjects returns first signaled handle, 
+         * but more _could_ be signaled.
+         *
+         * https://docs.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitformultipleobjects
+         */
         dw = WaitForMultipleObjects(wait_count, wait_handles, FALSE, timeout_ms);
 
         switch (dw) {
         case WAIT_OBJECT_0:
             return SC_DLL_ERROR_USER_HANDLE_SIGNALED;
         case WAIT_OBJECT_0 + 1:
-            /* Looks like we actually need to check this, sigh */
-            if (WaitForSingleObject(stream->exposed.user_handle, 0) == WAIT_OBJECT_0) {
-                return SC_DLL_ERROR_USER_HANDLE_SIGNALED;
-            }
-
+            // map to rx event
             dw = WAIT_OBJECT_0;
             break;
         }
