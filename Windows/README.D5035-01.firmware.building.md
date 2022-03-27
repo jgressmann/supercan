@@ -2,7 +2,7 @@
 
 I suppose if you had WSL installed, you would have already followed the Linux instructions :).
 
-This will guide you through the installation of [MSYS2](https://www.msys2.org/) which will provide a Linux-like environment on Windows. 
+This will guide you through the installation of [MSYS2](https://www.msys2.org/) which will provide a Linux-like environment on Windows.
 
 Afaik Windows nowadays is 64 bit so these steps describe the 64 bit path. If you happen to be using 32 bit Windows, just use the matching versions of MinGW terminal / MSYS2 packages.
 
