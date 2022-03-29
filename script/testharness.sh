@@ -422,7 +422,7 @@ if [ $init -ne 0 ]; then
 			echo INFO: TEST log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
 		fi
 	else
-	echo INFO: not running error recovery tests. | tee -a "$meta_log_path"
+		echo INFO: not running error recovery tests. | tee -a "$meta_log_path"
 	fi
 else
 	echo INFO: init forbidden, not running error recovery tests. | tee -a "$meta_log_path"
@@ -570,6 +570,15 @@ if [ $? -ne 0 ]; then
 else
 	echo INFO: good -\> test rx timestamps mono OK! | tee -a "$meta_log_path"
 fi
+
+non_zero_time_stamp=$(cat "$good_to_test_file_test_path" | awk '{print $1;}' | grep -v '(0000000000.000000)')
+if [ -z "$non_zero_time_stamp" ]; then
+	echo ERROR: good -\> test TEST log file \(RX\) has ONLY zero time stamps! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: good -\> test TEST log file \(RX\) has found non-zero time stamp, OK! | tee -a "$meta_log_path"
+fi
+
 set -e
 
 #######################
@@ -640,6 +649,15 @@ if [ $? -ne 0 ]; then
 else
 	echo INFO: test -\> good tx timestamps mono OK! | tee -a "$meta_log_path"
 fi
+
+non_zero_time_stamp=$(cat "$test_to_good_file_test_path" | awk '{print $1;}' | grep -v '(0000000000.000000)')
+if [ -z "$non_zero_time_stamp" ]; then
+	echo ERROR: good -\> test TEST log file \(TX\) has ONLY zero time stamps! | tee -a "$meta_log_path"
+	errors=$((errors+1))
+else
+	echo INFO: good -\> test TEST log file \(TX\) has found non-zero time stamp, OK! | tee -a "$meta_log_path"
+fi
+
 set -e
 
 
