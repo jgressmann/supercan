@@ -7,7 +7,8 @@
 #include "targetver.h"
 
 //#define _ATL_APARTMENT_THREADED
-#define _ATL_FREE_THREADED
+//#define _ATL_FREE_THREADED
+#define _ATL_SINGLE_THREADED
 
 #define _ATL_NO_AUTOMATIC_NAMESPACE
 
