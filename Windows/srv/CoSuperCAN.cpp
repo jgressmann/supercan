@@ -2003,7 +2003,9 @@ XSuperCANDevice::~XSuperCANDevice()
 		m_Sc->Release();
 	}
 
-	CoReleaseServerProcess();
+	auto count = CoReleaseServerProcess();
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "server ref count=%lu\n", count);
 }
 
 XSuperCANDevice::XSuperCANDevice()
@@ -2012,7 +2014,9 @@ XSuperCANDevice::XSuperCANDevice()
 	m_Index = 0;
 	m_Mm = nullptr;
 
-	CoAddRefServerProcess();
+	auto count = CoAddRefServerProcess();
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "server ref count=%lu\n", count);
 }
 
 
@@ -2474,8 +2478,6 @@ CSuperCAN::~CSuperCAN()
 
 		m_Instance = nullptr;
 	}
-
-	CoReleaseServerProcess();
 }
 
 CSuperCAN::CSuperCAN()
@@ -2497,8 +2499,6 @@ CSuperCAN::CSuperCAN()
 		m_Instance = s_Instance;
 		m_Instance->AddRef();
 	}
-
-	
 }
 
 STDMETHODIMP CSuperCAN::DeviceScan(unsigned long* count)
