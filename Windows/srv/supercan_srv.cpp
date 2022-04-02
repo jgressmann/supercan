@@ -25,10 +25,11 @@
 
 
 #include "pch.h"
-#include "framework.h"
+
 #include "resource.h"
 #include "CoSuperCAN.h"
 
+#include "../inc/supercan_dll.h"
 
 
 class CSuperCANSrvModule : public ATL::CAtlExeModuleT< CSuperCANSrvModule >
@@ -52,6 +53,8 @@ extern "C" int WINAPI _tWinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstan
 {
 	int argc = 0;
 	LPWSTR* argv = CommandLineToArgvW(lpCmdLine, &argc);
+	int rc = 0;
+
 	if (argv) {
 		DWORD priority_class = NORMAL_PRIORITY_CLASS;
 
@@ -72,6 +75,12 @@ extern "C" int WINAPI _tWinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstan
 		SetPriorityClass(GetCurrentProcess(), priority_class);
 	}
 
-	return _AtlModule.WinMain(nShowCmd);
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "WinMain start\n");
+
+	rc = _AtlModule.WinMain(nShowCmd);
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "WinMain end\n");
+
+	return rc;
 }
 

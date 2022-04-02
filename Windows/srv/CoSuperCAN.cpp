@@ -59,18 +59,6 @@ OBJECT_ENTRY_AUTO(CLSID_CSuperCAN, CSuperCAN)
 
 
 
-#define LOG2(src, level, ...) \
-	do { \
-		char buf[256]; \
-		int chars = _snprintf_s(buf, sizeof(buf), _TRUNCATE, "SC " src " LVL=%d: ", level); \
-		_snprintf_s(buf + chars, sizeof(buf) - chars, _TRUNCATE, __VA_ARGS__); \
-		OutputDebugStringA(buf); \
-	} while (0)
-
-
-
-#define LOG_DLL(level, ...) LOG2("DLL", level, __VA_ARGS__)
-#define LOG_SRV(level, ...) LOG2("SRV", level, __VA_ARGS__)
 
 namespace
 {
@@ -2474,6 +2462,8 @@ CSuperCAN::~CSuperCAN()
 
 		m_Instance = nullptr;
 	}
+
+	CoReleaseServerProcess();
 }
 
 CSuperCAN::CSuperCAN()
@@ -2495,6 +2485,8 @@ CSuperCAN::CSuperCAN()
 		m_Instance = s_Instance;
 		m_Instance->AddRef();
 	}
+
+	CoAddRefServerProcess();
 }
 
 STDMETHODIMP CSuperCAN::DeviceScan(unsigned long* count)
