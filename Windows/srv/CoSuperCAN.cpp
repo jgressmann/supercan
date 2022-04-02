@@ -2002,6 +2002,8 @@ XSuperCANDevice::~XSuperCANDevice()
 	if (m_Sc) {
 		m_Sc->Release();
 	}
+
+	CoReleaseServerProcess();
 }
 
 XSuperCANDevice::XSuperCANDevice()
@@ -2009,6 +2011,8 @@ XSuperCANDevice::XSuperCANDevice()
 	m_Sc = nullptr;
 	m_Index = 0;
 	m_Mm = nullptr;
+
+	CoAddRefServerProcess();
 }
 
 
