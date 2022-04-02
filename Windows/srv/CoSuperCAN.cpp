@@ -2251,6 +2251,10 @@ XSuperCAN::~XSuperCAN()
 	sc_uninit();
 
 	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "DLL uninitialized\n");
+
+	auto count = CoReleaseServerProcess();
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "server ref count=%lu\n", count);
 }
 
 XSuperCAN::XSuperCAN()
@@ -2260,6 +2264,10 @@ XSuperCAN::XSuperCAN()
 	sc_log_set_callback(this, &XSuperCAN::Log);
 
 	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "DLL initialized\n");
+
+	auto count = CoAddRefServerProcess();
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "server ref count=%lu\n", count);
 }
 
 
@@ -2490,7 +2498,7 @@ CSuperCAN::CSuperCAN()
 		m_Instance->AddRef();
 	}
 
-	CoAddRefServerProcess();
+	
 }
 
 STDMETHODIMP CSuperCAN::DeviceScan(unsigned long* count)
