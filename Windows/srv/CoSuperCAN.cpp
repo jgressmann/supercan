@@ -62,7 +62,7 @@ OBJECT_ENTRY_AUTO(CLSID_CSuperCAN, CSuperCAN)
 #define LOG2(src, level, ...) \
 	do { \
 		char buf[256]; \
-		int chars = _snprintf_s(buf, sizeof(buf), _TRUNCATE, "SC " src "  LVL=%d: ", level); \
+		int chars = _snprintf_s(buf, sizeof(buf), _TRUNCATE, "SC " src " LVL=%d: ", level); \
 		_snprintf_s(buf + chars, sizeof(buf) - chars, _TRUNCATE, __VA_ARGS__); \
 		OutputDebugStringA(buf); \
 	} while (0)
@@ -2257,13 +2257,17 @@ XSuperCAN::~XSuperCAN()
 	sc_log_set_callback(nullptr, nullptr);
 
 	sc_uninit();
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "DLL uninitialized\n");
 }
 
 XSuperCAN::XSuperCAN()
 {
 	sc_init();
 
-	sc_log_set_callback(this, XSuperCAN::Log);
+	sc_log_set_callback(this, &XSuperCAN::Log);
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "DLL initialized\n");
 }
 
 
@@ -2356,14 +2360,19 @@ STDMETHODIMP XSuperCAN::DeviceScan(unsigned long* count)
 
 	m_Devices.swap(new_devices);
 
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "DeviceScan: %zu devices found\n", m_Devices.size());
+
 	return S_OK;
 }
 
 STDMETHODIMP XSuperCAN::DeviceGetCount(unsigned long* count)
 {
-	ATLASSERT(count);
 	ObjectLock g(this);
+
+	ATLASSERT(count);
+	
 	*count = static_cast<unsigned long>(m_Devices.size());
+
 	return S_OK;
 }
 
@@ -2372,9 +2381,9 @@ STDMETHODIMP XSuperCAN::DeviceOpen(
 	unsigned long index, 
 	ISuperCANDevice** dev)
 {
-	ATLASSERT(dev);
-
 	ObjectLock g(this);
+
+	ATLASSERT(dev);
 
 	if (index >= m_Devices.size()) {
 		return E_INVALIDARG;
@@ -2414,6 +2423,8 @@ STDMETHODIMP XSuperCAN::DeviceOpen(
 
 STDMETHODIMP XSuperCAN::GetVersion(SuperCANVersion* version)
 {
+	ATLASSERT(version);
+
 	version->major = SC_SRV_VERSION_MAJOR;
 	version->minor = SC_SRV_VERSION_MINOR;
 	version->patch = SC_SRV_VERSION_PATCH;
@@ -2458,6 +2469,7 @@ CSuperCAN::~CSuperCAN()
 	if (m_Instance) {
 		if (0 == m_Instance->Release()) {
 			s_Instance = nullptr;
+			LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "singleton destroyed\n");
 		}
 
 		m_Instance = nullptr;
@@ -2475,6 +2487,7 @@ CSuperCAN::CSuperCAN()
 
 		if (SUCCEEDED(hr)) {
 			s_Instance = instance;
+			LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "singleton created\n");
 		}
 	}
 	
