@@ -1256,6 +1256,7 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
     struct sc_stream* stream = (struct sc_stream*)_stream;
     int error = SC_DLL_ERROR_NONE;
     DWORD dw = 0;
+    HRESULT hr = S_OK;
 
     if (!stream) {
         return SC_DLL_ERROR_INVALID_PARAM;
@@ -1301,14 +1302,12 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
         // nothing to do
         return SC_DLL_ERROR_TIMEOUT;
     }
-    else {
-        HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
-        error = HrToError(hr);
-        stream->error = error;
-        return error;
-    }
+    
+    hr = HRESULT_FROM_WIN32(GetLastError());
+    error = HrToError(hr);
+    stream->error = error;
 
-    return SC_DLL_ERROR_NONE;
+    return error;
 }
 
 SC_DLL_API int sc_can_stream_rx_next_wait_handle(sc_can_stream_t* _stream, HANDLE* handle)
