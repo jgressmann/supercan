@@ -985,7 +985,7 @@ SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t* _stream)
                     break;
                 }
 
-                CancelIoEx(dev->dev_handle, &stream->rx_ovs[i]);
+                sc_dev_cancel((sc_dev_t*)dev, &stream->rx_ovs[i]);
                 CloseHandle(stream->rx_ovs[i].hEvent);
             }
 
@@ -997,7 +997,7 @@ SC_DLL_API void sc_can_stream_uninit(sc_can_stream_t* _stream)
                 break;
             }
 
-            CancelIoEx(dev->dev_handle, &stream->tx_ovs[i]);
+            sc_dev_cancel((sc_dev_t*)dev, &stream->tx_ovs[i]);
             CloseHandle(stream->tx_ovs[i].hEvent);
         }
 
@@ -1623,7 +1623,7 @@ SC_DLL_API int sc_cmd_ctx_run(
         break;
     case WAIT_TIMEOUT:
         error = SC_DLL_ERROR_TIMEOUT;
-        CancelIoEx(dev->dev_handle, &ctx->tx_ov);
+        sc_dev_cancel((sc_dev_t*)dev, &ctx->tx_ov);
         goto error_exit;
     default: {
         DWORD e = GetLastError();
@@ -1676,7 +1676,7 @@ success_exit:
 
 error_exit:
     if (rx_submitted) {
-        CancelIoEx(dev->dev_handle, &ctx->rx_ov);
+        sc_dev_cancel((sc_dev_t*)dev, &ctx->rx_ov);
     }
     goto success_exit;
 }
