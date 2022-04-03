@@ -79,7 +79,10 @@ public:
 
 		hr = RevokeClassObjects();
 
-		CleanupSingleton();
+		if (m_Singleton) {
+			CleanupSingleton();
+			LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "Singleton '%s' destroyed\n", NAME);
+		}
 
 		if (m_bDelayShutdown)
 			Sleep(m_dwPause); //wait for any threads to finish
@@ -93,8 +96,6 @@ private:
 		if (m_Singleton) {
 			CloseHandle(m_Singleton);
 			m_Singleton = nullptr;
-
-			LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "Singleton '%s' destroyed\n", NAME);
 		}
 	}
 
