@@ -65,7 +65,8 @@ enum sc_log_data_src {
     SC_LOG_DATA_SRC_SRV             ///< message originated in SC COM server
 };
 
-#define SC_LOG_DATA_BUFFER_SIZE 68
+#define SC_LOG_DATA_BUFFER_SIZE 72
+#define SC_MM_ELEMENT_SIZE      88
 
 
 struct sc_mm_header {
@@ -89,6 +90,7 @@ struct sc_mm_can_tx {
     uint8_t echo;           ///< TX echo (ignore track_id)
     uint32_t track_id;
     uint32_t can_id;
+    uint32_t reserved;
     uint64_t timestamp_us;
     uint8_t data[64];
 };
@@ -167,6 +169,14 @@ struct sc_can_mm_header {
     volatile uint32_t log_lost;         ///< log messages lost
     volatile uint32_t reserved1[7];     // reserved for now
     sc_can_mm_slot_t elements[0];
+};
+
+enum {
+    sc_static_assert_sizeof_sc_mm_can_rx_fits = sizeof(int[sizeof(struct sc_mm_can_rx) <= SC_MM_ELEMENT_SIZE ? 1 : -1]),
+    sc_static_assert_sizeof_sc_mm_can_tx_fits = sizeof(int[sizeof(struct sc_mm_can_tx) == SC_MM_ELEMENT_SIZE ? 1 : -1]),
+    sc_static_assert_sizeof_sc_mm_can_status_fits = sizeof(int[sizeof(struct sc_mm_can_status) <= SC_MM_ELEMENT_SIZE ? 1 : -1]),
+    sc_static_assert_sizeof_sc_mm_can_error_fits = sizeof(int[sizeof(struct sc_mm_can_error) <= SC_MM_ELEMENT_SIZE ? 1 : -1]),
+    sc_static_assert_sizeof_sc_mm_log_data_fits = sizeof(int[sizeof(struct sc_mm_log_data) == SC_MM_ELEMENT_SIZE ? 1 : -1]),
 };
 
 #ifdef __cplusplus
