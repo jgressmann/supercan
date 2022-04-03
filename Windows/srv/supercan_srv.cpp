@@ -44,26 +44,30 @@ public :
 CSuperCANSrvModule _AtlModule;
 
 
-
-//
 extern "C" int WINAPI _tWinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/,
 								LPTSTR /*lpCmdLine*/, int nShowCmd)
 {
-	static const char NAME[] = "Global\\sc-singleton-{BA10F9A1-4ABC-46F1-A1C5-BF22F91A7620}";
+	static const char NAME[] = "Global\\sc-com-server";
 
 	HANDLE singleton = NULL;
 
 	singleton = CreateEventA(NULL, TRUE, FALSE, NAME);
 
 	if (singleton) {
-		LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "Created event name='%s'\n", NAME);
-	}
-	else {
-		if (ERROR_ALREADY_EXISTS != GetLastError()) {
-			LOG_SRV(SC_DLL_LOG_LEVEL_ERROR, "Failed to create event name='%s' error=%lu\n", NAME, GetLastError());
-			return 1;
+		if (ERROR_ALREADY_EXISTS == GetLastError()) {
+			CloseHandle(singleton);
+
+			LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "Event name='%s' exists, exiting\n", NAME);
+
+			return E_FAIL;
 		}
 	}
+	else {
+		LOG_SRV(SC_DLL_LOG_LEVEL_ERROR, "Failed to create event name='%s' error=%lu\n", NAME, GetLastError());
+
+		return E_FAIL;
+		
+	}	
 
 	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "WinMain start\n");
 

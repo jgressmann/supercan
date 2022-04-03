@@ -21,7 +21,7 @@ HKCR
 			'TypeLib' = s '{fd71338b-9533-4785-8c2f-664ece4bebee}'
 			'Version' = s '1.0'
 			val LocalizedString = s '@%MODULE%,-1'
-			InprocHandler32 = s 'Ole32.dll'
+			;InprocHandler32 = s 'Ole32.dll'
 		}
 	}
 }
