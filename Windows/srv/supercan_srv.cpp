@@ -37,7 +37,7 @@ class CSuperCANSrvModule : public ATL::CAtlExeModuleT< CSuperCANSrvModule >
 public :
 	DECLARE_LIBID(LIBID_SuperCAN)
 	DECLARE_REGISTRY_APPID_RESOURCEID(IDR_SUPERCANSRV, "{945BB09D-DA86-4183-9C9A-D85220638156}")
-
+#if 0
 public:
 	~CSuperCANSrvModule()
 	{
@@ -104,6 +104,7 @@ private:
 
 private:
 	static constexpr char NAME[] = "Global\\sc-com-server";
+#endif
 };
 
 
