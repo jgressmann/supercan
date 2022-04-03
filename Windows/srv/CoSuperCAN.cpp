@@ -826,7 +826,9 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 
 void ScDev::Uninit()
 {
-	SetBusOff();
+	if (m_CmdCtx.dev) {
+		SetBusOff();
+	}
 
 	sc_cmd_ctx_uninit(&m_CmdCtx);
 	ZeroMemory(&m_CmdCtx, sizeof(m_CmdCtx));
@@ -1173,7 +1175,9 @@ error_exit:
 
 void ScDev::SetBusOff()
 {
-	if (m_CmdCtx.dev) {
+	assert(m_CmdCtx.dev);
+
+	{
 		sc_msg_config* bus = reinterpret_cast<sc_msg_config*>(m_CmdCtx.tx_buffer);
 		bus->id = SC_MSG_BUS;
 		bus->len = sizeof(*bus);
@@ -1254,6 +1258,8 @@ int ScDev::SetBusOn()
 	int error = SC_DLL_ERROR_NONE;
 	DWORD thread_id = 0;
 	decltype(m_TxThreadNotificationValue)::value_type bitmask = 0;
+
+	assert(m_CmdCtx.dev);
 
 	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
 		m_ComDeviceDataPrivate[i].rx.hdr->error = 0;
