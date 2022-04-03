@@ -37,6 +37,72 @@ class CSuperCANSrvModule : public ATL::CAtlExeModuleT< CSuperCANSrvModule >
 public :
 	DECLARE_LIBID(LIBID_SuperCAN)
 	DECLARE_REGISTRY_APPID_RESOURCEID(IDR_SUPERCANSRV, "{945BB09D-DA86-4183-9C9A-D85220638156}")
+
+public:
+	~CSuperCANSrvModule()
+	{
+		CleanupSingleton();
+	}
+
+	CSuperCANSrvModule()
+		: m_Singleton(nullptr)
+	{}
+
+	HRESULT PreMessageLoop(_In_ int nShowCmd) throw()
+	{
+		m_Singleton = CreateEventA(NULL, TRUE, FALSE, NAME);
+
+		if (m_Singleton) {
+			if (ERROR_ALREADY_EXISTS == GetLastError()) {
+				CleanupSingleton();
+
+				LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "Singleton '%s' exists\n", NAME);
+
+				return E_FAIL;
+			}
+
+			LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "Singleton name='%s' created\n", NAME);
+		}
+		else {
+			LOG_SRV(SC_DLL_LOG_LEVEL_ERROR, "Failed to create event '%s' error=%lu\n", NAME, GetLastError());
+
+			return E_FAIL;
+
+		}
+
+		return __super::PreMessageLoop(nShowCmd);
+	}
+
+	HRESULT PostMessageLoop() throw()
+	{
+		HRESULT hr = S_OK;
+
+		hr = RevokeClassObjects();
+
+		CleanupSingleton();
+
+		if (m_bDelayShutdown)
+			Sleep(m_dwPause); //wait for any threads to finish
+
+		return hr;
+	}
+
+private:
+	void CleanupSingleton()
+	{
+		if (m_Singleton) {
+			CloseHandle(m_Singleton);
+			m_Singleton = nullptr;
+
+			LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "Singleton '%s' destroyed\n", NAME);
+		}
+	}
+
+private:
+	HANDLE m_Singleton;
+
+private:
+	static constexpr char NAME[] = "Global\\sc-com-server";
 };
 
 
@@ -47,39 +113,11 @@ CSuperCANSrvModule _AtlModule;
 extern "C" int WINAPI _tWinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/,
 								LPTSTR /*lpCmdLine*/, int nShowCmd)
 {
-	static const char NAME[] = "Global\\sc-com-server";
-
-	HANDLE singleton = NULL;
-
-	singleton = CreateEventA(NULL, TRUE, FALSE, NAME);
-
-	if (singleton) {
-		if (ERROR_ALREADY_EXISTS == GetLastError()) {
-			CloseHandle(singleton);
-
-			LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "Event name='%s' exists, exiting\n", NAME);
-
-			return E_FAIL;
-		}
-	}
-	else {
-		LOG_SRV(SC_DLL_LOG_LEVEL_ERROR, "Failed to create event name='%s' error=%lu\n", NAME, GetLastError());
-
-		return E_FAIL;
-		
-	}	
-
 	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "WinMain start\n");
 
 	auto rc = _AtlModule.WinMain(nShowCmd);
 
 	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "WinMain end\n");
-
-	if (singleton) {
-		CloseHandle(singleton);
-		singleton = NULL;
-		LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "Destroyed event name='%s'\n", NAME);
-	}
 
 	return rc;
 }
