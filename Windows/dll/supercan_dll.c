@@ -1227,11 +1227,11 @@ static int sc_can_stream_rx_process_signaled_ex(struct sc_stream* stream)
         return error;
     }
 
+    LOG_DEV_DEBUG1(stream->dev, "sc_can_stream_rx submit %u\n", index);
+
     if (user_error) {
         return user_error;
     }
-
-    LOG_DEV_DEBUG1(stream->dev, "sc_can_stream_rx submit %u\n", index);
 
     return error;
 }
