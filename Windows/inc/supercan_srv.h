@@ -123,8 +123,8 @@ struct sc_mm_log_data {
     uint8_t flags;
     uint8_t bytes;
     uint8_t src;
-    uint8_t reserved[3];
-    uint64_t timestamp_qpc;
+    uint8_t reserved0[3];
+    uint64_t reserved1;
     uint8_t data[SC_LOG_DATA_BUFFER_SIZE];           ///< UTF-8
 };
 

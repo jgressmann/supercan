@@ -223,7 +223,7 @@ private:
 	};
 
 	struct log_entry {
-		uint64_t timestamp_qpc;
+		//uint64_t timestamp_qpc;
 		int8_t level;
 		uint8_t src;
 		uint8_t bytes;
@@ -596,7 +596,7 @@ void ScDev::StoreLogMessage(log_entry const * const e)
 				slot->log_data.type = SC_MM_DATA_TYPE_LOG_DATA;
 				slot->log_data.level = e->level;
 				slot->log_data.src = e->src;
-				slot->log_data.timestamp_qpc = e->timestamp_qpc;
+				//slot->log_data.timestamp_qpc = e->timestamp_qpc;
 				slot->log_data.flags = flags;
 				slot->log_data.bytes = count;
 				memcpy(slot->log_data.data, e->data + offset, count);
@@ -1014,7 +1014,7 @@ void ScDev::Log(int level, const char* msg, size_t bytes)
 		const unsigned index = m_LogRingPutIndex % _countof(m_LogRingBuffer);
 		log_entry* const e = &m_LogRingBuffer[index];
 
-		QueryPerformanceCounter((LARGE_INTEGER*)&e->timestamp_qpc);
+		//QueryPerformanceCounter((LARGE_INTEGER*)&e->timestamp_qpc);
 		e->level = static_cast<int8_t>(level);
 		e->src = SC_LOG_DATA_SRC_DLL;
 		e->bytes = static_cast<uint8_t>(std::min(_countof(e->data) - 1, bytes));
@@ -1048,7 +1048,7 @@ void ScDev::LogFormatQueue(int level, const char* fmt, ...)
 
 			e->level = static_cast<int8_t>(level);
 			e->src = SC_LOG_DATA_SRC_SRV;
-			QueryPerformanceCounter((LARGE_INTEGER*)&e->timestamp_qpc);
+			//QueryPerformanceCounter((LARGE_INTEGER*)&e->timestamp_qpc);
 
 			va_start(vl, fmt);
 			
@@ -1077,7 +1077,7 @@ void ScDev::LogFormatDirect(int level, const char* fmt, ...)
 
 		e.src = SC_LOG_DATA_SRC_SRV;
 		e.level = static_cast<int8_t>(level);
-		QueryPerformanceCounter((LARGE_INTEGER*)&e.timestamp_qpc);
+		//QueryPerformanceCounter((LARGE_INTEGER*)&e.timestamp_qpc);
 		
 
 		va_start(vl, fmt);
