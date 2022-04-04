@@ -328,9 +328,10 @@ class ATL_NO_VTABLE XSuperCAN :
 public:
 	BEGIN_COM_MAP(XSuperCAN)
 	END_COM_MAP()
+	
 public:
-	~XSuperCAN();
-	XSuperCAN();
+	static ATL::CComObject<XSuperCAN>* GetOrCreate();
+
 public:
 	STDMETHOD(DeviceScan)(unsigned long* count);
 	STDMETHOD(DeviceGetCount)(unsigned long* count);
@@ -340,12 +341,22 @@ public:
 	STDMETHOD(GetVersion)(SuperCANVersion* version);
 	STDMETHOD(SetLogLevel)(int level);
 
-private:
+protected:
+	~XSuperCAN();
+	XSuperCAN();
+
+private:	
 	static void Log(void* ctx, int level, char const* msg, size_t bytes);
 	void Log(int level, char const* msg, size_t bytes);
+	static void DestroyInstanceLock();
+	static ATL::CComObject<XSuperCAN>* CreateInstanceLock();
 
 private:
 	std::vector<ScDevPtr> m_Devices;
+
+private:
+	static CRITICAL_SECTION ms_Lock;
+	static ATL::CComObject<XSuperCAN>* ms_Instance;
 };
 
 
@@ -2003,41 +2014,16 @@ void ScDev::SetDeviceError(int error)
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
-void DestroyInstanceLock();
-ATL::CComObject<XSuperCAN>* CreateInstanceLock();
-
-CRITICAL_SECTION s_Lock;
-ATL::CComObject<XSuperCAN>* s_Instance = CreateInstanceLock();
-
-ATL::CComObject<XSuperCAN>* CreateInstanceLock()
-{
-	InitializeCriticalSection(&s_Lock);
-
-	std::atexit(DestroyInstanceLock);
-
-	return nullptr;
-}
-
-void DestroyInstanceLock()
-{
-	DeleteCriticalSection(&s_Lock);
-}
 
 XSuperCANDevice::~XSuperCANDevice()
 {
 	if (m_SharedDevice) {
-		if (m_Mm) {
-			m_SharedDevice->RemoveComDevice(m_Index);
-		}
+		m_SharedDevice->RemoveComDevice(m_Index);
 	}
 
 	if (m_Sc) {
 		m_Sc->Release();
 	}
-
-	/*auto count = CoReleaseServerProcess();
-
-	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "server ref count=%lu\n", count);*/
 }
 
 XSuperCANDevice::XSuperCANDevice()
@@ -2045,10 +2031,6 @@ XSuperCANDevice::XSuperCANDevice()
 	m_Sc = nullptr;
 	m_Index = 0;
 	m_Mm = nullptr;
-
-	/*auto count = CoAddRefServerProcess();
-
-	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "server ref count=%lu\n", count);*/
 }
 
 
@@ -2250,12 +2232,8 @@ STDMETHODIMP XSuperCANDevice::SetDataBitTiming(SuperCANBitTimingParams params)
 
 void XSuperCANDevice::SetSuperCAN(ISuperCAN2* sc)
 {
-	ATLASSERT(sc);
-
-	if (m_Sc) {
-		m_Sc->Release();
-		m_Sc = nullptr;
-	}
+	assert(sc);
+	assert(!m_Sc);
 
 	sc->AddRef();
 	m_Sc = sc;
@@ -2279,8 +2257,52 @@ STDMETHODIMP XSuperCANDevice::SetLogLevel(int level)
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
+
+CRITICAL_SECTION XSuperCAN::ms_Lock;
+ATL::CComObject<XSuperCAN>* XSuperCAN::ms_Instance = XSuperCAN::CreateInstanceLock();
+
+ATL::CComObject<XSuperCAN>* XSuperCAN::CreateInstanceLock()
+{
+	InitializeCriticalSection(&ms_Lock);
+
+	std::atexit(DestroyInstanceLock);
+
+	return nullptr;
+}
+
+void XSuperCAN::DestroyInstanceLock()
+{
+	DeleteCriticalSection(&ms_Lock);
+}
+
+ATL::CComObject<XSuperCAN>* XSuperCAN::GetOrCreate()
+{
+	Guard g(ms_Lock);
+
+	if (!ms_Instance) {
+		auto hr = ATL::CComObject<XSuperCAN>::CreateInstance(&ms_Instance);
+		if (SUCCEEDED(hr)) {
+			LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "Singleton instance set\n");
+		}
+		else {
+			ms_Instance = nullptr;
+		}
+	}
+
+	auto ptr = ms_Instance;
+
+	if (ptr) {
+		ptr->AddRef();
+	}
+
+	return ptr;
+}
+
+
 XSuperCAN::~XSuperCAN()
 {
+	Guard g(ms_Lock);
+
 	m_Devices.clear();
 
 	sc_log_set_callback(nullptr, nullptr);
@@ -2289,9 +2311,11 @@ XSuperCAN::~XSuperCAN()
 
 	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "DLL uninitialized\n");
 
-	/*auto count = CoReleaseServerProcess();
+	assert(this == ms_Instance);
 
-	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "server ref count=%lu\n", count);*/
+	ms_Instance = nullptr;
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "Singleton instance cleared\n");
 }
 
 XSuperCAN::XSuperCAN()
@@ -2301,10 +2325,6 @@ XSuperCAN::XSuperCAN()
 	sc_log_set_callback(this, &XSuperCAN::Log);
 
 	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "DLL initialized\n");
-
-	/*auto count = CoAddRefServerProcess();
-
-	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "server ref count=%lu\n", count);*/
 }
 
 
@@ -2500,38 +2520,15 @@ void XSuperCAN::Log(int level, char const* msg, size_t bytes)
 
 CSuperCAN::~CSuperCAN()
 {
-	// ATL::ModuleLockHelper locks the module (prevents unloaded, not a thread-safety measure)
-	Guard g(s_Lock);
-
 	if (m_Instance) {
-		if (0 == m_Instance->Release()) {
-			s_Instance = nullptr;
-			LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "singleton destroyed\n");
-		}
-
+		m_Instance->Release();
 		m_Instance = nullptr;
 	}
 }
 
 CSuperCAN::CSuperCAN()
-: m_Instance(nullptr)
+	: m_Instance(XSuperCAN::GetOrCreate())
 {
-	Guard g(s_Lock);
-
-	if (nullptr == s_Instance) {
-		ATL::CComObject<XSuperCAN>* instance = nullptr;
-		HRESULT hr = ATL::CComObject<XSuperCAN>::CreateInstance(&instance);
-
-		if (SUCCEEDED(hr)) {
-			s_Instance = instance;
-			LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "singleton created\n");
-		}
-	}
-	
-	if (s_Instance) {
-		m_Instance = s_Instance;
-		m_Instance->AddRef();
-	}
 }
 
 STDMETHODIMP CSuperCAN::DeviceScan(unsigned long* count)
