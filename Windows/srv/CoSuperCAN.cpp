@@ -2111,8 +2111,9 @@ STDMETHODIMP XSuperCANDevice::SetBus(boolean on)
 	ObjectLock g(this);
 
 	auto error = m_SharedDevice->SetBus(m_Index, on != 0);
+
 	if (error) {
-		SC_HRESULT_FROM_ERROR(error);
+		return SC_HRESULT_FROM_ERROR(error);
 	}
 
 	return S_OK;
