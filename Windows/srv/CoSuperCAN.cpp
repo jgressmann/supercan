@@ -1026,7 +1026,7 @@ void ScDev::LogFormatQueue(int level, const char* fmt, ...)
 
 			va_start(vl, fmt);
 			
-			e->bytes = (uint8_t)_vsnprintf_s(e->data, sizeof(e->data), _TRUNCATE, fmt, vl);
+			e->bytes = (uint8_t)_vsnprintf_s(e->data, _countof(e->data), _TRUNCATE, fmt, vl);
 
 			va_end(vl);
 
@@ -1056,7 +1056,7 @@ void ScDev::LogFormatDirect(int level, const char* fmt, ...)
 
 		va_start(vl, fmt);
 
-		e.bytes = (uint8_t)_vsnprintf_s(e.data, sizeof(e.data), _TRUNCATE, fmt, vl);
+		e.bytes = (uint8_t)_vsnprintf_s(e.data, _countof(e.data), _TRUNCATE, fmt, vl);
 
 		va_end(vl);
 
