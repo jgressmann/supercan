@@ -2156,12 +2156,14 @@ STDMETHODIMP XSuperCANDevice::GetDeviceData(SuperCANDeviceData* data)
 {
 	ATLASSERT(data);
 
-	wchar_t wstr[_countof(m_SharedDevice->dev_info.name_bytes)+1] = { 0 };
+	wchar_t wstr[_countof(m_SharedDevice->dev_info.name_bytes)+1];
 
 	auto const& ci = m_SharedDevice->can_info;
 	auto const& di = m_SharedDevice->dev_info;
 
 	auto chars = MultiByteToWideChar(CP_UTF8, 0 /*flags*/, reinterpret_cast<LPCCH>(di.name_bytes), di.name_len, wstr, _countof(wstr)-1);
+
+	assert(chars >= 0 && chars < _countof(wstr));
 	wstr[chars] = 0;
 
 	data->name = SysAllocString(wstr);
