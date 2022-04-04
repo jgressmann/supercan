@@ -179,7 +179,6 @@ private:
 	void SetDeviceError(int error);
 	int SetBusOn();
 	void SetBusOff();
-	bool IsOnBus() const { return m_RxThread != nullptr; }
 	bool VerifyConfigurationAccess(sc_com_dev_index_t index) const;
 	void ComDeviceAddedTx(sc_com_dev_index_t index);
 	void ComDeviceRemovedTx(sc_com_dev_index_t index);
@@ -262,6 +261,8 @@ private:
 	std::atomic<uint8_t> m_RxThreadNotificationValue;
 	std::atomic<uint8_t> m_TxThreadNotificationValue;
 	bool m_Mapped;
+	bool m_Initialized;
+	bool m_OnBus;
 	sc_com_dev_index_t m_RxThreadLiveComDevBuffer[MAX_COM_DEVICES_PER_SC_DEVICE];
 	sc_com_dev_index_t m_RxThreadLiveComDevCount;
 	uint32_t m_LogLost;
@@ -427,6 +428,7 @@ ScDev::ScDev()
 	m_ConfigurationAccessClaimed = 0;
 	ZeroMemory(&m_TimeTracker, sizeof(m_TimeTracker));
 	m_Mapped = false;
+	m_Initialized = false;
 	ZeroMemory(m_TxEchoMap, sizeof(m_TxEchoMap));
 	m_RxThreadLiveComDevCount = 0;
 	ZeroMemory(m_RxThreadLiveComDevBuffer, sizeof(m_RxThreadLiveComDevBuffer));
@@ -436,6 +438,7 @@ ScDev::ScDev()
 	m_LogRingPutIndex = 0;
 	m_LogLost = 0;
 	ZeroMemory(m_LogRingBuffer, sizeof(m_LogRingBuffer));
+	m_OnBus = false;
 }
 
 void ScDev::ResetTxrMap()
@@ -490,6 +493,7 @@ bool ScDev::AcquireConfigurationAccess(
 {
 	assert(index < MAX_COM_DEVICES_PER_SC_DEVICE);
 	assert(timeout_ms);
+	assert(m_Initialized);
 
 	Guard g(m_Lock);
 
@@ -515,7 +519,7 @@ bool ScDev::AcquireConfigurationAccess(
 
 	// Don't allow configuration access to some other client in a 
 	// multi-client scenario after the bus was configured and enabled.
-	if (clients > 1 && IsOnBus()) {
+	if (clients > 1 && m_OnBus) {
 		return false;
 	}
 
@@ -534,6 +538,7 @@ bool ScDev::AcquireConfigurationAccess(
 void ScDev::ReleaseConfigurationAccess(sc_com_dev_index_t index)
 {
 	assert(index < MAX_COM_DEVICES_PER_SC_DEVICE);
+	assert(m_Initialized);
 
 	Guard g(m_Lock);
 
@@ -600,6 +605,7 @@ void ScDev::StoreLogMessage(log_entry const * const e)
 int ScDev::SetLogLevel(sc_com_dev_index_t index, int level)
 {
 	assert(m_Device);
+	assert(m_Initialized);
 
 	Guard g1(m_Lock);
 
@@ -826,12 +832,17 @@ int ScDev::OnRx(sc_msg_header const* _msg, unsigned bytes)
 
 void ScDev::Uninit()
 {
-	if (m_CmdCtx.dev) {
-		SetBusOff();
+	if (m_Initialized) {
+		if (m_OnBus) {
+			SetBusOff();
+		}
 	}
 
 	sc_cmd_ctx_uninit(&m_CmdCtx);
 	ZeroMemory(&m_CmdCtx, sizeof(m_CmdCtx));
+
+	ZeroMemory(&dev_info, sizeof(dev_info));
+	ZeroMemory(&can_info, sizeof(can_info));
 
 	if (m_Device) {
 		sc_dev_close(m_Device);
@@ -841,6 +852,10 @@ void ScDev::Uninit()
 	Unmap();
 
 	m_LogLevel = SC_DLL_LOG_LEVEL_OFF;
+
+	m_Name.clear();
+
+	m_Initialized = false;
 }
 
 void ScDev::Unmap()
@@ -1164,6 +1179,8 @@ int ScDev::Init(std::wstring&& name)
 		can_info.nmbt_tseg1_max = m_Device->dev_to_host16(can_info.nmbt_tseg1_max);
 	}
 
+	m_Initialized = true;
+
 success_exit:
 	return error;
 
@@ -1175,7 +1192,7 @@ error_exit:
 
 void ScDev::SetBusOff()
 {
-	assert(m_CmdCtx.dev);
+	assert(m_Initialized);
 
 	{
 		sc_msg_config* bus = reinterpret_cast<sc_msg_config*>(m_CmdCtx.tx_buffer);
@@ -1241,16 +1258,16 @@ void ScDev::SetBusOff()
 
 	ResetTxrMap();
 
-	if (m_Mapped) {
-		for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
-			m_ComDeviceDataPrivate[i].rx.hdr->flags = 0;
-			m_ComDeviceDataPrivate[i].tx.hdr->flags = 0;
+	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
+		m_ComDeviceDataPrivate[i].rx.hdr->flags = 0;
+		m_ComDeviceDataPrivate[i].tx.hdr->flags = 0;
 
-			SetEvent(m_ComDeviceDataPrivate[i].rx.ev);
-		}
+		SetEvent(m_ComDeviceDataPrivate[i].rx.ev);
 	}
 
 	m_RxThreadLiveComDevCount = 0;
+
+	m_OnBus = false;
 }
 
 int ScDev::SetBusOn()
@@ -1259,7 +1276,7 @@ int ScDev::SetBusOn()
 	DWORD thread_id = 0;
 	decltype(m_TxThreadNotificationValue)::value_type bitmask = 0;
 
-	assert(m_CmdCtx.dev);
+	assert(m_Initialized);
 
 	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
 		m_ComDeviceDataPrivate[i].rx.hdr->error = 0;
@@ -1274,6 +1291,7 @@ int ScDev::SetBusOn()
 
 	sc_tt_init(&m_TimeTracker);
 
+	assert(!m_Stream);
 	error = sc_can_stream_init(
 		m_Device,
 		can_info.msg_buffer_size,
@@ -1285,6 +1303,8 @@ int ScDev::SetBusOn()
 	if (error) {
 		goto error_exit;
 	}
+
+	assert(!m_Stream->user_handle);
 
 	m_RxThreadNotificationEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
 	if (!m_RxThreadNotificationEvent) {
@@ -1359,6 +1379,8 @@ int ScDev::SetBusOn()
 
 	Notify(NOTIFICATION_SET, bitmask);
 
+	m_OnBus = true;
+
 success_exit:
 	return error;
 
@@ -1369,6 +1391,8 @@ error_exit:
 
 int ScDev::SetBus(sc_com_dev_index_t index, bool on)
 {
+	assert(m_Initialized);
+
 	Guard g(m_Lock);
 
 	if (!VerifyConfigurationAccess(index)) {
@@ -1406,6 +1430,7 @@ void ScDev::Notify(uint8_t code, uint8_t value)
 int ScDev::AddComDevice(XSuperCANDevice* device)
 {
 	assert(device);
+	assert(m_Initialized);
 
 	Guard g(m_Lock);
 
@@ -1428,7 +1453,7 @@ int ScDev::AddComDevice(XSuperCANDevice* device)
 
 	m_ComDeviceDataPrivate[index].com_device = device;
 
-	if (IsOnBus()) { // on bus
+	if (m_OnBus) { // on bus
 		Notify(NOTIFICATION_ADD, index);
 	}
 	else {
@@ -1441,6 +1466,7 @@ int ScDev::AddComDevice(XSuperCANDevice* device)
 void ScDev::RemoveComDevice(sc_com_dev_index_t index)
 {
 	assert(index < _countof(m_ComDeviceData));
+	assert(m_Initialized);
 
 	Guard g(m_Lock);
 
@@ -1450,7 +1476,7 @@ void ScDev::RemoveComDevice(sc_com_dev_index_t index)
 
 	m_ComDeviceDataPrivate[index].com_device = nullptr;
 
-	if (IsOnBus()) { // on bus
+	if (m_OnBus) { // on bus
 		Notify(NOTIFICATION_REMOVE, index);
 	}
 	else {
