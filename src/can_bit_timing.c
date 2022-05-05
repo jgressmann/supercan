@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -145,7 +145,7 @@ cbt_run(
 	uint32_t brp = 0;
 
 	assert(hw->brp_min >= 1);
-	assert(user->sjw == CAN_SJW_TSEG2 || (user->sjw >= 1 && (uint32_t)user->sjw < hw->sjw_max));
+    assert(user->sjw == CAN_SJW_TSEG2 || (user->sjw >= 1 && (uint32_t)user->sjw <= hw->sjw_max));
 
 	for (brp = hw->brp_min; brp <= hw->brp_max; brp += hw->brp_step) {
 		const uint32_t can_hz = hw->clock_hz / brp;
