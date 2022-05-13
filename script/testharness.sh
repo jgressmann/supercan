@@ -263,9 +263,11 @@ if [ $test_error_recovery -ne 0 ]; then
 	kill $candump_good_pid 2>/dev/null || true
 	kill $candump_test_pid 2>/dev/null || true
 
+	set +e
+
 	lines=$(cat "$error_recovery_error_passive_log_good_can_tx_path" | wc -l)
-	if [ $lines -lt $error_recovery_acceptable_rx_frames ]; then
-		echo ERROR: GOOD log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+	if [ $lines -ne $error_recovery_acceptable_rx_frames ]; then
+		echo ERROR: GOOD log file messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
 		errors=$((errors+1))
 	else
 		echo INFO: GOOD log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
@@ -273,12 +275,13 @@ if [ $test_error_recovery -ne 0 ]; then
 
 	lines=$(cat "$error_recovery_error_passive_log_test_can_rx_path" | wc -l)
 	if [ $lines -ne $error_recovery_tx_frames ]; then
-		echo ERROR: TEST log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+		echo ERROR: TEST log file messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
 		errors=$((errors+1))
 	else
-		echo INFO: TEST log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
+		echo INFO: TEST log file $lines/$error_recovery_tx_frames messages, error-passive recovery OK! | tee -a "$meta_log_path"
 	fi
 
+	set -e
 
 	echo "INFO: test -> good" | tee -a "$meta_log_path"
 
@@ -295,9 +298,11 @@ if [ $test_error_recovery -ne 0 ]; then
 	kill $candump_good_pid 2>/dev/null || true
 	kill $candump_test_pid 2>/dev/null || true
 
+	set +e
+
 	lines=$(cat "$error_recovery_error_passive_log_good_can_rx_path" | wc -l)
 	if [ $lines -ne $error_recovery_tx_frames ]; then
-		echo ERROR: GOOD log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+		echo ERROR: GOOD log file messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
 		errors=$((errors+1))
 	else
 		echo INFO: GOOD log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
@@ -305,11 +310,13 @@ if [ $test_error_recovery -ne 0 ]; then
 
 	lines=$(cat "$error_recovery_error_passive_log_test_can_tx_path" | wc -l)
 	if [ $lines -ne $error_recovery_tx_frames ]; then
-		echo ERROR: TEST log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+		echo ERROR: TEST log file messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
 		errors=$((errors+1))
 	else
-		echo INFO: TEST log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
+		echo INFO: TEST log file $lines/$error_recovery_tx_frames messages, error-passive recovery OK! | tee -a "$meta_log_path"
 	fi
+
+	set -e
 
 	################
 	# TEST -> GOOD
@@ -331,6 +338,8 @@ if [ $test_error_recovery -ne 0 ]; then
 
 	ip -details -statistics link show $test_can >$error_recovery_bus_off_stats_test_can_path 2>&1
 
+	set +e
+
 	bus_off=`grep "can state BUS-OFF" $error_recovery_bus_off_stats_test_can_path`
 	if [ -n "$bus_off" ]; then
 		echo INFO: $can_test in bus-off state, OK! | tee -a "$meta_log_path"
@@ -338,6 +347,8 @@ if [ $test_error_recovery -ne 0 ]; then
 		echo ERROR: $can_test not in bus-off state! | tee -a "$meta_log_path"
 		errors=$((errors+1))
 	fi
+
+	set -e
 
 	echo "INFO: Bringing both devices up to same bitrate" | tee -a "$meta_log_path"
 	for can in $cans; do
@@ -364,22 +375,25 @@ if [ $test_error_recovery -ne 0 ]; then
 	kill $candump_good_pid 2>/dev/null || true
 	kill $candump_test_pid 2>/dev/null || true
 
+	set +e
+
 	lines=$(cat "$error_recovery_bus_off_log_test_can_tx_path" | wc -l)
-	if [ $lines -lt $error_recovery_acceptable_rx_frames ]; then
-		echo ERROR: TEST log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+	if [ $lines -ne $error_recovery_tx_frames ]; then
+		echo "ERROR: TEST log file messages contains $lines/$error_recovery_tx_frames!" | tee -a "$meta_log_path"
 		errors=$((errors+1))
 	else
-		echo INFO: TEST log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
+		echo INFO: TEST log file contains $lines/$error_recovery_tx_frames messages, bus-off recovery OK! | tee -a "$meta_log_path"
 	fi
 
 	lines=$(cat "$error_recovery_error_passive_log_test_can_rx_path" | wc -l)
 	if [ $lines -ne $error_recovery_tx_frames ]; then
-		echo ERROR: GOOD log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+		echo ERROR: GOOD log file messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
 		errors=$((errors+1))
 	else
 		echo INFO: GOOD log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
 	fi
 
+	set -e
 
 	candump $candump_options $can_good >$error_recovery_bus_off_log_good_can_tx_path &
 	candump_good_pid=$!
@@ -395,9 +409,11 @@ if [ $test_error_recovery -ne 0 ]; then
 	kill $candump_good_pid 2>/dev/null || true
 	kill $candump_test_pid 2>/dev/null || true
 
+	set +e
+
 	lines=$(cat "$error_recovery_bus_off_log_good_can_tx_path" | wc -l)
 	if [ $lines -ne $error_recovery_tx_frames ]; then
-		echo ERROR: GOOD log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+		echo ERROR: GOOD log file messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
 		errors=$((errors+1))
 	else
 		echo INFO: GOOD log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
@@ -405,11 +421,13 @@ if [ $test_error_recovery -ne 0 ]; then
 
 	lines=$(cat "$error_recovery_bus_off_log_test_can_rx_path" | wc -l)
 	if [ $lines -ne $error_recovery_tx_frames ]; then
-		echo ERROR: TEST log file missing messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+		echo ERROR: TEST log file messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
 		errors=$((errors+1))
 	else
-		echo INFO: TEST log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
+		echo INFO: TEST log file $lines/$error_recovery_tx_frames messages, bus-off recovery OK! | tee -a "$meta_log_path"
 	fi
+
+	set -e
 else
 	echo INFO: not running error recovery tests. | tee -a "$meta_log_path"
 fi
