@@ -59,7 +59,7 @@ for i in $hw_revs; do
 	rm -rf _build
 
 	# generate J-Link flash script
-	cat >$TARGET_DIR/supercan/$BOARD/0$i/superdfu.jlink <<EOF
+	cat <<EOF >$TARGET_DIR/supercan/$BOARD/0$i/superdfu.jlink
 r
 loadfile superdfu.hex
 r
@@ -68,7 +68,7 @@ exit
 EOF
 
 	# generate README
-	cat >>$TARGET_DIR/supercan/$BOARD/0$i/README.md <<EOF
+	cat <<EOF >>$TARGET_DIR/supercan/$BOARD/0$i/README.md
 # SuperCAN Device Firmware
 
 ## Content
@@ -100,7 +100,7 @@ for i in $hw_revs; do
 	rm -rf _build
 
 	# generate J-Link flash script (standalone)
-	cat >$TARGET_DIR/supercan/$BOARD/0$i/superdfu-standalone.jlink <<EOF
+	cat <<EOF >$TARGET_DIR/supercan/$BOARD/0$i/superdfu-standalone.jlink
 r
 loadfile supercan-standalone.hex
 r
@@ -118,7 +118,7 @@ exit
 EOF
 
 
-	cat >>$TARGET_DIR/supercan/$BOARD/0$i/README <<EOF
+	cat <<EOF >>$TARGET_DIR/supercan/$BOARD/0$i/README
 ### CAN Application (SuperCAN)
 
 - supercan-standalone.bin: binary, no bootloader required, flash with debug probe
@@ -139,26 +139,26 @@ After the bootloader update, you likely need to re-install the CAN application.
 
 #### J-LINK
 
-```
+\`\`\`
 JLinkExe -device ATSAME51J18 -if swd -JTAGConf -1,-1 -speed auto -CommandFile superdfu.jlink
-```
+\`\`\`
 
 
 ### CAN Application (no Bootloder Required)
 
 #### J-LINK
 
-```
+\`\`\`
 JLinkExe -device ATSAME51J18 -if swd -JTAGConf -1,-1 -speed auto -CommandFile supercan-standalone.jlink
-```
+\`\`\`
 
 ### CAN Application (Bootlodaer Required)
 
 #### J-LINK
 
-```
+\`\`\`
 JLinkExe -device ATSAME51J18 -if swd -JTAGConf -1,-1 -speed auto -CommandFile supercan-dfu.jlink
-```
+\`\`\`
 
 EOF
 
@@ -180,7 +180,7 @@ cp _build/$BOARD/${project}.bin $TARGET_DIR/supercan/$BOARD/
 rm -rf _build
 
 # generate J-Link flash script (standalone)
-cat >$TARGET_DIR/supercan/$BOARD/README.md <<EOF
+cat <<EOF >$TARGET_DIR/supercan/$BOARD/README.md
 # SuperCAN Device Firmware
 
 ## Content
@@ -190,9 +190,9 @@ cat >$TARGET_DIR/supercan/$BOARD/README.md <<EOF
 ## Installation
 ### EDBG
 
-```
+\`\`\`
 edbg --verbose -t same54 -pv -f supercan.bin
-```
+\`\`\`
 
 EOF
 
