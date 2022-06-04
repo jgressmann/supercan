@@ -10,11 +10,8 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
-VID=0x1d50
-PID_RT=0x5035
-PID_DFU=0x5036
+
 MAKE_ARGS="-j V=1"
-BOOTLOADER_NAME="D5035-01 SuperCAN DFU"
 TARGET_DIR=$APPVEYOR_BUILD_FOLDER/tmp
 readme_file=README.md
 
@@ -35,8 +32,12 @@ echo $APPVEYOR_REPO_COMMIT >$TARGET_DIR/supercan/COMMIT
 ############
 # D5035-01 #
 ############
+VID=0x1d50
+#PID_RT=0x5035
+PID_DFU=0x5036
+BOOTLOADER_NAME="D5035-01 SuperCAN DFU"
 hw_revs=3
-BOARD=d5035_01
+export BOARD=d5035_01
 
 # make output dirs for hw revs
 for i in $hw_revs; do
@@ -170,7 +171,7 @@ unset hw_revs
 # SAM E54 Xplained Pro #
 ########################
 
-BOARD=same54xplainedpro
+export BOARD=same54xplainedpro
 
 mkdir -p $TARGET_DIR/supercan/$BOARD
 
@@ -205,7 +206,7 @@ EOF
 
 boards="teensy_40 d5035_03"
 for board in $boards; do
-	BOARD=$board
+	export BOARD=$board
 
 	mkdir -p $TARGET_DIR/supercan/$BOARD
 
@@ -222,7 +223,7 @@ done
 
 boards="feather_m4_can_express"
 for board in $boards; do
-	BOARD=$board
+	export BOARD=$board
 
 	mkdir -p $TARGET_DIR/supercan/$BOARD
 
