@@ -10,12 +10,13 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
-export VID=0x1d50
-export PID_RT=0x5035
-export PID_DFU=0x5036
-export MAKE_ARGS="-j V=1"
-export BOOTLOADER_NAME="D5035-01 SuperCAN DFU"
-export TARGET_DIR=$APPVEYOR_BUILD_FOLDER/tmp
+VID=0x1d50
+PID_RT=0x5035
+PID_DFU=0x5036
+MAKE_ARGS="-j V=1"
+BOOTLOADER_NAME="D5035-01 SuperCAN DFU"
+TARGET_DIR=$APPVEYOR_BUILD_FOLDER/tmp
+readme_file=README.md
 
 
 
@@ -35,7 +36,7 @@ echo $APPVEYOR_REPO_COMMIT >$TARGET_DIR/supercan/COMMIT
 # D5035-01 #
 ############
 hw_revs=3
-export BOARD=d5035_01
+BOARD=d5035_01
 
 # make output dirs for hw revs
 for i in $hw_revs; do
@@ -68,7 +69,7 @@ exit
 EOF
 
 	# generate README
-	cat <<EOF >>$TARGET_DIR/supercan/$BOARD/0$i/README.md
+	cat <<EOF >>$TARGET_DIR/supercan/$BOARD/0$i/$readme_file
 # SuperCAN Device Firmware
 
 ## Content
@@ -118,7 +119,7 @@ exit
 EOF
 
 
-	cat <<EOF >>$TARGET_DIR/supercan/$BOARD/0$i/README
+	cat <<EOF >>$TARGET_DIR/supercan/$BOARD/0$i/$readme_file
 ### CAN Application (SuperCAN)
 
 - supercan-standalone.bin: binary, no bootloader required, flash with debug probe
@@ -169,7 +170,7 @@ unset hw_revs
 # SAM E54 Xplained Pro #
 ########################
 
-export BOARD=same54xplainedpro
+BOARD=same54xplainedpro
 
 mkdir -p $TARGET_DIR/supercan/$BOARD
 
@@ -180,7 +181,7 @@ cp _build/$BOARD/${project}.bin $TARGET_DIR/supercan/$BOARD/
 rm -rf _build
 
 # generate J-Link flash script (standalone)
-cat <<EOF >$TARGET_DIR/supercan/$BOARD/README.md
+cat <<EOF >$TARGET_DIR/supercan/$BOARD/$readme_file
 # SuperCAN Device Firmware
 
 ## Content
@@ -204,7 +205,7 @@ EOF
 
 boards="teensy_40 d5035_03"
 for board in $boards; do
-	export BOARD=$board
+	BOARD=$board
 
 	mkdir -p $TARGET_DIR/supercan/$BOARD
 
@@ -221,7 +222,7 @@ done
 
 boards="feather_m4_can_express"
 for board in $boards; do
-	export BOARD=$board
+	BOARD=$board
 
 	mkdir -p $TARGET_DIR/supercan/$BOARD
 
