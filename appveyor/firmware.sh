@@ -132,35 +132,49 @@ EOF
 - supercan.dfu: requires bootloader, update with dfu-util
 
 
-## Installation / Upgrade
+## Installation / Update
 
 If you are using the bootloader, update it *first*.
 After the bootloader update, you likely need to re-install the CAN application.
 
 ### Device Bootloader
 
-#### J-LINK
+#### Flash with J-LINK
 
 \`\`\`
 JLinkExe -device ATSAME51J18 -if swd -JTAGConf -1,-1 -speed auto -CommandFile superdfu.jlink
 \`\`\`
 
+#### Update with dfu-util
 
-### CAN Application (no Bootloder Required)
+\`\`\`
+sudo dfu-util -d 1d50:5035,:5036 -R -D superdfu.dfu
+\`\`\`
 
-#### J-LINK
+
+### CAN Application (no Bootloader Required)
+
+#### Flash with J-LINK
 
 \`\`\`
 JLinkExe -device ATSAME51J18 -if swd -JTAGConf -1,-1 -speed auto -CommandFile supercan-standalone.jlink
 \`\`\`
 
-### CAN Application (Bootlodaer Required)
+### CAN Application (Bootloader Required)
 
-#### J-LINK
+#### Flash with J-LINK
 
 \`\`\`
 JLinkExe -device ATSAME51J18 -if swd -JTAGConf -1,-1 -speed auto -CommandFile supercan-dfu.jlink
 \`\`\`
+
+#### Update with dfu-util
+
+\`\`\`
+sudo dfu-util -d 1d50:5035,:5036 -R -D supercan.dfu
+\`\`\`
+
+
 
 EOF
 
