@@ -284,7 +284,7 @@ precision:
 								buffer[offset++] = '0';
 								buffer[offset++] = 'x';
 							} else {
-								goto out;
+                                goto done;
 							}
 						}
 						base = 16;
@@ -324,6 +324,7 @@ precision:
 		}
 	}
 
+done:
     buffer[offset] = '\0';
 
     error = (int)offset;
