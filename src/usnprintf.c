@@ -35,18 +35,30 @@
 static const char hex[16] = "0123456789abcdef";
 static const char HEX[16] = "0123456789ABCDEF";
 
+#ifndef USNPRINTF_WITH_LONGLONG
+    #define USNPRINTF_WITH_LONGLONG 0
+#endif
+
+#if USNPRINTF_WITH_LONGLONG
+    #define USNPRINTF_UINT_TYPE unsigned long long
+    #define USNPRINTF_INT_TYPE long long
+#else
+    #define USNPRINTF_UINT_TYPE unsigned long
+    #define USNPRINTF_INT_TYPE long
+#endif
+
 USNPRINTF_SECTION
 static
 inline
 void
-uprint_ulong_long_reverse_char(
+uprint_uint_reverse_char(
 		char * restrict buffer,
 		size_t * restrict offset_ptr,
 		char const * restrict alphabet,
-		unsigned long long* restrict value,
+        USNPRINTF_UINT_TYPE* restrict value,
 		unsigned base)
 {
-	unsigned long long a = *value / base;
+    USNPRINTF_UINT_TYPE a = *value / base;
 	unsigned digit = *value - a * base;
 	*value = a;
 	buffer[*offset_ptr] = alphabet[digit];
@@ -56,13 +68,13 @@ uprint_ulong_long_reverse_char(
 USNPRINTF_SECTION
 static
 void
-uprint_ulong_long_raw(
+uprint_uint_raw(
 		char * restrict buffer,
 		size_t * restrict offset_ptr,
 		size_t end,
 		int flags,
 		unsigned base,
-		unsigned long long value)
+        USNPRINTF_UINT_TYPE value)
 {
 	size_t start_offset = *offset_ptr;
 	unsigned chars = 0;
@@ -75,12 +87,12 @@ uprint_ulong_long_raw(
 	}
 
 	if (*offset_ptr < end) { // zero case
-		uprint_ulong_long_reverse_char(buffer, offset_ptr, alphabet, &value, base);
+        uprint_uint_reverse_char(buffer, offset_ptr, alphabet, &value, base);
 		++chars;
 	}
 
 	while (*offset_ptr < end && value) {
-		uprint_ulong_long_reverse_char(buffer, offset_ptr, alphabet, &value, base);
+        uprint_uint_reverse_char(buffer, offset_ptr, alphabet, &value, base);
 		++chars;
 	}
 
@@ -224,11 +236,13 @@ precision:
 					break;
 				case 'd':
 				case 'i': {
-					step = -1;
-					// short/int/long
-					long long v;
+                    // short/int/long
+                    USNPRINTF_INT_TYPE v;
+
+                    step = -1;
+
 					if (2 == int_size) {
-						v = va_arg(vl, long long);
+                        v = va_arg(vl, USNPRINTF_INT_TYPE);
 					} else if (1 == int_size) {
 						v = va_arg(vl, long);
 					} else {
@@ -247,14 +261,17 @@ precision:
 						v = -v;
 					}
 
-					uprint_ulong_long_raw(buffer, &offset, end, 0, 10, (unsigned long long)v);
+                    uprint_uint_raw(buffer, &offset, end, 0, 10, (USNPRINTF_UINT_TYPE)v);
 				} break;
 				case 'u':
 				case 'x':
 				case 'X': {
+                    // unsigned short/int/long
+                    USNPRINTF_UINT_TYPE v;
+                    unsigned base;
+
 					step = -1;
-					// unsigned short/int/long
-					unsigned base;
+
 					int flags = 0;
 					if ('u' == c) {
 						base = 10;
@@ -276,23 +293,23 @@ precision:
 						}
 					}
 
-					unsigned long long v;
 					if (2 == int_size) {
-						v = va_arg(vl, unsigned long long);
+                        v = va_arg(vl, USNPRINTF_UINT_TYPE);
 					} else if (1 == int_size) {
 						v = va_arg(vl, unsigned long);
 					} else {
 						v = va_arg(vl, unsigned int);
 					}
-					uprint_ulong_long_raw(buffer, &offset, end, flags, base, v);
+                    uprint_uint_raw(buffer, &offset, end, flags, base, v);
 				} break;
 				case 'p':
 					step = -1;
 					buffer[offset++] = '0';
 					if (offset < end) {
-						buffer[offset++] = 'x';
-						unsigned long long v = (unsigned long long)(uintptr_t)va_arg(vl, void*);
-						uprint_ulong_long_raw(buffer, &offset, end, 0, 16, v);
+                        USNPRINTF_UINT_TYPE v = (USNPRINTF_UINT_TYPE)(uintptr_t)va_arg(vl, void*);
+
+                        buffer[offset++] = 'x';
+                        uprint_uint_raw(buffer, &offset, end, 0, 16, v);
 					}
 					break;
 				default:

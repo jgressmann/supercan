@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,10 +44,12 @@ extern "C" {
 /* micro snprintf replacement
  *
  * This implementation supports these specifiers: cdipsuxX.
- * These are the supported _length_ specifers (integers only): (none), h, hh, j, l, ll, z, t
+ * These are the supported _length_ specifers (integers only): (none), h, hh, j, l, ll('), z, t
  * Flags (+-#0(space) are ignored except for # and + which are honored.
  * Width specifier * is _not_ supported. Number specifiers are ignored.
  * Precision specifiers are ignored.
+ *
+ * (') Define USNPRINTF_WITH_LONGLONG to support (unsigned) long long's.
  **/
 USNPRINTF_SECTION int usnprintf(
 	char * restrict buffer,

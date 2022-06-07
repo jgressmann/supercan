@@ -53,5 +53,6 @@ include_directories(
 
 add_executable(supercan-test ${TEST_SRC_LIST} ${LIB_SRC_LIST})
 target_link_libraries(supercan-test CppUnitLite2)
+target_compile_definitions(supercan-test PRIVATE USNPRINTF_WITH_LONG_LONG)
 
 add_test(NAME supercan COMMAND supercan-test)
