@@ -36,15 +36,15 @@ static const char hex[16] = "0123456789abcdef";
 static const char HEX[16] = "0123456789ABCDEF";
 
 #ifndef USNPRINTF_WITH_LONGLONG
-    #define USNPRINTF_WITH_LONGLONG 0
+	#define USNPRINTF_WITH_LONGLONG 0
 #endif
 
 #if USNPRINTF_WITH_LONGLONG
-    #define USNPRINTF_UINT_TYPE unsigned long long
-    #define USNPRINTF_INT_TYPE long long
+	#define USNPRINTF_UINT_TYPE unsigned long long
+	#define USNPRINTF_INT_TYPE long long
 #else
-    #define USNPRINTF_UINT_TYPE unsigned long
-    #define USNPRINTF_INT_TYPE long
+	#define USNPRINTF_UINT_TYPE unsigned long
+	#define USNPRINTF_INT_TYPE long
 #endif
 
 USNPRINTF_SECTION
@@ -55,10 +55,10 @@ uprint_uint_reverse_char(
 		char * restrict buffer,
 		size_t * restrict offset_ptr,
 		char const * restrict alphabet,
-        USNPRINTF_UINT_TYPE* restrict value,
+		USNPRINTF_UINT_TYPE* restrict value,
 		unsigned base)
 {
-    USNPRINTF_UINT_TYPE a = *value / base;
+	USNPRINTF_UINT_TYPE a = *value / base;
 	unsigned digit = *value - a * base;
 	*value = a;
 	buffer[*offset_ptr] = alphabet[digit];
@@ -74,12 +74,15 @@ uprint_uint_raw(
 		size_t end,
 		int flags,
 		unsigned base,
-        USNPRINTF_UINT_TYPE value)
+		char fill,
+		unsigned width,
+		char const * restrict reversed_prefix,
+		USNPRINTF_UINT_TYPE value)
 {
 	size_t start_offset = *offset_ptr;
 	unsigned chars = 0;
-
 	char const *alphabet;
+
 	if (16 == base && (flags & FLAG_HEX_MASC)) {
 		alphabet = HEX;
 	} else {
@@ -87,20 +90,37 @@ uprint_uint_raw(
 	}
 
 	if (*offset_ptr < end) { // zero case
-        uprint_uint_reverse_char(buffer, offset_ptr, alphabet, &value, base);
+		uprint_uint_reverse_char(buffer, offset_ptr, alphabet, &value, base);
 		++chars;
 	}
 
 	while (*offset_ptr < end && value) {
-        uprint_uint_reverse_char(buffer, offset_ptr, alphabet, &value, base);
+		uprint_uint_reverse_char(buffer, offset_ptr, alphabet, &value, base);
+		++chars;
+	}
+
+	while (*offset_ptr < end && *reversed_prefix) {
+		buffer[*offset_ptr] = *reversed_prefix;
+
+		++*offset_ptr;
+		++reversed_prefix;
+		++chars;
+	}
+
+	while (*offset_ptr < end && chars < width) {
+		buffer[*offset_ptr] = fill;
+
+		++*offset_ptr;
 		++chars;
 	}
 
 	if (chars > 1) {
 		size_t end_offset = *offset_ptr;
 		size_t count = (end_offset - start_offset) / 2;
+
 		for (size_t i = start_offset, j = end_offset - 1, k = 0; k < count; ++i, --j, ++k) {
 			char c = buffer[i];
+
 			buffer[i] = buffer[j];
 			buffer[j] = c;
 		}
@@ -120,12 +140,14 @@ int usnprintf(
 
 	const size_t end = size - 1;
 	size_t offset = 0;
+	int error = 0;
+	unsigned width = 0;
 	signed char step = -1;
 	unsigned char int_size = 0;
 	unsigned char print_sign = 0;
+	unsigned char print_plus_space = 0;
 	unsigned char print_hex_prefix = 0;
-	// char fill = 0;
-    int error = 0;
+	char fill = ' ';
 
 
 	va_list vl;
@@ -133,6 +155,7 @@ int usnprintf(
 
 	while (offset < end) {
 		char c = *fmt++;
+
 		if ('\0' == c) {
 			break;
 		}
@@ -145,8 +168,10 @@ int usnprintf(
 				step = 0;
 				print_sign = 0;
 				int_size = 0;
-				// fill = 0;
+				fill = ' ';
+				print_plus_space = 0;
 				print_hex_prefix = 0;
+				width = 0;
 			}
 		} else {
 start:
@@ -163,10 +188,11 @@ start:
 					print_sign = 1;
 					break;
 				case ' ':
-					// fill = ' ';
+					print_sign = 1;
+					print_plus_space = 1;
 					break;
 				case '0':
-					// fill = '0';
+					 fill = '0';
 					break;
 				case '#':
 					print_hex_prefix = 1;
@@ -176,13 +202,12 @@ start:
 					goto start;
 				}
 				break;
-			case 1: // width, precision
-precision:
+			case 1: // width
 				switch (c) {
 				case '*':
-                     // not supported
-                    error = -1;
-                    goto out;
+					// not supported
+					error = -1;
+					goto out;
 				case '0':
 				case '1':
 				case '2':
@@ -193,20 +218,19 @@ precision:
 				case '7':
 				case '8':
 				case '9':
+					width *= 10;
+					width += c - '0';
 					break;
+				case '.':
+					// not supported
+					error = -1;
+					goto out;
 				default:
 					++step;
 					goto start;
 				}
 				break;
-			case 2: // precision
-				++step;
-				if ('*' == c || (c >= '0' && c <= '9')) {
-					goto precision;
-				}
-				goto start;
-			case 3: // length char 1
-
+			case 2: // length char 1
 				switch (c) {
 				case 'h':
 					--int_size;
@@ -236,101 +260,100 @@ precision:
 					break;
 				case 'd':
 				case 'i': {
-                    // short/int/long
-                    USNPRINTF_INT_TYPE v;
+					char const * prefix = "";
+					// short/int/long
+					USNPRINTF_INT_TYPE v;
 
-                    step = -1;
+					step = -1;
 
 					if (2 == int_size) {
-                        v = va_arg(vl, USNPRINTF_INT_TYPE);
+						v = va_arg(vl, USNPRINTF_INT_TYPE);
 					} else if (1 == int_size) {
 						v = va_arg(vl, long);
 					} else {
 						v = va_arg(vl, int);
 					}
 
-					if (print_sign) {
-						if (v < 0) {
-							buffer[offset++] = '-';
-							v = -v;
-						} else {
-							buffer[offset++] = '+';
-						}
-					} else if (v < 0) {
-						buffer[offset++] = '-';
+					if (v < 0) {
+						prefix = "-";
 						v = -v;
+					} else if (print_sign) {
+						if (print_plus_space) {
+							prefix = " ";
+						} else {
+							prefix = "+";
+						}
 					}
 
-                    uprint_uint_raw(buffer, &offset, end, 0, 10, (USNPRINTF_UINT_TYPE)v);
+					uprint_uint_raw(buffer, &offset, end, 0, 10, fill, width, prefix, (USNPRINTF_UINT_TYPE)v);
 				} break;
 				case 'u':
 				case 'x':
 				case 'X': {
-                    // unsigned short/int/long
-                    USNPRINTF_UINT_TYPE v;
-                    unsigned base;
+					char const * prefix = "";
+					// unsigned short/int/long
+					USNPRINTF_UINT_TYPE v;
+					unsigned base;
+					int flags = 0;
 
 					step = -1;
 
-					int flags = 0;
 					if ('u' == c) {
 						base = 10;
+
 						if (print_sign) {
-							buffer[offset++] = '+';
+							prefix = "+";
 						}
 					} else {
-						if (print_hex_prefix) {
-							if (offset + 2 <= end) {
-								buffer[offset++] = '0';
-								buffer[offset++] = 'x';
-							} else {
-                                goto done;
-							}
-						}
 						base = 16;
+
+						/* Technically %#X should prefix with 0X but that's
+						 * hard to read so we'll bend the rules. */
+						if (print_hex_prefix) {
+							prefix = "x0";
+						}
+
 						if ('X' == c) {
 							flags |= FLAG_HEX_MASC;
 						}
 					}
 
 					if (2 == int_size) {
-                        v = va_arg(vl, USNPRINTF_UINT_TYPE);
+						v = va_arg(vl, USNPRINTF_UINT_TYPE);
 					} else if (1 == int_size) {
 						v = va_arg(vl, unsigned long);
 					} else {
 						v = va_arg(vl, unsigned int);
 					}
-                    uprint_uint_raw(buffer, &offset, end, flags, base, v);
-				} break;
-				case 'p':
-					step = -1;
-					buffer[offset++] = '0';
-					if (offset < end) {
-                        USNPRINTF_UINT_TYPE v = (USNPRINTF_UINT_TYPE)(uintptr_t)va_arg(vl, void*);
 
-                        buffer[offset++] = 'x';
-                        uprint_uint_raw(buffer, &offset, end, 0, 16, v);
-					}
-					break;
+					uprint_uint_raw(buffer, &offset, end, flags, base, fill, width, prefix, v);
+				} break;
+				case 'p': {
+					char const * prefix = "x0";
+					USNPRINTF_UINT_TYPE v = (USNPRINTF_UINT_TYPE)(uintptr_t)va_arg(vl, void*);
+
+					step = -1;
+
+					uprint_uint_raw(buffer, &offset, end, 0, 16, fill, width, prefix, v);
+				} break;
 				default:
-                    error = -1;
-                    goto out;
+					error = -1;
+					goto out;
 				}
 				break;
 			default:
-                error = -1;
-                goto out;
+				error = -1;
+				goto out;
 			}
 		}
 	}
 
-done:
-    buffer[offset] = '\0';
+	buffer[offset] = '\0';
 
-    error = (int)offset;
+	error = (int)offset;
 
 out:
-    va_end(vl);
+	va_end(vl);
 
-    return error;
+	return error;
 }

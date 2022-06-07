@@ -45,9 +45,9 @@ extern "C" {
  *
  * This implementation supports these specifiers: cdipsuxX.
  * These are the supported _length_ specifers (integers only): (none), h, hh, j, l, ll('), z, t
- * Flags (+-#0(space) are ignored except for # and + which are honored.
- * Width specifier * is _not_ supported. Number specifiers are ignored.
- * Precision specifiers are ignored.
+ * Flags are honored expect - (left justify) which is ignored.
+ * Width specifier * is _not_ supported. number specifiers are.
+ * Precision specifiers are _not_ supported.
  *
  * (') Define USNPRINTF_WITH_LONGLONG to support (unsigned) long long's.
  **/

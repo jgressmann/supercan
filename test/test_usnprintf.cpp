@@ -343,7 +343,7 @@ TEST (usnprintf_prints_X)
     CHECK_EQUAL(0, strcmp(ubuf, cbuf));
 }
 
-TEST (usnprintf_can_prefix_with_0x)
+TEST (usnprintf_honors_hash_flag)
 {
     char ubuf[64];
     char cbuf[64];
@@ -381,5 +381,85 @@ TEST (usnprintf_handles_escaped_percent)
     CHECK_EQUAL('d', buf[1]);
 }
 
+TEST (usnprintf_honors_space_flag)
+{
+    char buf[8];
+
+    int chars = usnprintf(buf, sizeof(buf), "% d", 10);
+    CHECK_EQUAL(3, chars);
+    CHECK_EQUAL(' ', buf[0]);
+    CHECK_EQUAL('1', buf[1]);
+    CHECK_EQUAL('0', buf[2]);
+
+    chars = usnprintf(buf, sizeof(buf), "% d", -2);
+    CHECK_EQUAL(2, chars);
+    CHECK_EQUAL('-', buf[0]);
+    CHECK_EQUAL('2', buf[1]);
+}
+
+
+TEST (usnprintf_honors_plus_flag)
+{
+    char buf[8];
+
+    int chars = usnprintf(buf, sizeof(buf), "%+d", 10);
+    CHECK_EQUAL(3, chars);
+    CHECK_EQUAL('+', buf[0]);
+    CHECK_EQUAL('1', buf[1]);
+    CHECK_EQUAL('0', buf[2]);
+
+    chars = usnprintf(buf, sizeof(buf), "%+d", -2);
+    CHECK_EQUAL(2, chars);
+    CHECK_EQUAL('-', buf[0]);
+    CHECK_EQUAL('2', buf[1]);
+}
+
+TEST (usnprintf_prints_with_fill_char)
+{
+    char buf[10];
+
+    int chars = usnprintf(buf, sizeof(buf), "%03x", 10);
+    CHECK_EQUAL(3, chars);
+    CHECK_EQUAL('0', buf[0]);
+    CHECK_EQUAL('0', buf[1]);
+    CHECK_EQUAL('a', buf[2]);
+
+    chars = usnprintf(buf, sizeof(buf), "%08x", 0x1234);
+    CHECK_EQUAL(8, chars);
+    CHECK_EQUAL('0', buf[0]);
+    CHECK_EQUAL('0', buf[1]);
+    CHECK_EQUAL('0', buf[2]);
+    CHECK_EQUAL('0', buf[3]);
+    CHECK_EQUAL('1', buf[4]);
+    CHECK_EQUAL('2', buf[5]);
+    CHECK_EQUAL('3', buf[6]);
+    CHECK_EQUAL('4', buf[7]);
+
+    char ubuf[64];
+    char cbuf[64];
+
+    int uchars = 0;
+    int cchars = 0;
+
+    cchars = snprintf(cbuf, sizeof(cbuf), "% 3d", -3);
+    uchars = usnprintf(ubuf, sizeof(ubuf), "% 3d", -3);
+    CHECK_EQUAL(cchars, uchars);
+    CHECK_EQUAL(0, strcmp(ubuf, cbuf));
+
+    cchars = snprintf(cbuf, sizeof(cbuf), "% 3d", 3);
+    uchars = usnprintf(ubuf, sizeof(ubuf), "% 3d", 3);
+    CHECK_EQUAL(cchars, uchars);
+    CHECK_EQUAL(0, strcmp(ubuf, cbuf));
+
+//    cchars = snprintf(cbuf, sizeof(cbuf), "%03d", -1);
+//    uchars = usnprintf(ubuf, sizeof(ubuf), "%03d", -1);
+//    CHECK_EQUAL(cchars, uchars);
+//    CHECK_EQUAL(0, strcmp(ubuf, cbuf));
+
+    cchars = snprintf(cbuf, sizeof(cbuf), "%03d", 3);
+    uchars = usnprintf(ubuf, sizeof(ubuf), "%03d", 3);
+    CHECK_EQUAL(cchars, uchars);
+    CHECK_EQUAL(0, strcmp(ubuf, cbuf));
+}
 
 } // anon namespace
