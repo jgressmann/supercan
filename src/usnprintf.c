@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -113,6 +113,7 @@ int usnprintf(
 	unsigned char print_sign = 0;
 	unsigned char print_hex_prefix = 0;
 	// char fill = 0;
+    int error = 0;
 
 
 	va_list vl;
@@ -167,7 +168,9 @@ start:
 precision:
 				switch (c) {
 				case '*':
-					return -1; // not supported
+                     // not supported
+                    error = -1;
+                    goto out;
 				case '0':
 				case '1':
 				case '2':
@@ -293,18 +296,23 @@ precision:
 					}
 					break;
 				default:
-					return -1;
+                    error = -1;
+                    goto out;
 				}
 				break;
 			default:
-				return -1;
+                error = -1;
+                goto out;
 			}
 		}
 	}
+
+    buffer[offset] = '\0';
+
+    error = (int)offset;
+
 out:
-	va_end(vl);
+    va_end(vl);
 
-	buffer[offset] = '\0';
-
-	return (int)offset;
+    return error;
 }
