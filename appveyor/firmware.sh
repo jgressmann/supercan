@@ -96,8 +96,8 @@ for i in $hw_revs; do
 	cp _build/$BOARD/${project}.bin $TARGET_DIR/supercan/$BOARD/0$i/supercan-standalone.bin
 	rm -rf _build
 	make $MAKE_ARGS HWREV=$i APP=1 dfu
-	cp _build/$BOARD/${project}.superdfu.hex $TARGET_DIR/supercan/$BOARD/0$i/supercan-dfu.hex
-	cp _build/$BOARD/${project}.superdfu.bin $TARGET_DIR/supercan/$BOARD/0$i/supercan-dfu.bin
+	cp _build/$BOARD/${project}.superdfu.hex $TARGET_DIR/supercan/$BOARD/0$i/supercan-app.hex
+	cp _build/$BOARD/${project}.superdfu.bin $TARGET_DIR/supercan/$BOARD/0$i/supercan-app.bin
 	cp _build/$BOARD/${project}.dfu $TARGET_DIR/supercan/$BOARD/0$i/supercan.dfu
 	rm -rf _build
 
@@ -111,9 +111,9 @@ exit
 EOF
 
 	# generate J-Link flash script (requires bootloader)
-	cat >$TARGET_DIR/supercan/$BOARD/0$i/superdfu-dfu.jlink <<EOF
+	cat >$TARGET_DIR/supercan/$BOARD/0$i/supercan-app.jlink <<EOF
 r
-loadfile supercan-dfu.hex
+loadfile supercan-app.hex
 r
 go
 exit
@@ -126,9 +126,9 @@ EOF
 - supercan-standalone.bin: binary, no bootloader required, flash with debug probe
 - supercan-standalone.hex: hex, no bootloader required, flash with debug probe
 - supercan-standalone.jlink: J-Link flash script
-- supercan-dfu.bin: binary, requires bootloader, flash with debug probe to 0x4000
-- supercan-dfu.hex: hex, requires bootloader, flash with debug probe to 0x4000
-- supercan-dfu.jlink: J-Link flash script
+- supercan-app.bin: binary, requires bootloader, flash with debug probe to 0x4000
+- supercan-app.hex: hex, requires bootloader, flash with debug probe to 0x4000
+- supercan-app.jlink: J-Link flash script
 - supercan.dfu: requires bootloader, update with dfu-util
 
 
@@ -165,7 +165,7 @@ JLinkExe -device ATSAME51J18 -if swd -JTAGConf -1,-1 -speed auto -CommandFile su
 #### Flash with J-LINK
 
 \`\`\`
-JLinkExe -device ATSAME51J18 -if swd -JTAGConf -1,-1 -speed auto -CommandFile supercan-dfu.jlink
+JLinkExe -device ATSAME51J18 -if swd -JTAGConf -1,-1 -speed auto -CommandFile supercan-app.jlink
 \`\`\`
 
 #### Update with dfu-util
