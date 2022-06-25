@@ -75,12 +75,12 @@ uprint_uint_raw(
 		int flags,
 		unsigned base,
 		char fill,
-		unsigned width,
+		int width,
 		char const * restrict reversed_prefix,
 		USNPRINTF_UINT_TYPE value)
 {
 	size_t start_offset = *offset_ptr;
-	unsigned chars = 0;
+	int chars = 0;
 	char const *alphabet;
 
 	if (16 == base && (flags & FLAG_HEX_MASC)) {
@@ -128,11 +128,11 @@ uprint_uint_raw(
 }
 
 USNPRINTF_SECTION
-int usnprintf(
+int uvsnprintf(
 	char * restrict buffer,
 	size_t size,
 	char const * restrict fmt,
-	...)
+	va_list vl)
 {
 	if (!size) {
 		return -1;
@@ -141,7 +141,7 @@ int usnprintf(
 	const size_t end = size - 1;
 	size_t offset = 0;
 	int error = 0;
-	unsigned width = 0;
+	int width = 0;
 	signed char step = -1;
 	unsigned char int_size = 0;
 	unsigned char print_sign = 0;
@@ -149,9 +149,6 @@ int usnprintf(
 	unsigned char print_hex_prefix = 0;
 	char fill = ' ';
 
-
-	va_list vl;
-	va_start(vl, fmt);
 
 	while (offset < end) {
 		char c = *fmt++;
@@ -307,10 +304,15 @@ start:
 					} else {
 						base = 16;
 
-						/* Technically %#X should prefix with 0X but that's
-						 * hard to read so we'll bend the rules. */
 						if (print_hex_prefix) {
-							prefix = "x0";
+							if (offset < end) {
+								buffer[offset++] = '0';
+								--width;
+								if (offset < end) {
+									buffer[offset++] = c;
+									--width;
+								}
+							}
 						}
 
 						if ('X' == c) {
@@ -353,7 +355,21 @@ start:
 	error = (int)offset;
 
 out:
+	return error;
+}
+
+USNPRINTF_SECTION int usnprintf(
+	char * restrict buffer,
+	size_t size,
+	char const * restrict fmt,
+	...)
+{
+	int chars;
+	va_list vl;
+
+	va_start(vl, fmt);
+	chars = uvsnprintf(buffer, size, fmt, vl);
 	va_end(vl);
 
-	return error;
+	return chars;
 }

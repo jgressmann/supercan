@@ -451,13 +451,13 @@ TEST (usnprintf_prints_with_fill_char)
     CHECK_EQUAL(cchars, uchars);
     CHECK_EQUAL(0, strcmp(ubuf, cbuf));
 
-//    cchars = snprintf(cbuf, sizeof(cbuf), "%03d", -1);
-//    uchars = usnprintf(ubuf, sizeof(ubuf), "%03d", -1);
-//    CHECK_EQUAL(cchars, uchars);
-//    CHECK_EQUAL(0, strcmp(ubuf, cbuf));
-
     cchars = snprintf(cbuf, sizeof(cbuf), "%03d", 3);
     uchars = usnprintf(ubuf, sizeof(ubuf), "%03d", 3);
+    CHECK_EQUAL(cchars, uchars);
+    CHECK_EQUAL(0, strcmp(ubuf, cbuf));
+
+    cchars = snprintf(cbuf, sizeof(cbuf), "%#08x", 0xdead);
+    uchars = usnprintf(ubuf, sizeof(ubuf), "%#08x", 0xdead);
     CHECK_EQUAL(cchars, uchars);
     CHECK_EQUAL(0, strcmp(ubuf, cbuf));
 }
