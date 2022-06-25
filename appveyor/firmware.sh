@@ -102,7 +102,7 @@ for i in $hw_revs; do
 	rm -rf _build
 
 	# generate J-Link flash script (standalone)
-	cat <<EOF >$TARGET_DIR/supercan/$BOARD/0$i/superdfu-standalone.jlink
+	cat <<EOF >$TARGET_DIR/supercan/$BOARD/0$i/supercan-standalone.jlink
 r
 loadfile supercan-standalone.hex
 r
