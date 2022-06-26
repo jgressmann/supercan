@@ -185,24 +185,6 @@ app_descend_to_bootloader()
 	sleep $usb_enum_pause_s
 }
 
-# app_descend_to_bootloader()
-# {
-# 	local setting_name=$1
-# 	local setting_log_dir=$log_dir/$setting_name
-
-# 	message="application to bootloader decend"
-# 	echo "INFO[${setting_name}]: Step $number: $message" | tee -a "$meta_log_path"
-# 	dfu-util -d ${vid}:${pid_app} -R -e 2>&1 | tee -a "$setting_log_dir/${number}-app-decend-to-bl.log"
-# 	exit_code=${PIPESTATUS[0]}
-
-# 	if [ $exit_code -ne 0 ]; then
-# 		echo "ERROR[${setting_name}]: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
-# 		errors=$((errors+1))
-# 	fi
-
-# 	# wait a bit (device enumeration)
-# 	sleep $usb_enum_pause_s
-# }
 
 
 # generate erase file (erase command fails but does end up erasing the flash memory)
@@ -241,38 +223,12 @@ dd if=/dev/urandom "of=$tmp_dir/junk.bin" bs=32K count=1
 cat >"$tmp_dir/flash-junk.jlink" << EOF
 ExitOnError 1
 r
-loadfile $tmp_dir/junk.bin
+loadfile $tmp_dir/junk.bin,0x0
 r
 go
 exit
 EOF
 
-# # erase target
-# message="erase target flash"
-# echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
-# JLinkExe $jlink_options -CommandFile "$tmp_dir/erase.jlink" 2>&1 | tee -a "$log_dir/${number}-erase-chip.log"
-# exit_code=${PIPESTATUS[0]}
-
-# if [ $exit_code -ne 0 ]; then
-# 	echo "ERROR: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
-# 	errors=$((errors+1))
-# fi
-
-# number=$((number+1))
-# # wait a bit (device enumeration)
-# sleep $usb_enum_pause_s
-
-
-# message="verify neither bootloader nor application is running"
-# echo "INFO: Step $number: $message" | tee -a "$meta_log_path"
-# output_bl=$( lsusb -v -d ${vid}:${pid_bl} 2>&1 | tee -a "$log_dir/${number}-verify-no-dfu-app-vid-pid-after-erase.log" )
-# output_app=$( lsusb -v -d ${vid}:${pid_app} 2>&1 | tee -a "$log_dir/${number}-verify-no-dfu-app-vid-pid-after-erase.log" )
-
-
-# if [ -n "$output_bl" ] || [ -n "$output_app" ]; then
-# 	echo "ERROR: failed step \"$message\": found USB device for VID:PID ${vid}:${pid_bl},${pid_app}" | tee -a "$meta_log_path"
-# 	errors=$((errors+1))
-# fi
 
 function app_update_test()
 {
@@ -301,6 +257,9 @@ function app_update_test()
 	# update app again (self update)
 	app_descend_to_bootloader $setting_name
 	number=$((number+1))
+
+	# wait a bit (device enumeration)
+	sleep $usb_enum_pause_s
 
 	verify_bootloader_is_running $setting_name
 	number=$((number+1))
@@ -331,8 +290,6 @@ function bootloader_upgrade_test()
 	local setting_log_dir=$log_dir/$setting_name
 
 
-	# app_descend_to_bootloader $setting_name
-	# number=$((number+1))
 	verify_bootloader_is_running $setting_name
 	number=$((number+1))
 
@@ -354,34 +311,107 @@ function bootloader_upgrade_test()
 
 	verify_bootloader_is_running $setting_name
 	number=$((number+1))
-	app_update_test  $setting_name
-	number=$((number+1))
+
+	# -> this part fails for update bootloader, gets stuck in tud_task <-
+
+	# app_update_test  $setting_name
+	# number=$((number+1))
 
 	# ## prep self-update
 	# app_descend_to_bootloader $setting_name
 	# number=$((number+1))
+
 	# verify_bootloader_is_running $setting_name
 	# number=$((number+1))
 
-	# ## Bootloader update to default
-	# message="bootloader upload through DFU from upgrade to default version"
-	# echo "INFO[$setting_name]: Step $number: $message" | tee -a "$meta_log_path"
-	# dfu-util -d ${vid}:${pid_app},:${pid_bl} -R -D "$curr_bl_dfu_file" 2>&1 | tee -a "$setting_log_dir/${number}-upload-bl-upgrade-to-curr-default.log"
-	# exit_code=${PIPESTATUS[0]}
+	## Bootloader update to default
+	message="bootloader upload through DFU from upgrade to default version"
+	echo "INFO[$setting_name]: Step $number: $message" | tee -a "$meta_log_path"
+	dfu-util -d ${vid}:${pid_app},:${pid_bl} -R -D "$curr_bl_dfu_file" 2>&1 | tee -a "$setting_log_dir/${number}-upload-bl-upgrade-to-curr-default.log"
+	exit_code=${PIPESTATUS[0]}
 
-	# if [ $exit_code -ne 0 ]; then
-	# 	echo "ERROR[$setting_name]: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
-	# 	errors=$((errors+1))
-	# fi
+	if [ $exit_code -ne 0 ]; then
+		echo "ERROR[$setting_name]: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
+		errors=$((errors+1))
+	fi
 
-	# # wait a bit (device enumeration)
-	# sleep $usb_enum_pause_s
+	# wait a bit (device enumeration)
+	sleep $usb_enum_pause_s
 
-	# number=$((number+1))
-	# app_update_test $setting_name
+	number=$((number+1))
+
+	verify_bootloader_is_running $setting_name
+	number=$((number+1))
+
+	app_update_test  $setting_name
+	number=$((number+1))
+}
+
+function from_naked_device()
+{
+	local setting_name=$1
+	local setting_log_dir=$log_dir/$setting_name
+
+	message="verify neither bootloader nor application is running"
+	echo "INFO[$setting_name]: Step $number: $message" | tee -a "$meta_log_path"
+	output_bl=$( lsusb -v -d ${vid}:${pid_bl} 2>&1 | tee -a "$setting_log_dir/${number}-verify-no-dfu-app-vid-pid-after-erase.log" )
+	output_app=$( lsusb -v -d ${vid}:${pid_app} 2>&1 | tee -a "$setting_log_dir/${number}-verify-no-dfu-app-vid-pid-after-erase.log" )
+
+
+	if [ -n "$output_bl" ] || [ -n "$output_app" ]; then
+		echo "ERROR[$setting_name]: failed step \"$message\": found USB device for VID:PID ${vid}:${pid_bl},${pid_app}" | tee -a "$meta_log_path"
+		errors=$((errors+1))
+	fi
+
+
+	message="flash prev bootloader onto chip"
+	echo "INFO[$setting_name]: Step $number: $message" | tee -a "$meta_log_path"
+	JLinkExe $jlink_options -CommandFile "$tmp_dir/flash-bootloader.jlink" 2>&1 | tee -a "$setting_log_dir/${number}-flash-prev-bootloader.log"
+	exit_code=${PIPESTATUS[0]}
+
+	if [ $exit_code -ne 0 ]; then
+		echo "ERROR[$setting_name]: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
+		errors=$((errors+1))
+	fi
+
+
+	number=$((number+1))
+	# wait a bit (device enumeration)
+	sleep $usb_enum_pause_s
+
+	verify_bl_is_running $setting_name
+
+	message="flash prev app onto chip"
+	echo "INFO[$setting_name]: Step $number: $message" | tee -a "$meta_log_path"
+	JLinkExe $jlink_options -CommandFile "$tmp_dir/flash-app.jlink" 2>&1 | tee -a "$setting_log_dir/${number}-flash-prev-app.log"
+	exit_code=${PIPESTATUS[0]}
+
+	if [ $exit_code -ne 0 ]; then
+		echo "ERROR[$setting_name]: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
+		errors=$((errors+1))
+	fi
+
+
+	number=$((number+1))
+	# wait a bit (device enumeration)
+	sleep $usb_enum_pause_s
+
+
+	verify_app_is_running $setting_name
+	number=$((number+1))
+
+	app_descend_to_bootloader $setting_name
+	number=$((number+1))
+
+	bootloader_upgrade_test $setting_name
+
+
 }
 
 
+##################
+### from blank ###
+##################
 setting_name="from_blank"
 setting_log_dir=$log_dir/$setting_name
 
@@ -389,6 +419,8 @@ echo
 echo INFO: Setting $setting_name
 
 mkdir -p "$setting_log_dir"
+
+number=1
 
 # erase target
 message="erase target flash"
@@ -405,22 +437,26 @@ number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
+from_naked_device $setting_name
 
-message="verify neither bootloader nor application is running"
+#################
+### from junk ###
+#################
+
+setting_name="from_junk"
+setting_log_dir=$log_dir/$setting_name
+
+echo
+echo INFO: Setting $setting_name
+
+mkdir -p "$setting_log_dir"
+
+number=1
+
+# erase target
+message="flash junk"
 echo "INFO[$setting_name]: Step $number: $message" | tee -a "$meta_log_path"
-output_bl=$( lsusb -v -d ${vid}:${pid_bl} 2>&1 | tee -a "$setting_log_dir/${number}-verify-no-dfu-app-vid-pid-after-erase.log" )
-output_app=$( lsusb -v -d ${vid}:${pid_app} 2>&1 | tee -a "$setting_log_dir/${number}-verify-no-dfu-app-vid-pid-after-erase.log" )
-
-
-if [ -n "$output_bl" ] || [ -n "$output_app" ]; then
-	echo "ERROR[$setting_name]: failed step \"$message\": found USB device for VID:PID ${vid}:${pid_bl},${pid_app}" | tee -a "$meta_log_path"
-	errors=$((errors+1))
-fi
-
-
-message="flash prev bootloader onto chip"
-echo "INFO[$setting_name]: Step $number: $message" | tee -a "$meta_log_path"
-JLinkExe $jlink_options -CommandFile "$tmp_dir/flash-bootloader.jlink" 2>&1 | tee -a "$setting_log_dir/${number}-flash-prev-bootloader.log"
+JLinkExe $jlink_options -CommandFile "$tmp_dir/flash-junk.jlink" 2>&1 | tee -a "$setting_log_dir/${number}-flash-junk.log"
 exit_code=${PIPESTATUS[0]}
 
 if [ $exit_code -ne 0 ]; then
@@ -428,37 +464,11 @@ if [ $exit_code -ne 0 ]; then
 	errors=$((errors+1))
 fi
 
-
 number=$((number+1))
 # wait a bit (device enumeration)
 sleep $usb_enum_pause_s
 
-verify_bl_is_running $setting_name
-
-message="flash prev app onto chip"
-echo "INFO[$setting_name]: Step $number: $message" | tee -a "$meta_log_path"
-JLinkExe $jlink_options -CommandFile "$tmp_dir/flash-app.jlink" 2>&1 | tee -a "$setting_log_dir/${number}-flash-prev-app.log"
-exit_code=${PIPESTATUS[0]}
-
-if [ $exit_code -ne 0 ]; then
-	echo "ERROR[$setting_name]: failed step \"$message\" (exit code $exit_code)" | tee -a "$meta_log_path"
-	errors=$((errors+1))
-fi
-
-
-number=$((number+1))
-# wait a bit (device enumeration)
-sleep $usb_enum_pause_s
-
-
-verify_app_is_running $setting_name
-number=$((number+1))
-
-app_descend_to_bootloader $setting_name
-number=$((number+1))
-
-bootloader_upgrade_test $setting_name
-
+from_naked_device $setting_name
 
 #######################
 # archive results
