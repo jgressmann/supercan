@@ -10,7 +10,6 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
-TARGET_DIR=$APPVEYOR_BUILD_FOLDER/tmp
 
 
 # install build dependencies
@@ -22,5 +21,4 @@ git submodule update --init --depth 1 --recursive
 env
 
 $APPVEYOR_BUILD_FOLDER/Boards/examples/device/supercan/build.sh
-mv $APPVEYOR_BUILD_FOLDER/Boards/examples/device/supercan/firmware/supercan-firmware.tar.xz .
-
+mv $APPVEYOR_BUILD_FOLDER/Boards/examples/device/supercan/firmware/supercan-firmware.tar.xz $APPVEYOR_BUILD_FOLDER

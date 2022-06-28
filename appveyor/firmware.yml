@@ -6,15 +6,11 @@ branches:
 # set clone depth
 clone_depth: 1
 
-# environment variables
-environment:
-  ARCHIVE_FILE: tmp/supercan-firmware.tar.xz
-
 build_script:
-  - chmod +x $APPVEYOR_BUILD_FOLDER/appveyor/firmware.sh && $APPVEYOR_BUILD_FOLDER/appveyor/firmware.sh
+  - chmod +x appveyor/firmware.sh && ./appveyor/firmware.sh
 
 artifacts:
-  - path: $(ARCHIVE_FILE)
+  - path: supercan-firmware.tar.xz
     name: files
 
 deploy:
