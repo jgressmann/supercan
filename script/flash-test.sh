@@ -6,7 +6,7 @@
 script_dir=$(dirname $0)
 
 usb_enum_pause_s=3
-jlink_options="-device ATSAME51J19 -if swd -JTAGConf -1,-1 -speed auto"
+jlink_options="-device ATSAME51J18 -if swd -JTAGConf -1,-1 -speed auto"
 vid=1d50
 pid_bl=5036
 pid_app=5035
