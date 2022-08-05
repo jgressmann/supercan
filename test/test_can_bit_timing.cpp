@@ -442,6 +442,28 @@ TEST_F (fixture, cbt_computes_sensible_values)
     CHECK_EQUAL(6u, settings_data.tseg1);
     CHECK_EQUAL(3u, settings_data.tseg2);
     // data brp=1 sjw=1 tseg1=6 tseg2=3 bitrate=8000000 sp=666/1000
+
+    // 60MHz clock
+    hw_data.clock_hz = UINT32_C(80000000);
+    hw_data.brp_min = 1;
+    hw_data.brp_max = 1024;
+    hw_data.brp_step = 1;
+    hw_data.sjw_max = 0x08;
+    hw_data.tseg1_min = 0x01;
+    hw_data.tseg1_max = 0x10;
+    hw_data.tseg2_min = 0x01;
+    hw_data.tseg2_max = 0x08;
+    hw_data.clock_hz = UINT32_C(80000000);
+    user_data.bitrate = 2000000;
+    user_data.sjw = CAN_SJW_TSEG2;
+    user_data.sample_point = .7f;
+    user_data.min_tqs = 0;
+    CHECK_EQUAL(CAN_BTRE_NONE, cbt_real(&hw_data, &user_data, &settings_data));
+    CHECK_EQUAL(2u, settings_data.brp);
+    CHECK_EQUAL(6u, settings_data.sjw);
+    CHECK_EQUAL(13u, settings_data.tseg1);
+    CHECK_EQUAL(6u, settings_data.tseg2);
+
 }
 
 TEST_F (fixture, cbt_computes_leaves_sjw_at_the_user_setting)
