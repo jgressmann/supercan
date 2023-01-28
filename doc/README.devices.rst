@@ -14,7 +14,7 @@ Supported Devices
 +----------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | `Microchip SAM E54 Xplained Pro <https://www.microchip.com/en-us/development-tool/atsame54-xpro>`_ | `Microchip Studio <https://www.microchip.com/en-us/development-tools-tools-and-software/microchip-studio-for-avr-and-sam-devices>`_, `edbg <https://github.com/ataradov/edbg>`_ |
 +----------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| `STMicroelectronics STM32F3DISCOVERY`_, `README <README.stm32f3discovery.rst>`_                    | DfuSe, embedded debugger, STM32CubeProgrammer_                                                                                                                                  |
+| STM32F3DISCOVERY_, `README <README.stm32f3discovery.rst>`_                                         | DfuSe, embedded debugger, STM32CubeProgrammer_                                                                                                                                  |
 +----------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | `Teensy 4.x <README.teensy_4x.rst>`_                                                               | `Teensy Loader`_                                                                                                                                                                |
 +----------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -24,6 +24,6 @@ Supported Devices
 .. _D5035-03: https://github.com/RudolphRiedel/USB_CAN-FD
 .. _`Longan CANBED M4`: https://docs.longan-labs.cc/1030013/
 .. _STM32CubeProgrammer: https://www.st.com/en/development-tools/stm32cubeprog.html
-.. _``STMicroelectronics STM32F3DISCOVERY`: https://www.st.com/en/evaluation-tools/stm32f3discovery.html
+.. _STM32F3DISCOVERY: https://www.st.com/en/evaluation-tools/stm32f3discovery.html
 .. _`Teensy Loader`: https://www.pjrc.com/teensy/loader.html
 
