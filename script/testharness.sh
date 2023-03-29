@@ -446,7 +446,7 @@ function one_each()
 	local setting_data_bitrate=$3
 
 	echo
-	echo INFO: Setting $setting_name
+	echo "INFO: Setting $setting_name ($setting_nominal_bitrate/$setting_data_bitrate bps)"
 
 	max_frames=$((seconds*$setting_nominal_bitrate/200))
 	echo INFO[$setting_name]: max frames $max_frames
