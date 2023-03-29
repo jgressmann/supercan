@@ -10,6 +10,8 @@ Supported Devices
 +----------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | D5035-03_                                                                                          | `Teensy Loader`_                                                                                                                                                                |
 +----------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| D5035-05_                                                                                          | DfuSe_ or JLink, see README in firmware archive                                                                                                                                 |
++----------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | `Longan CANBED M4`_                                                                                | `see these steps (same as D5035-01) <README.D5035-01.md>`_                                                                                                                      |
 +----------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | `Microchip SAM E54 Xplained Pro <https://www.microchip.com/en-us/development-tool/atsame54-xpro>`_ | `Microchip Studio <https://www.microchip.com/en-us/development-tools-tools-and-software/microchip-studio-for-avr-and-sam-devices>`_, `edbg <https://github.com/ataradov/edbg>`_ |
@@ -22,6 +24,8 @@ Supported Devices
 .. _`Adafruit Feather M4 CAN Express`: https://www.adafruit.com/product/4759
 .. _D5035-01: https://github.com/RudolphRiedel/USB_CAN-FD
 .. _D5035-03: https://github.com/RudolphRiedel/USB_CAN-FD
+.. _D5035-05: https://github.com/RudolphRiedel/USB_CAN-FD
+.. _DfuSe: https://dfu-util.sourceforge.net/dfuse.html
 .. _`Longan CANBED M4`: https://docs.longan-labs.cc/1030013/
 .. _STM32CubeProgrammer: https://www.st.com/en/development-tools/stm32cubeprog.html
 .. _STM32F3DISCOVERY: https://www.st.com/en/evaluation-tools/stm32f3discovery.html
