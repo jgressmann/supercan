@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2023 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@
 
 #define SC_SRV_VERSION_MAJOR 0
 #define SC_SRV_VERSION_MINOR 6
-#define SC_SRV_VERSION_PATCH 0
+#define SC_SRV_VERSION_PATCH 1
 
 #ifdef __cplusplus
 extern "C" {

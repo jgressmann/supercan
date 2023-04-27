@@ -87,6 +87,7 @@ struct app_ctx {
     bool config;
     bool log_on_change;
     bool candump;
+    bool stop_on_error;
 };
 
 static inline uint8_t dlc_to_len(uint8_t dlc)

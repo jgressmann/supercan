@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2023 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@
 
 static void usage(FILE* stream)
 {
-    fprintf(stream, "SuperCAN demo app (c) 2020 Jean Gressmann <jean@0x42.de>\n");
+    fprintf(stream, "SuperCAN demo app (c) 2020-2023 Jean Gressmann <jean@0x42.de>\n");
     fprintf(stream, "supercan_app [options]\n");
     fprintf(stream, "\n");
     fprintf(stream, "-h, --help, /?     print this help\n");
@@ -81,6 +81,7 @@ static void usage(FILE* stream)
     fprintf(stream, "--config BOOL  request config level access (defaults to on)\n");
     fprintf(stream, "--candump      log received messages in candump log format (overrides other log flags)\n");
     fprintf(stream, "--debug-log-level  LEVEL   debug log level, default OFF (-1)\n");
+    fprintf(stream, "--dontdie      don't exit app on device done\n");
 }
 
 
@@ -243,6 +244,7 @@ int main(int argc, char** argv)
     ac.can_bus_state_last = -1;
     ac.candump = false;
     ac.debug_log_level = SC_DLL_LOG_LEVEL_OFF;
+    ac.stop_on_error = true;
 
     cia_fd_cbt_init_default_real(&ac.nominal_user_constraints, &ac.data_user_constraints);
 
@@ -503,6 +505,10 @@ int main(int argc, char** argv)
         }
         else if (0 == strcmp("--candump", argv[i])) {
             ac.candump = true;
+            ++i;
+        }
+        else if (0 == strcmp("--dontdie", argv[i])) {
+            ac.stop_on_error = false;
             ++i;
         }
         else if (0 == strcmp("--config", argv[i])) {

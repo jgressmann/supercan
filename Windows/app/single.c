@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2023 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -702,8 +702,10 @@ int run_single(struct app_ctx* ac)
             }
 
             if (SC_DLL_ERROR_TIMEOUT != error) {
-                fprintf(stderr, "sc_can_stream_run failed: %s (%d)\n", sc_strerror(error), error);
-                break;
+                if (ac->stop_on_error) {
+                    fprintf(stderr, "sc_can_stream_run failed: %s (%d)\n", sc_strerror(error), error);
+                    break;
+                }
             }
         }
 
@@ -713,8 +715,10 @@ int run_single(struct app_ctx* ac)
             
             error = sc_can_stream_tx_batch_begin(can_state.stream);
             if (error) {
-                fprintf(stderr, "sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
-                goto Exit;
+                if (ac->stop_on_error) {
+                    fprintf(stderr, "sc_can_stream_tx_batch_begin failed: %s (%d)\n", sc_strerror(error), error);
+                    goto Exit;
+                }
             }
 
             for (size_t i = 0; i < ac->tx_job_count; ++i) {
@@ -743,7 +747,9 @@ int run_single(struct app_ctx* ac)
                             job->count = 0;
                             break;
                         default:
-                            goto Exit;
+                            if (ac->stop_on_error) {
+                                goto Exit;
+                            }
                         }
                     }
 
@@ -760,8 +766,10 @@ int run_single(struct app_ctx* ac)
 
             error = sc_can_stream_tx_batch_end(can_state.stream);
             if (error) {
-                fprintf(stderr, "sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
-                goto Exit;
+                if (ac->stop_on_error) {
+                    fprintf(stderr, "sc_can_stream_tx_batch_end failed: %s (%d)\n", sc_strerror(error), error);
+                    goto Exit;
+                }
             }
         }
         else {
