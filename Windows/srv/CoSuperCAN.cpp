@@ -148,7 +148,6 @@ public:
 	void Uninit();
 	int AddComDevice(XSuperCANDevice* device);
 	void RemoveComDevice(sc_com_dev_index_t index);
-	//int Cmd(sc_com_dev_index_t index, uint16_t bytes_in, uint16_t* bytes_out);
 	bool AcquireConfigurationAccess(sc_com_dev_index_t index, unsigned long* timeout_ms);
 	void ReleaseConfigurationAccess(sc_com_dev_index_t index);
 	int SetBus(sc_com_dev_index_t index, bool on);
@@ -161,12 +160,6 @@ public:
 	const std::wstring& name() const { return m_Name; }
 	sc_msg_dev_info dev_info;
 	sc_msg_can_info can_info;
-	
-	
-	uint16_t dev_to_host16(uint16_t value) const { return m_Device->dev_to_host16(value); }
-	uint32_t dev_to_host32(uint32_t value) const { return m_Device->dev_to_host32(value); }
-	uint8_t* cmd_tx_buffer() const { return m_CmdCtx.tx_buffer; }
-	uint8_t* cmd_rx_buffer() const { return m_CmdCtx.rx_buffer; }
 
 private:
 	static DWORD WINAPI RxMain(void* self);
@@ -531,6 +524,10 @@ bool ScDev::AcquireConfigurationAccess(
 	// Don't allow configuration access to some other client in a 
 	// multi-client scenario after the bus was configured and enabled.
 	if (clients > 1 && m_OnBus) {
+		// Special case: device is on bus but has failed, likely due 
+		// to the device having been disconnected from the host.
+		// In this case, allow configuration so that we can take the 
+		// device offline and then back online.
 		if (m_Failed) {
 			m_ConfigurationAccessIndex = index;
 			m_ConfigurationAccessClaimed = now;
@@ -663,7 +660,7 @@ int ScDev::SetFeatureFlags(sc_com_dev_index_t index, uint32_t flags)
 int ScDev::SetFeatureFlags()
 {
 	
-	sc_msg_features* feat = reinterpret_cast<sc_msg_features*>(cmd_tx_buffer());
+	sc_msg_features* feat = reinterpret_cast<sc_msg_features*>(m_CmdCtx.tx_buffer);
 	feat->id = SC_MSG_FEATURES;
 	feat->op = SC_FEAT_OP_CLEAR;
 	feat->len = sizeof(*feat);
@@ -676,7 +673,7 @@ int ScDev::SetFeatureFlags()
 	}
 
 	feat->op = SC_FEAT_OP_OR;
-	feat->arg = dev_to_host32(m_FeatureFlags);
+	feat->arg = m_Device->dev_to_host32(m_FeatureFlags);
 
 	return Cmd(feat->len);
 }
@@ -708,12 +705,12 @@ int ScDev::SetNominalBitTiming(sc_com_dev_index_t index, SuperCANBitTimingParams
 
 int ScDev::SetNominalBitTiming()
 {
-	sc_msg_bittiming* bt = reinterpret_cast<sc_msg_bittiming*>(cmd_tx_buffer());
+	sc_msg_bittiming* bt = reinterpret_cast<sc_msg_bittiming*>(m_CmdCtx.tx_buffer);
 	bt->id = SC_MSG_NM_BITTIMING;
 	bt->len = sizeof(*bt);
-	bt->brp = dev_to_host16(m_Nm.brp);
+	bt->brp = m_Device->dev_to_host16(m_Nm.brp);
 	bt->sjw = m_Nm.sjw;
-	bt->tseg1 = dev_to_host16(m_Nm.tseg1);
+	bt->tseg1 = m_Device->dev_to_host16(m_Nm.tseg1);
 	bt->tseg2 = m_Nm.tseg2;
 
 	return Cmd(bt->len);
@@ -746,12 +743,12 @@ int ScDev::SetDataBitTiming(sc_com_dev_index_t index, SuperCANBitTimingParams pa
 
 int ScDev::SetDataBitTiming()
 {
-	sc_msg_bittiming* bt = reinterpret_cast<sc_msg_bittiming*>(cmd_tx_buffer());
+	sc_msg_bittiming* bt = reinterpret_cast<sc_msg_bittiming*>(m_CmdCtx.tx_buffer);
 	bt->id = SC_MSG_DT_BITTIMING;
 	bt->len = sizeof(*bt);
-	bt->brp = dev_to_host16(m_Dt.brp);
+	bt->brp = m_Device->dev_to_host16(m_Dt.brp);
 	bt->sjw = m_Dt.sjw;
-	bt->tseg1 = dev_to_host16(m_Dt.tseg1);
+	bt->tseg1 = m_Device->dev_to_host16(m_Dt.tseg1);
 	bt->tseg2 = m_Dt.tseg2;
 
 	return Cmd(bt->len);
@@ -761,7 +758,7 @@ int ScDev::Cmd(uint16_t bytes_in)
 {
 	assert(m_Initialized);
 
-	sc_msg_error* e = reinterpret_cast<sc_msg_error*>(cmd_rx_buffer());
+	sc_msg_error* e = reinterpret_cast<sc_msg_error*>(m_CmdCtx.tx_buffer);
 	uint16_t bytes_out = 0;
 	auto error = sc_cmd_ctx_run(&m_CmdCtx, bytes_in, &bytes_out, CMD_TIMEOUT_MS);
 
@@ -2219,8 +2216,7 @@ void ScDev::SetDeviceError(int error)
 	{
 		Guard g(m_Lock);
 
-		// release configuration access
-		//m_ConfigurationAccessIndex = MAX_COM_DEVICES_PER_SC_DEVICE;
+		// mark device as failed
 		m_Failed = true;
 	}
 
@@ -2386,7 +2382,6 @@ STDMETHODIMP XSuperCANDevice::GetDeviceData(SuperCANDeviceData* data)
 
 	return S_OK;
 }
-
 
 STDMETHODIMP XSuperCANDevice::SetNominalBitTiming(SuperCANBitTimingParams params)
 {
