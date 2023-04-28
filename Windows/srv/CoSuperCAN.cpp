@@ -26,6 +26,11 @@
 
 #include "pch.h"
 
+#include <cfgmgr32.h>
+#include <initguid.h> // required to resolve DEVPKEY_*
+#include <devpkey.h>
+
+
 #include "CoSuperCAN.h"
 #include "commit.h"
 
@@ -192,7 +197,14 @@ private:
 	int SetFeatureFlags();
 	int SetNominalBitTiming();
 	int SetDataBitTiming();
-	
+	static DWORD OnDeviceNotification(
+		HCMNOTIFICATION hNotify,
+		PVOID Context,
+		CM_NOTIFY_ACTION Action,
+		PCM_NOTIFY_EVENT_DATA EventData,
+		DWORD EventDataSize);
+	void OnDeviceGone();
+	void OnDeviceDiscovered();
 	
 
 private:
@@ -239,9 +251,12 @@ private:
 
 private:
 	std::wstring m_Name;
+	std::string m_DeviceName;
 	sc_dev_t* m_Device;
+	HCMNOTIFICATION m_DeviceInstanceNotification;
 	sc_cmd_ctx_t m_CmdCtx;
 	sc_can_stream_t *m_Stream;
+
 	sc_dev_time_tracker m_TimeTracker;
 	sc_msg_bittiming m_Nm, m_Dt;
 	uint32_t m_FeatureFlags;
@@ -270,6 +285,7 @@ private:
 	bool m_Opened;
 	bool m_OnBus;
 	bool m_Failed;
+	bool m_Gone;
 	sc_com_dev_index_t m_RxThreadLiveComDevBuffer[MAX_COM_DEVICES_PER_SC_DEVICE];
 	sc_com_dev_index_t m_RxThreadLiveComDevCount;
 	uint32_t m_LogLost;
@@ -456,6 +472,7 @@ ScDev::ScDev()
 	m_OnBus = false;
 	m_Opened = false;
 	m_Failed = false;
+	m_Gone = false;
 	memset(&m_Nm, 0, sizeof(m_Nm));
 	memset(&m_Dt, 0, sizeof(m_Dt));
 	m_FeatureFlags = 0;
@@ -467,6 +484,8 @@ ScDev::ScDev()
 
 	ZeroMemory(&dev_info, sizeof(dev_info));
 	ZeroMemory(&can_info, sizeof(can_info));
+
+	m_DeviceInstanceNotification = nullptr;
 }
 
 void ScDev::ResetTxrMap()
@@ -528,7 +547,7 @@ bool ScDev::AcquireConfigurationAccess(
 		// to the device having been disconnected from the host.
 		// In this case, allow configuration so that we can take the 
 		// device offline and then back online.
-		if (m_Failed) {
+		if (m_Failed || m_Gone) {
 			m_ConfigurationAccessIndex = index;
 			m_ConfigurationAccessClaimed = now;
 			return true;
@@ -754,11 +773,71 @@ int ScDev::SetDataBitTiming()
 	return Cmd(bt->len);
 }
 
+DWORD ScDev::OnDeviceNotification(
+	HCMNOTIFICATION hNotify,
+	PVOID Context,
+	CM_NOTIFY_ACTION Action,
+	PCM_NOTIFY_EVENT_DATA EventData,
+	DWORD EventDataSize)
+{
+	(void)hNotify;
+	(void)EventDataSize;
+	(void)EventData;
+
+	switch (Action) {
+	case CM_NOTIFY_ACTION_DEVICEINSTANCEENUMERATED:
+		// sent prior to 'started' 
+		break;
+	case CM_NOTIFY_ACTION_DEVICEINSTANCESTARTED:
+		static_cast<ScDev*>(Context)->OnDeviceDiscovered();
+		break;
+	case CM_NOTIFY_ACTION_DEVICEINSTANCEREMOVED:
+		static_cast<ScDev*>(Context)->OnDeviceGone();
+		break;
+	}
+
+	return ERROR_SUCCESS;
+}
+
+void ScDev::OnDeviceGone()
+{
+	Guard g(m_Lock);
+	
+	m_Gone = true;
+
+	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
+		InterlockedOr((volatile LONG*)&m_ComDeviceDataPrivate[i].rx.hdr->flags, SC_MM_FLAG_GONE);
+		InterlockedOr((volatile LONG*)&m_ComDeviceDataPrivate[i].tx.hdr->flags, SC_MM_FLAG_GONE);
+
+		SetEvent(m_ComDeviceDataPrivate[i].rx.ev);
+	}
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_INFO, "%s: gone\n", m_DeviceName.c_str());
+}
+
+void ScDev::OnDeviceDiscovered()
+{
+	Guard g(m_Lock);
+
+	m_Gone = false;
+
+	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
+		InterlockedAnd((volatile LONG*)&m_ComDeviceDataPrivate[i].rx.hdr->flags, ~SC_MM_FLAG_GONE);
+		InterlockedAnd((volatile LONG*)&m_ComDeviceDataPrivate[i].tx.hdr->flags, ~SC_MM_FLAG_GONE);
+		InterlockedIncrement((volatile LONG*)&m_ComDeviceDataPrivate[i].rx.hdr->generation);
+		InterlockedIncrement((volatile LONG*)&m_ComDeviceDataPrivate[i].tx.hdr->generation);
+
+		SetEvent(m_ComDeviceDataPrivate[i].rx.ev);
+	}
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_INFO, "%s: discovered gen=%lu\n", m_DeviceName.c_str(), m_ComDeviceDataPrivate[0].rx.hdr->generation);
+}
+
 int ScDev::Cmd(uint16_t bytes_in)
 {
 	assert(m_Initialized);
 
-	sc_msg_error* e = reinterpret_cast<sc_msg_error*>(m_CmdCtx.tx_buffer);
+	sc_msg_error* e = reinterpret_cast<sc_msg_error*>(m_CmdCtx.rx_buffer);
 	uint16_t bytes_out = 0;
 	auto error = sc_cmd_ctx_run(&m_CmdCtx, bytes_in, &bytes_out, CMD_TIMEOUT_MS);
 
@@ -991,6 +1070,11 @@ void ScDev::Uninit()
 		if (m_OnBus) {
 			SetBusOff();
 		}
+	}
+
+	if (m_DeviceInstanceNotification) {
+		CM_Unregister_Notification(m_DeviceInstanceNotification);
+		m_DeviceInstanceNotification = nullptr;
 	}
 
 	Unmap();
@@ -1235,6 +1319,36 @@ int ScDev::Init(std::wstring&& name)
 		goto error_exit;
 	}
 
+	CONFIGRET cr;
+	DEVPROPTYPE prop_type = 0;
+	CM_NOTIFY_FILTER filter;
+	ULONG size = sizeof(filter.u.DeviceInstance.InstanceId[0]) * (_countof(filter.u.DeviceInstance.InstanceId) - 1);
+
+	ZeroMemory(&filter, sizeof(filter));
+
+	filter.cbSize = sizeof(filter);
+	filter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINSTANCE;
+
+	cr = CM_Get_Device_Interface_PropertyW(
+		m_Name.c_str(),
+		&DEVPKEY_Device_InstanceId,
+		&prop_type,
+		(PBYTE)filter.u.DeviceInstance.InstanceId,
+		&size,
+		0);
+
+	if (cr != CR_SUCCESS) {
+		error = SC_DLL_ERROR_OUT_OF_MEM;
+		goto error_exit;
+	}
+
+	cr = CM_Register_Notification(&filter, this, &OnDeviceNotification, &m_DeviceInstanceNotification);
+
+	if (cr != CR_SUCCESS) {
+		error = SC_DLL_ERROR_OUT_OF_MEM;
+		goto error_exit;
+	}
+
 	error = OpenDevice();
 
 	if (error) {
@@ -1269,6 +1383,8 @@ int ScDev::Init(std::wstring&& name)
 			error = SC_DLL_ERROR_DEV_UNSUPPORTED;
 			goto error_exit;
 		}
+
+		m_DeviceName.assign(dev_info.name_bytes, dev_info.name_bytes + dev_info.name_len);
 
 		/*fprintf(stdout, "device features perm=%#04x conf=%#04x\n", dev_info.feat_perm, dev_info.feat_conf);
 
@@ -1346,6 +1462,7 @@ void ScDev::CloseDevice()
 
 	m_Opened = false;
 	m_Failed = false;
+	m_Gone = false;
 }
 
 int ScDev::OpenDevice()
@@ -1449,13 +1566,13 @@ void ScDev::SetBusOff()
 		m_Stream = nullptr;
 	}
 
-	memset(&m_TimeTracker, 0, sizeof(m_TimeTracker));
+	ZeroMemory(&m_TimeTracker, sizeof(m_TimeTracker));
 
 	ResetTxrMap();
 
 	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
-		m_ComDeviceDataPrivate[i].rx.hdr->flags = 0;
-		m_ComDeviceDataPrivate[i].tx.hdr->flags = 0;
+		InterlockedAnd((volatile LONG*)&m_ComDeviceDataPrivate[i].rx.hdr->flags, ~SC_MM_FLAG_BUS_ON);
+		InterlockedAnd((volatile LONG*)&m_ComDeviceDataPrivate[i].tx.hdr->flags, ~SC_MM_FLAG_BUS_ON);
 
 		SetEvent(m_ComDeviceDataPrivate[i].rx.ev);
 	}
@@ -1504,6 +1621,9 @@ int ScDev::SetBusOn()
 	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
 		m_ComDeviceDataPrivate[i].rx.hdr->error = 0;
 		m_ComDeviceDataPrivate[i].tx.hdr->error = 0;
+
+		InterlockedAnd((volatile LONG*)&m_ComDeviceDataPrivate[i].rx.hdr->flags, ~SC_MM_FLAG_ERROR);
+		InterlockedAnd((volatile LONG*)&m_ComDeviceDataPrivate[i].tx.hdr->flags, ~SC_MM_FLAG_ERROR);
 
 		SetEvent(m_ComDeviceDataPrivate[i].rx.ev);
 
@@ -2565,7 +2685,7 @@ STDMETHODIMP XSuperCAN::DeviceScan(unsigned long* count)
 					return SC_HRESULT_FROM_ERROR(error);
 				}
 			}
-			else {				
+			else {
 				bool found = false;
 				ScDevPtr ptr;
 

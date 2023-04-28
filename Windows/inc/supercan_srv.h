@@ -150,6 +150,9 @@ enum sc_mm_flags {
       * NOTE: this flag remains set until the device is explicitly taken off the bus.
       */
     SC_MM_FLAG_BUS_ON = 0x2,
+
+    /** The device is gone (failure or unplug) */
+     SC_MM_FLAG_GONE = 0x4,
 };
 
 struct sc_can_mm_header {
@@ -167,7 +170,8 @@ struct sc_can_mm_header {
     volatile int32_t error;             ///< device error
     volatile uint32_t flags;            ///< flags
     volatile uint32_t log_lost;         ///< log messages lost
-    volatile uint32_t reserved1[7];     // reserved for now
+    volatile uint32_t generation;       ///< device generation, incremented each time the device is re-discovered
+    volatile uint32_t reserved1[6];     // reserved for now
     sc_can_mm_slot_t elements[0];
 };
 
