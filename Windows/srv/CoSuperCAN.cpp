@@ -182,6 +182,7 @@ private:
 	void SetDeviceError(int error);
 	int SetBusOn();
 	void SetBusOff();
+	void BusCleanup();
 	bool VerifyConfigurationAccess(sc_com_dev_index_t index) const;
 	void ComDeviceAddedTx(sc_com_dev_index_t index);
 	void ComDeviceRemovedTx(sc_com_dev_index_t index);
@@ -543,16 +544,6 @@ bool ScDev::AcquireConfigurationAccess(
 	// Don't allow configuration access to some other client in a 
 	// multi-client scenario after the bus was configured and enabled.
 	if (clients > 1 && m_OnBus) {
-		// Special case: device is on bus but has failed, likely due 
-		// to the device having been disconnected from the host.
-		// In this case, allow configuration so that we can take the 
-		// device offline and then back online.
-		if (m_Failed || m_Gone) {
-			m_ConfigurationAccessIndex = index;
-			m_ConfigurationAccessClaimed = now;
-			return true;
-		}
-
 		return false;
 	}
 
@@ -802,6 +793,10 @@ DWORD ScDev::OnDeviceNotification(
 void ScDev::OnDeviceGone()
 {
 	Guard g(m_Lock);
+
+	BusCleanup();
+
+	CloseDevice();
 	
 	m_Gone = true;
 
@@ -819,18 +814,26 @@ void ScDev::OnDeviceDiscovered()
 {
 	Guard g(m_Lock);
 
-	m_Gone = false;
+	// re-open the device to indicate it is 'back' 
+	auto error = OpenDevice();
 
-	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
-		InterlockedAnd((volatile LONG*)&m_ComDeviceDataPrivate[i].rx.hdr->flags, ~SC_MM_FLAG_GONE);
-		InterlockedAnd((volatile LONG*)&m_ComDeviceDataPrivate[i].tx.hdr->flags, ~SC_MM_FLAG_GONE);
-		InterlockedIncrement((volatile LONG*)&m_ComDeviceDataPrivate[i].rx.hdr->generation);
-		InterlockedIncrement((volatile LONG*)&m_ComDeviceDataPrivate[i].tx.hdr->generation);
-
-		SetEvent(m_ComDeviceDataPrivate[i].rx.ev);
+	if (error) {
+		SetDeviceError(error);
 	}
+	else {
+		m_Gone = false;
 
-	LOG_SRV(SC_DLL_LOG_LEVEL_INFO, "%s: discovered gen=%lu\n", m_DeviceName.c_str(), m_ComDeviceDataPrivate[0].rx.hdr->generation);
+		for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
+			InterlockedAnd((volatile LONG*)&m_ComDeviceDataPrivate[i].rx.hdr->flags, ~SC_MM_FLAG_GONE);
+			InterlockedAnd((volatile LONG*)&m_ComDeviceDataPrivate[i].tx.hdr->flags, ~SC_MM_FLAG_GONE);
+			InterlockedIncrement((volatile LONG*)&m_ComDeviceDataPrivate[i].rx.hdr->generation);
+			InterlockedIncrement((volatile LONG*)&m_ComDeviceDataPrivate[i].tx.hdr->generation);
+
+			SetEvent(m_ComDeviceDataPrivate[i].rx.ev);
+		}
+
+		LOG_SRV(SC_DLL_LOG_LEVEL_INFO, "%s: discovered gen=%lu\n", m_DeviceName.c_str(), m_ComDeviceDataPrivate[0].rx.hdr->generation);
+	}
 }
 
 int ScDev::Cmd(uint16_t bytes_in)
@@ -1070,6 +1073,8 @@ void ScDev::Uninit()
 		if (m_OnBus) {
 			SetBusOff();
 		}
+
+		CloseDevice();
 	}
 
 	if (m_DeviceInstanceNotification) {
@@ -1342,6 +1347,7 @@ int ScDev::Init(std::wstring&& name)
 		goto error_exit;
 	}
 
+	// NOTE: the notification works even if the device is plugged into a different USB port.
 	cr = CM_Register_Notification(&filter, this, &OnDeviceNotification, &m_DeviceInstanceNotification);
 
 	if (cr != CR_SUCCESS) {
@@ -1462,7 +1468,6 @@ void ScDev::CloseDevice()
 
 	m_Opened = false;
 	m_Failed = false;
-	m_Gone = false;
 }
 
 int ScDev::OpenDevice()
@@ -1502,19 +1507,9 @@ error_exit:
 	goto success_exit;
 }
 
-void ScDev::SetBusOff()
+void ScDev::BusCleanup()
 {
 	assert(m_Initialized);
-
-	if (m_Opened) {
-		sc_msg_config* bus = reinterpret_cast<sc_msg_config*>(m_CmdCtx.tx_buffer);
-		bus->id = SC_MSG_BUS;
-		bus->len = sizeof(*bus);
-		bus->arg = 0;
-
-		uint16_t bytes_out;
-		sc_cmd_ctx_run(&m_CmdCtx, bus->len, &bytes_out, CMD_TIMEOUT_MS);
-	}
 
 	m_RxThreadNotificationCode.store(NOTIFICATION_SHUTDOWN, std::memory_order_release);
 	m_TxThreadNotificationCode.store(NOTIFICATION_SHUTDOWN, std::memory_order_release);
@@ -1580,8 +1575,24 @@ void ScDev::SetBusOff()
 	m_RxThreadLiveComDevCount = 0;
 
 	m_OnBus = false;
+}
 
-	CloseDevice();
+void ScDev::SetBusOff()
+{
+	assert(m_Initialized);
+	assert(m_Opened);
+
+	if (m_OnBus) {
+		sc_msg_config* bus = reinterpret_cast<sc_msg_config*>(m_CmdCtx.tx_buffer);
+		bus->id = SC_MSG_BUS;
+		bus->len = sizeof(*bus);
+		bus->arg = 0;
+
+		uint16_t bytes_out;
+		sc_cmd_ctx_run(&m_CmdCtx, bus->len, &bytes_out, CMD_TIMEOUT_MS);
+	}
+
+	BusCleanup();
 }
 
 int ScDev::SetBusOn()
@@ -1591,13 +1602,8 @@ int ScDev::SetBusOn()
 	decltype(m_TxThreadNotificationValue)::value_type bitmask = 0;
 
 	assert(m_Initialized);
-
-	error = OpenDevice();
-
-	if (error) {
-		goto error_exit;
-	}
-
+	assert(m_Opened);
+	
 	error = SetFeatureFlags();
 
 	if (error) {
@@ -1740,6 +1746,14 @@ int ScDev::SetBus(sc_com_dev_index_t index, bool on)
 
 	if (!VerifyConfigurationAccess(index)) {
 		return SC_DLL_ERROR_ACCESS_DENIED;
+	}
+
+	if (m_Gone) {
+		return SC_DLL_ERROR_DEVICE_FAILURE;
+	}
+
+	if (!m_Opened) {
+		return SC_DLL_ERROR_INVALID_OPERATION;
 	}
 
 	SetBusOff();
