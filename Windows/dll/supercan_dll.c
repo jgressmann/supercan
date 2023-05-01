@@ -56,8 +56,12 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 
 #include "commit.h"
 
-// I am going to assume Windows on ARM is little endian
-#define NATIVE_BYTE_ORDER SC_BYTE_ORDER_LE
+#if REG_DWORD == REG_DWORD_LITTLE_ENDIAN
+#   define NATIVE_BYTE_ORDER SC_BYTE_ORDER_LE
+#else
+#   define NATIVE_BYTE_ORDER SC_BYTE_ORDER_BE
+#endif
+
 #define SC_CAN_STREAM_MAX_RX_WAIT_HANDLES 64
 #define SC_CAN_STREAM_DEFAULT_RX_WAIT_HANDLES 32
 
