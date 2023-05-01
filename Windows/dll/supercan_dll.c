@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2023 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,13 +29,11 @@
 #include <usb.h>
 #include <cfgmgr32.h>
 
-
-
 //
 // Define below GUIDs
 //
 #include <initguid.h>
-
+#include <devpkey.h>
 
 //
 // Device Interface GUID.
@@ -149,6 +147,7 @@ struct sc_dev_ex {
     sc_dev_t exposed;
     HANDLE dev_handle;
     WINUSB_INTERFACE_HANDLE usb_handle;
+    wchar_t* path;
     void* log_ctx;
     sc_log_callback_t log_callback;
     int log_level;
@@ -187,25 +186,71 @@ static inline void sc_devs_free(void)
     sc_data.dev_count = 0;
 }
 
-static inline int HrToError(HRESULT hr)
+extern int sc_map_cm_error(CONFIGRET cr)
 {
-    if (SUCCEEDED(hr)) {
-        return SC_DLL_ERROR_NONE;
+    switch (cr) {
+    case CR_SUCCESS: return SC_DLL_ERROR_NONE;
+    case CR_ACCESS_DENIED: return SC_DLL_ERROR_DEVICE_BUSY;
+    case CR_OUT_OF_MEMORY: return SC_DLL_ERROR_OUT_OF_MEM;
+    default: return SC_DLL_ERROR_UNKNOWN;
+    }
+}
+
+static int sc_map_win_error_ex(struct sc_dev_ex* dev, DWORD error)
+{
+    if (dev && dev->path) {
+        WCHAR instance_id[MAX_DEVICE_ID_LEN];
+        WCHAR instance_path[MAX_DEVICE_ID_LEN];
+        ULONG size = sizeof(instance_id[0]) * (_countof(instance_id) - 1);
+        DEVPROPTYPE prop_type = 0;
+        CONFIGRET cr = CR_SUCCESS;
+
+        cr = CM_Get_Device_Interface_PropertyW(
+            dev->path,
+            &DEVPKEY_Device_InstanceId,
+            &prop_type,
+            (PBYTE)instance_id,
+            &size,
+            0);
+
+        if (CR_SUCCESS == cr) {
+            cr = CM_Get_Device_Interface_ListW(
+                (LPGUID)&GUID_DEVINTERFACE_supercan,
+                instance_id,
+                instance_path,
+                _countof(instance_path),
+                CM_GET_DEVICE_INTERFACE_LIST_PRESENT);
+
+            if (CR_SUCCESS == cr) {
+                if (instance_path[0] == L'\0') {
+                    return SC_DLL_ERROR_DEV_GONE;
+                }
+            }
+        }
     }
 
-    switch (hr) {
-    case E_OUTOFMEMORY:
-        return SC_DLL_ERROR_OUT_OF_MEM;
-    case E_ACCESSDENIED:
+    switch (error) {
+    case ERROR_SUCCESS:
+        return SC_DLL_ERROR_NONE;
+    case ERROR_FILE_NOT_FOUND:
+        return SC_DLL_ERROR_DEV_GONE;
+    case ERROR_ACCESS_DENIED:
         return SC_DLL_ERROR_DEVICE_BUSY;
-    case 0x8007001f: // ERROR_GEN_FAILURE, 31 (0x1F), A device attached to the system is not functioning.
-    case 0x80070016: // 		hr	HRESULT_FROM_WIN32(ERROR_BAD_COMMAND) : The device does not recognize the command. 	HRESULT
+    case ERROR_OUTOFMEMORY:
+        return SC_DLL_ERROR_OUT_OF_MEM;
+    case ERROR_GEN_FAILURE:
+    case ERROR_BAD_COMMAND:
         return SC_DLL_ERROR_DEVICE_FAILURE;
-    case 0x800703E3: // ERROR_OPERATION_ABORTED, 995 (0x3E3), The I/O operation has been aborted because of either a thread exit or an application request.
+    case ERROR_OPERATION_ABORTED:
         return SC_DLL_ERROR_ABORTED;
     default:
         return SC_DLL_ERROR_UNKNOWN;
     }
+}
+
+extern int sc_map_win_error(sc_dev_t *_dev, DWORD error)
+{
+    return sc_map_win_error_ex((struct sc_dev_ex*)_dev, error);
 }
 
 SC_DLL_API void sc_version(sc_version_t* version)
@@ -258,9 +303,9 @@ SC_DLL_API int sc_dev_scan(void)
             NULL,
             CM_GET_DEVICE_INTERFACE_LIST_PRESENT);
 
-        if (cr != CR_SUCCESS) {
-            HRESULT hr = HRESULT_FROM_WIN32(CM_MapCrToWin32Err(cr, ERROR_INVALID_DATA));
-            error = HrToError(hr);
+        error = sc_map_cm_error(cr);
+
+        if (error) {
             goto Exit;
         }
 
@@ -279,8 +324,7 @@ SC_DLL_API int sc_dev_scan(void)
 
         if (cr != CR_SUCCESS) {
             if (cr != CR_BUFFER_SMALL) {
-                HRESULT hr = HRESULT_FROM_WIN32(CM_MapCrToWin32Err(cr, ERROR_INVALID_DATA));
-                error = HrToError(hr);
+                error = sc_map_cm_error(cr);
                 goto Exit;
             }
         }
@@ -367,6 +411,7 @@ SC_DLL_API void sc_dev_close(sc_dev_t* dev)
             CloseHandle(d->dev_handle);
         }
 
+        free(d->path);
         free(d);
     }
 }
@@ -383,6 +428,7 @@ SC_DLL_API int sc_dev_open_by_index(uint32_t index, sc_dev_t** dev)
 SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
 {
     int error = SC_DLL_ERROR_NONE;
+    DWORD win_error = ERROR_SUCCESS;
     struct sc_dev_ex *dev = NULL;
     USB_DEVICE_DESCRIPTOR deviceDesc;
     PUCHAR cmd_tx_buffer = NULL;
@@ -395,25 +441,27 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
     }
 
     dev = calloc(1, sizeof(*dev));
+
     if (!dev) {
+        error = SC_DLL_ERROR_OUT_OF_MEM;
+        goto Error;
+    }
+
+    dev->path = _wcsdup(id);
+
+    if (!dev->path) {
         error = SC_DLL_ERROR_OUT_OF_MEM;
         goto Error;
     }
 
     cmd_rx_overlapped.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
     if (!cmd_rx_overlapped.hEvent) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     cmd_tx_overlapped.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
     if (!cmd_tx_overlapped.hEvent) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     dev->dev_handle = CreateFile(
@@ -426,17 +474,11 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         NULL);
 
     if (INVALID_HANDLE_VALUE == dev->dev_handle) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     if (!WinUsb_Initialize(dev->dev_handle, &dev->usb_handle)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     ULONG transferred;
@@ -448,10 +490,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         (PBYTE)&deviceDesc,
         sizeof(deviceDesc),
         &transferred)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     if (transferred != sizeof(deviceDesc)) {
@@ -464,10 +503,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         dev->usb_handle,
         0,
         &ifaceDescriptor)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     if (ifaceDescriptor.bNumEndpoints < 2) {
@@ -481,10 +517,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         0,
         0,
         &pipeInfo)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     if (pipeInfo.PipeType != UsbdPipeTypeBulk) {
@@ -506,10 +539,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         0,
         2,
         &pipeInfo)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     if (pipeInfo.PipeType != UsbdPipeTypeBulk) {
@@ -540,10 +570,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         RAW_IO,
         sizeof(value),
         &value)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     cmd_tx_buffer = calloc(dev->exposed.cmd_buffer_size, 1);
@@ -565,10 +592,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         SHORT_PACKET_TERMINATE,
         sizeof(value),
         &value)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     // make cmd pipe raw
@@ -578,10 +602,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         RAW_IO,
         sizeof(value),
         &value)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     // submit in token
@@ -593,10 +614,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         NULL,
         &cmd_rx_overlapped) &&
         ERROR_IO_PENDING != GetLastError()) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     struct sc_msg_req* hello = (struct sc_msg_req*)cmd_tx_buffer;
@@ -612,10 +630,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         NULL,
         &cmd_tx_overlapped)) {
         if (ERROR_IO_PENDING != GetLastError()) {
-            DWORD e = GetLastError();
-            HRESULT hr = HRESULT_FROM_WIN32(e);
-            error = HrToError(hr);
-            goto Error;
+            goto error_exit_win_error;
         }
     }
 
@@ -627,12 +642,9 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         goto Error;
     case WAIT_OBJECT_0:
         break;
-    default: {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
-    } break;
+    default:
+        goto error_exit_win_error;
+        break;
     }
 
     if (!WinUsb_GetOverlappedResult(
@@ -640,17 +652,11 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         &cmd_tx_overlapped,
         &transferred,
         FALSE)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     if (transferred != sizeof(*hello)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     // wait for a sec to get the resonse
@@ -662,10 +668,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
     case WAIT_OBJECT_0:
         break;
     default: {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     } break;
     }
 
@@ -674,10 +677,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         &cmd_rx_overlapped,
         &transferred,
         FALSE)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto Error;
+        goto error_exit_win_error;
     }
 
     if (sizeof(struct sc_msg_hello) > transferred) {
@@ -737,6 +737,10 @@ Cleanup:
 
     return error;
 
+error_exit_win_error:
+    win_error = GetLastError();
+    error = sc_map_win_error_ex(dev, win_error);
+
 Error:
     sc_dev_close((sc_dev_t*)dev);
     goto Cleanup;
@@ -770,8 +774,7 @@ SC_DLL_API int sc_dev_read(sc_dev_t* _dev, uint8_t pipe, void* _buffer, ULONG by
         if (ERROR_IO_PENDING == GetLastError()) {
             error = SC_DLL_ERROR_IO_PENDING;
         } else {
-            HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
-            error = HrToError(hr);
+            error = sc_map_win_error_ex(dev, GetLastError());
             goto Exit;
         }
     }
@@ -808,8 +811,7 @@ SC_DLL_API int sc_dev_write(sc_dev_t* _dev, uint8_t pipe, void const* _buffer, U
             error = SC_DLL_ERROR_IO_PENDING;
         }
         else {
-            HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
-            error = HrToError(hr);
+            error = sc_map_win_error_ex(dev, GetLastError());
             goto Exit;
         }
     }
@@ -821,6 +823,7 @@ Exit:
 SC_DLL_API int sc_dev_result(sc_dev_t* _dev, DWORD* transferred, OVERLAPPED* ov, int millis)
 {
     int error = SC_DLL_ERROR_NONE;
+    DWORD win_error = ERROR_SUCCESS;
     struct sc_dev_ex* dev = (struct sc_dev_ex*)_dev;
 
     if (!_dev || !ov || !ov->hEvent) {
@@ -831,9 +834,7 @@ SC_DLL_API int sc_dev_result(sc_dev_t* _dev, DWORD* transferred, OVERLAPPED* ov,
     if (millis < 0) {
 get_result:
         if (!WinUsb_GetOverlappedResult(dev->usb_handle, ov, transferred, TRUE)) {
-            DWORD e = GetLastError();
-            HRESULT hr = HRESULT_FROM_WIN32(e);
-            error = HrToError(hr);
+            goto error_exit_win_error;
         }
     }
     else if (0 == millis) {
@@ -842,9 +843,7 @@ get_result:
                 error = SC_DLL_ERROR_IO_PENDING;
             }
             else {
-                DWORD e = GetLastError();
-                HRESULT hr = HRESULT_FROM_WIN32(e);
-                error = HrToError(hr);
+                goto error_exit_win_error;
             }
         }
     }
@@ -856,15 +855,19 @@ get_result:
         case WAIT_OBJECT_0:
             goto get_result;
             break;
-        default: {
-            DWORD e = GetLastError();
-            HRESULT hr = HRESULT_FROM_WIN32(e);
-            error = HrToError(hr);
-        } break;
+        default:
+            goto error_exit_win_error;
+            break;
         }
     }
+
 Exit:
     return error;
+
+error_exit_win_error:
+    win_error = GetLastError();
+    error = sc_map_win_error_ex(dev, win_error);
+    goto Exit;
 }
 
 
@@ -914,6 +917,8 @@ SC_DLL_API char const* sc_strerror(int error)
         return "access denied";
     case SC_DLL_ERROR_INVALID_OPERATION:
         return "invalid operation";
+    case SC_DLL_ERROR_DEV_GONE:
+        return "device gone";
     default:
         return "sc_strerror not implemented";
     }
@@ -929,20 +934,20 @@ SC_DLL_API int sc_dev_cancel(sc_dev_t *_dev, OVERLAPPED* ov)
 
     if (CancelIoEx(dev->dev_handle, ov)) {
         DWORD transferred;
+
         if (!WinUsb_GetOverlappedResult(dev->usb_handle, ov, &transferred, TRUE)) {
             DWORD e = GetLastError();
             if (ERROR_OPERATION_ABORTED != e) {
-                HRESULT hr = HRESULT_FROM_WIN32(e);
-                return HrToError(hr);
+                return sc_map_win_error_ex(dev, e);
             }
         }
     } else {
          DWORD e = GetLastError();
+
          if (ERROR_NOT_FOUND == e) {
              // all is well wasn' t scheduled
          } else {
-             HRESULT hr = HRESULT_FROM_WIN32(e);
-             return HrToError(hr);
+             return sc_map_win_error_ex(dev, e);
          }
     }
 
@@ -1021,6 +1026,7 @@ SC_DLL_API int sc_can_stream_init(
 {
     struct sc_stream* stream = NULL;
     int error = SC_DLL_ERROR_NONE;
+    DWORD win_error = ERROR_SUCCESS;
 
     if (!dev || !_stream || !buffer_size || !callback) {
         error = SC_DLL_ERROR_INVALID_PARAM;
@@ -1068,11 +1074,9 @@ SC_DLL_API int sc_can_stream_init(
     
     for (size_t i = 0; i < _countof(stream->tx_ovs); ++i) {
         HANDLE h = CreateEventW(NULL, TRUE, TRUE, NULL);
+
         if (!h) {
-            DWORD e = GetLastError();
-            HRESULT hr = HRESULT_FROM_WIN32(e);
-            error = HrToError(hr);
-            goto Error;
+            goto error_exit_win_error;
         }
 
         stream->tx_ovs[i].hEvent = h;
@@ -1089,10 +1093,7 @@ SC_DLL_API int sc_can_stream_init(
         HANDLE h = CreateEventW(NULL, TRUE, FALSE, NULL);
 
         if (!h) {
-            DWORD e = GetLastError();
-            HRESULT hr = HRESULT_FROM_WIN32(e);
-            error = HrToError(hr);
-            goto Error;
+            goto error_exit_win_error;
         }
 
         stream->rx_ovs[i].hEvent = h;
@@ -1105,9 +1106,9 @@ SC_DLL_API int sc_can_stream_init(
             NULL,
             &stream->rx_ovs[i])) {
             DWORD e = GetLastError();
+
             if (ERROR_IO_PENDING != e) {
-                HRESULT hr = HRESULT_FROM_WIN32(e);
-                error = HrToError(hr);
+                error = sc_map_win_error_ex(stream->dev, e);
                 goto Error;
             }
 
@@ -1128,6 +1129,10 @@ SC_DLL_API int sc_can_stream_init(
     *_stream = (sc_can_stream_t*)stream;
 Exit:
     return error;
+
+error_exit_win_error:
+    win_error = GetLastError();
+    error = sc_map_win_error_ex((struct sc_dev_ex*)dev, win_error);
 
 Error:
     sc_can_stream_uninit((sc_can_stream_t*)stream);
@@ -1183,9 +1188,9 @@ static inline int sc_rx_submit(
         NULL,
         &stream->rx_ovs[stream->rx_next])) {
         DWORD e = GetLastError();
+
         if (ERROR_IO_PENDING != e) {
-            HRESULT hr = HRESULT_FROM_WIN32(e);
-            return HrToError(hr);
+            return sc_map_win_error_ex(stream->dev, e);
         }
     }
     else {
@@ -1209,9 +1214,7 @@ static int sc_can_stream_rx_process_signaled_ex(struct sc_stream* stream)
         &stream->rx_ovs[index],
         &transferred,
         FALSE)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
+        error = sc_map_win_error_ex(stream->dev, GetLastError());
         stream->error = error;
         return error;
     }
@@ -1260,7 +1263,6 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
     struct sc_stream* stream = (struct sc_stream*)_stream;
     int error = SC_DLL_ERROR_NONE;
     DWORD dw = 0;
-    HRESULT hr = S_OK;
 
     if (!stream) {
         return SC_DLL_ERROR_INVALID_PARAM;
@@ -1307,8 +1309,7 @@ SC_DLL_API int sc_can_stream_rx(sc_can_stream_t* _stream, DWORD timeout_ms)
         return SC_DLL_ERROR_TIMEOUT;
     }
     
-    hr = HRESULT_FROM_WIN32(GetLastError());
-    error = HrToError(hr);
+    error = sc_map_win_error_ex(stream->dev, GetLastError());
     stream->error = error;
 
     return error;
@@ -1331,7 +1332,6 @@ static int sc_can_stream_tx_send_buffer(struct sc_stream* stream)
 {
     int error = SC_DLL_ERROR_NONE;
     DWORD dw = 0;
-    HRESULT hr = S_OK;
     uint8_t prev_index = (stream->tx_index + 1) & 0x1;
 
     dw = WaitForSingleObject(stream->tx_ovs[prev_index].hEvent, SC_STREAM_TIMEOUT_MS);
@@ -1371,8 +1371,7 @@ exit:
 
 fetch_error:
     dw = GetLastError();
-    hr = HRESULT_FROM_WIN32(dw);
-    error = HrToError(hr);
+    error = sc_map_win_error_ex(stream->dev, dw);
 
 exit_error:
     stream->error = error;
@@ -1598,8 +1597,7 @@ SC_DLL_API int sc_cmd_ctx_run(
         &ctx->rx_ov)) {
         DWORD e = GetLastError();
         if (ERROR_IO_PENDING != e) {
-            HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
-            error = HrToError(hr);
+            error = sc_map_win_error_ex(dev, e);
             goto error_exit;
         }
     }
@@ -1615,8 +1613,7 @@ SC_DLL_API int sc_cmd_ctx_run(
         &ctx->tx_ov)) {
         DWORD e = GetLastError();
         if (ERROR_IO_PENDING != e) {
-            HRESULT hr = HRESULT_FROM_WIN32(e);
-            error = HrToError(hr);
+            error = sc_map_win_error_ex(dev, e);
             goto error_exit;
         }
     }
@@ -1629,19 +1626,13 @@ SC_DLL_API int sc_cmd_ctx_run(
         error = SC_DLL_ERROR_TIMEOUT;
         sc_dev_cancel((sc_dev_t*)dev, &ctx->tx_ov);
         goto error_exit;
-    default: {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto error_exit;
-    } break;
+    default:
+        goto error_exit_win_error;
+        break;
     }
 
     if (!WinUsb_GetOverlappedResult(dev->usb_handle, &ctx->tx_ov, &transferred, FALSE)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto error_exit;
+        goto error_exit_win_error;
     }
 
     if (transferred < bytes) {
@@ -1656,27 +1647,24 @@ SC_DLL_API int sc_cmd_ctx_run(
     case WAIT_TIMEOUT:
         error = SC_DLL_ERROR_TIMEOUT;
         goto error_exit;
-    default: {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto error_exit;
-    } break;
+    default:
+        goto error_exit_win_error;
+        break;
     }
 
     rx_submitted = false;
 
     if (!WinUsb_GetOverlappedResult(dev->usb_handle, &ctx->rx_ov, &transferred, FALSE)) {
-        DWORD e = GetLastError();
-        HRESULT hr = HRESULT_FROM_WIN32(e);
-        error = HrToError(hr);
-        goto error_exit;
+        goto error_exit_win_error;
     }
 
     *response_size = (uint16_t)transferred;
 
 success_exit:
     return error;
+
+error_exit_win_error:
+    error = sc_map_win_error_ex(dev, GetLastError());
 
 error_exit:
     if (rx_submitted) {

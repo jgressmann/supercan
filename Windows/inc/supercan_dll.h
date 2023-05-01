@@ -56,7 +56,7 @@ extern "C" {
 
 #define SC_DLL_VERSION_MAJOR 0
 #define SC_DLL_VERSION_MINOR 5
-#define SC_DLL_VERSION_PATCH 0
+#define SC_DLL_VERSION_PATCH 1
 
 
 
@@ -81,6 +81,7 @@ extern "C" {
 #define SC_DLL_ERROR_USER_HANDLE_SIGNALED   18  ///< user provided handle was signaled
 #define SC_DLL_ERROR_ACCESS_DENIED          19  ///< access denied
 #define SC_DLL_ERROR_INVALID_OPERATION      20  ///< operation not possible in current state
+#define SC_DLL_ERROR_DEV_GONE               21  ///< device was removed from the system
 
 typedef struct sc_version {
     char const* commit;

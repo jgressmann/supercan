@@ -62,8 +62,8 @@ OBJECT_ENTRY_AUTO(CLSID_CSuperCAN, CSuperCAN)
 #define MAX_COM_DEVICES_PER_SC_DEVICE_BITS 3
 #define MAX_COM_DEVICES_PER_SC_DEVICE (1u<<MAX_COM_DEVICES_PER_SC_DEVICE_BITS)
 
-
-
+extern "C" int sc_map_cm_error(CONFIGRET cr);
+extern "C" int sc_map_win_error(sc_dev_t * _dev, DWORD error);
 
 namespace
 {
@@ -91,15 +91,6 @@ inline int map_device_error(uint8_t error)
 	}
 }
 
-inline int map_win_error(DWORD error)
-{
-	switch (error) {
-	case 0:
-		return SC_DLL_ERROR_NONE;
-	default:
-		return SC_DLL_ERROR_UNKNOWN;
-	}
-}
 
 
 inline uint8_t dlc_to_len(uint8_t dlc)
@@ -1342,16 +1333,18 @@ int ScDev::Init(std::wstring&& name)
 		&size,
 		0);
 
-	if (cr != CR_SUCCESS) {
-		error = SC_DLL_ERROR_OUT_OF_MEM;
+	error = sc_map_cm_error(cr);
+
+	if (error) {
 		goto error_exit;
 	}
 
 	// NOTE: the notification works even if the device is plugged into a different USB port.
 	cr = CM_Register_Notification(&filter, this, &OnDeviceNotification, &m_DeviceInstanceNotification);
 
-	if (cr != CR_SUCCESS) {
-		error = SC_DLL_ERROR_OUT_OF_MEM;
+	error = sc_map_cm_error(cr);
+
+	if (error) {
 		goto error_exit;
 	}
 
@@ -1943,7 +1936,7 @@ void ScDev::RxMain()
 				else {
 					auto e = GetLastError();
 
-					SetDeviceError(map_win_error(e));
+					SetDeviceError(sc_map_win_error(m_Device, e));
 					LogFormatDirect(SC_DLL_LOG_LEVEL_ERROR, "WaitForMultipleObjects failed: %lu (error=%lu)\n", r, e);
 					stream_error = true;
 				}
@@ -2158,7 +2151,7 @@ void ScDev::TxMain()
 		else {
 			auto e = GetLastError();
 
-			SetDeviceError(map_win_error(e));
+			SetDeviceError(sc_map_win_error(m_Device, e));
 			LogFormatQueue(SC_DLL_LOG_LEVEL_ERROR, "WaitForMultipleObjects failed: %lu (error=%lu)\n", r, e);
 			stream_error = true;
 		}
@@ -2303,7 +2296,7 @@ void ScDev::TxMain()
 							SetEvent(priv->tx.ev);
 						}
 						else {
-							SetDeviceError(map_win_error(GetLastError()));
+							SetDeviceError(sc_map_win_error(m_Device, GetLastError()));
 							stream_error = true;
 							goto service_end;
 						}
