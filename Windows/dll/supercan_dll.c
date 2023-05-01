@@ -91,7 +91,9 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 #define LOG_DEV_ERROR(dev, ...) LOG_DEV(dev, SC_DLL_LOG_LEVEL_ERROR, __VA_ARGS__)
 #define LOG_DEV_WARN(dev, ...) LOG_DEV(dev, SC_DLL_LOG_LEVEL_WARNING, __VA_ARGS__)
 #define LOG_DEV_INFO(dev, ...) LOG_DEV(dev, SC_DLL_LOG_LEVEL_INFO, __VA_ARGS__)
-#define LOG_DEV_DEBUG1(dev, ...) LOG_DEV(dev, SC_DLL_LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define LOG_DEV_DEBUG1(dev, ...) LOG_DEV(dev, SC_DLL_LOG_LEVEL_DEBUG1, __VA_ARGS__)
+#define LOG_DEV_DEBUG2(dev, ...) LOG_DEV(dev, SC_DLL_LOG_LEVEL_DEBUG2, __VA_ARGS__)
+#define LOG_DEV_DEBUG3(dev, ...) LOG_DEV(dev, SC_DLL_LOG_LEVEL_DEBUG3, __VA_ARGS__)
 
 
 #define SC_DLL_VERSION_BUILD 0
@@ -1234,7 +1236,7 @@ static int sc_can_stream_rx_process_signaled_ex(struct sc_stream* stream)
         return error;
     }
 
-    LOG_DEV_DEBUG1(stream->dev, "sc_can_stream_rx submit %u\n", index);
+    LOG_DEV_DEBUG3(stream->dev, "sc_can_stream_rx submit %u\n", index);
 
     if (user_error) {
         return user_error;

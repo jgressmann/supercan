@@ -248,7 +248,6 @@ private:
 	HCMNOTIFICATION m_DeviceInstanceNotification;
 	sc_cmd_ctx_t m_CmdCtx;
 	sc_can_stream_t *m_Stream;
-
 	sc_dev_time_tracker m_TimeTracker;
 	sc_msg_bittiming m_Nm, m_Dt;
 	uint32_t m_FeatureFlags;
@@ -1064,6 +1063,9 @@ void ScDev::Uninit()
 		if (m_OnBus) {
 			SetBusOff();
 		}
+		else {
+			BusCleanup();
+		}
 
 		CloseDevice();
 	}
@@ -1576,6 +1578,8 @@ void ScDev::SetBusOff()
 	assert(m_Opened);
 
 	if (m_OnBus) {
+		LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "%s: go off bus\n", m_DeviceName.c_str());
+
 		sc_msg_config* bus = reinterpret_cast<sc_msg_config*>(m_CmdCtx.tx_buffer);
 		bus->id = SC_MSG_BUS;
 		bus->len = sizeof(*bus);
@@ -1596,12 +1600,16 @@ int ScDev::SetBusOn()
 
 	assert(m_Initialized);
 	assert(m_Opened);
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "%s: set feature flags\n", m_DeviceName.c_str());
 	
 	error = SetFeatureFlags();
 
 	if (error) {
 		goto error_exit;
 	}
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "%s: set nominal bit timing\n", m_DeviceName.c_str());
 
 	error = SetNominalBitTiming();
 
@@ -1610,12 +1618,16 @@ int ScDev::SetBusOn()
 	}
 
 	if ((m_FeatureFlags & SC_FEATURE_FLAG_FDF) || (dev_info.feat_perm & SC_FEATURE_FLAG_FDF)) {
+		LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "%s: set data bit timing\n", m_DeviceName.c_str());
+
 		error = SetDataBitTiming();
 
 		if (error) {
 			goto error_exit;
 		}
 	}
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "%s: clear MM error\n", m_DeviceName.c_str());
 
 	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
 		m_ComDeviceDataPrivate[i].rx.hdr->error = 0;
@@ -1632,6 +1644,8 @@ int ScDev::SetBusOn()
 	}
 
 	sc_tt_init(&m_TimeTracker);
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "%s: init CAN stream\n", m_DeviceName.c_str());
 
 	assert(!m_Stream);
 	error = sc_can_stream_init(
@@ -1685,6 +1699,8 @@ int ScDev::SetBusOn()
 		goto error_exit;
 	}
 
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "%s: go on bus\n", m_DeviceName.c_str());
+
 	sc_msg_config* bus = reinterpret_cast<sc_msg_config*>(m_CmdCtx.tx_buffer);
 	bus->id = SC_MSG_BUS;
 	bus->len = sizeof(*bus);
@@ -1722,6 +1738,8 @@ int ScDev::SetBusOn()
 	Notify(NOTIFICATION_SET, bitmask);
 
 	m_OnBus = true;
+
+	LOG_SRV(SC_DLL_LOG_LEVEL_DEBUG, "%s: we are on bus\n", m_DeviceName.c_str());
 
 success_exit:
 	return error;
