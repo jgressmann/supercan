@@ -189,7 +189,7 @@ private:
 	int SetFeatureFlags();
 	int SetNominalBitTiming();
 	int SetDataBitTiming();
-	static DWORD OnDeviceNotification(
+	static DWORD WINAPI OnDeviceNotification(
 		HCMNOTIFICATION hNotify,
 		PVOID Context,
 		CM_NOTIFY_ACTION Action,
