@@ -275,7 +275,6 @@ private:
 	bool m_Initialized;
 	bool m_Opened;
 	bool m_OnBus;
-	bool m_Failed;
 	bool m_Gone;
 	sc_com_dev_index_t m_RxThreadLiveComDevBuffer[MAX_COM_DEVICES_PER_SC_DEVICE];
 	sc_com_dev_index_t m_RxThreadLiveComDevCount;
@@ -462,7 +461,6 @@ ScDev::ScDev()
 	ZeroMemory(m_LogRingBuffer, sizeof(m_LogRingBuffer));
 	m_OnBus = false;
 	m_Opened = false;
-	m_Failed = false;
 	m_Gone = false;
 	memset(&m_Nm, 0, sizeof(m_Nm));
 	memset(&m_Dt, 0, sizeof(m_Dt));
@@ -1462,7 +1460,6 @@ void ScDev::CloseDevice()
 	}
 
 	m_Opened = false;
-	m_Failed = false;
 }
 
 int ScDev::OpenDevice()
@@ -1760,7 +1757,7 @@ int ScDev::SetBus(sc_com_dev_index_t index, bool on)
 	}
 
 	if (m_Gone) {
-		return SC_DLL_ERROR_DEVICE_FAILURE;
+		return SC_DLL_ERROR_DEV_GONE;
 	}
 
 	if (!m_Opened) {
@@ -2358,13 +2355,6 @@ service_end:
 
 void ScDev::SetDeviceError(int error) 
 {
-	{
-		Guard g(m_Lock);
-
-		// mark device as failed
-		m_Failed = true;
-	}
-
 	for (sc_com_dev_index_t i = 0; i < _countof(m_ComDeviceDataPrivate); ++i) {
 		m_ComDeviceDataPrivate[i].rx.hdr->error = error;
 		m_ComDeviceDataPrivate[i].tx.hdr->error = error;
