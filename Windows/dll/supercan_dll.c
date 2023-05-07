@@ -225,7 +225,7 @@ static int sc_map_win_error_ex(struct sc_dev_ex* dev, DWORD error)
 
             if (CR_SUCCESS == cr) {
                 if (instance_path[0] == L'\0') {
-                    return SC_DLL_ERROR_DEV_GONE;
+                    return SC_DLL_ERROR_DEVICE_GONE;
                 }
             }
         }
@@ -235,7 +235,7 @@ static int sc_map_win_error_ex(struct sc_dev_ex* dev, DWORD error)
     case ERROR_SUCCESS:
         return SC_DLL_ERROR_NONE;
     case ERROR_FILE_NOT_FOUND:
-        return SC_DLL_ERROR_DEV_GONE;
+        return SC_DLL_ERROR_DEVICE_GONE;
     case ERROR_ACCESS_DENIED:
         return SC_DLL_ERROR_DEVICE_BUSY;
     case ERROR_OUTOFMEMORY:
@@ -919,7 +919,7 @@ SC_DLL_API char const* sc_strerror(int error)
         return "access denied";
     case SC_DLL_ERROR_INVALID_OPERATION:
         return "invalid operation";
-    case SC_DLL_ERROR_DEV_GONE:
+    case SC_DLL_ERROR_DEVICE_GONE:
         return "device gone";
     default:
         return "sc_strerror not implemented";

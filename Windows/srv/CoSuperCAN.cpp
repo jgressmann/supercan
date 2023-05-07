@@ -1757,7 +1757,7 @@ int ScDev::SetBus(sc_com_dev_index_t index, bool on)
 	}
 
 	if (m_Gone) {
-		return SC_DLL_ERROR_DEV_GONE;
+		return SC_DLL_ERROR_DEVICE_GONE;
 	}
 
 	if (!m_Opened) {
