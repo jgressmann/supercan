@@ -23,12 +23,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v1.1
       - name: Build
-        # run: appveyor\windows.cmd
         shell: cmd
-        run: |
-          set
-          echo 1 >supercan-win.7z
-          echo 2 >supercan_inst.exe
+        run: appveyor\windows.cmd
+
+        # run: |
+        #   set
+        #   echo 1 >supercan-win.7z
+        #   echo 2 >supercan_inst.exe
 
       - name: Generate hashes
         shell: bash
