@@ -89,11 +89,10 @@ jobs:
             supercan-win.7z
             supercan_inst.exe
 
-
   latest:
     needs: [build, provenance]
     runs-on: ubuntu-latest
-    if: !startsWith(github.ref, 'refs/tags/')
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     steps:
       - name: Download supercan-win.7z
         uses: actions/download-artifact@v3
