@@ -21,6 +21,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build
+      - name: Setup environment
         uses: microsoft/setup-msbuild@v1.1
+
+      - name: Build
         run: appveyor\windows.cmd
