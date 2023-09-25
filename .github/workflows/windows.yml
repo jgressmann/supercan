@@ -1,4 +1,4 @@
-name: Windows build
+name: Windows
 #run-name: ${{ github.actor }} is learning GitHub Actions
 on:
   workflow_dispatch:
@@ -32,10 +32,17 @@ jobs:
           # sha256sum generates sha256 hash for all artifacts.
           # base64 -w0 encodes to base64 and outputs on a single line.
           # sha256sum artifact1 artifact2 ... | base64 -w0
-          echo "hashes=$(sha256sum artifact1 artifact2 | base64 -w0)" >> "$GITHUB_OUTPUT"
+          echo "hashes=$(sha256sum supercan-win.7z supercan_inst.exe | base64 -w0)" >> "$GITHUB_OUTPUT"
 
 
-      - name: Upload
+      - name: Upload supercan-win.7z
+        uses: actions/upload-artifact@v3
+        with:
+          path: supercan-win.7z
+          name: supercan-win.7z
+          if-no-files-found: error
+
+      - name: Upload supercan_inst.exe
         uses: actions/upload-artifact@v3
         with:
           path: supercan_inst.exe
@@ -61,7 +68,12 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - name: Download
+      - name: Download supercan-win.7z
+        uses: actions/download-artifact@v3
+        with:
+          name: supercan-win.7z
+
+      - name: Download supercan_inst.exe
         uses: actions/download-artifact@v3
         with:
           name: supercan_inst.exe
@@ -70,4 +82,5 @@ jobs:
         uses: softprops/action-gh-release@1e07f4398721186383de40550babbdf2b84acfc5 # v0.1.14
         with:
           files: |
+            supercan-win.7z
             supercan_inst.exe
