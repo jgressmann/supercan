@@ -61,11 +61,19 @@ jobs:
       actions: read
       id-token: write
       contents: write
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
-    with:
-      base64-subjects: "${{ needs.build.outputs.hashes }}"
-      # Upload provenance to a new release
-      upload-assets: true
+    steps:
+      - name: slsa
+        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
+        with:
+          base64-subjects: "${{ needs.build.outputs.hashes }}"
+          # Upload provenance to a new release
+          upload-assets: true
+
+      - name: Upload supercan_inst.exe
+        uses: actions/upload-artifact@v3
+        with:
+          path: ${{ jobs.provenance.output.provenance-name }}
+          if-no-files-found: error
 
   # This step uploads our artifacts to the tagged GitHub release.
   release:
