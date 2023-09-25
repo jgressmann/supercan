@@ -93,7 +93,7 @@ jobs:
   latest:
     needs: [build, provenance]
     runs-on: ubuntu-latest
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    if: startsWith(github.ref, 'refs/heads/')
     steps:
       - name: Download supercan-win.7z
         uses: actions/download-artifact@v3
@@ -108,7 +108,8 @@ jobs:
       - name: Upload assets
         uses: softprops/action-gh-release@v1
         with:
-          name: latest-master
+          # name: latest-master
+          tag_name: latest-master
           files: |
             supercan-win.7z
             supercan_inst.exe
