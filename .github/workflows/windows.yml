@@ -1,0 +1,26 @@
+name: windows-build
+#run-name: ${{ github.actor }} is learning GitHub Actions
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: windows-2019
+    env:
+      SOLUTION: Windows\supercan.sln
+      MSBUILD_OPTIONS: -noLogo -m -t:Build -p:Configuration=Release
+      ResourcesExtraDefines: SC_BUILD_NUMBER=$(GITHUB_RUN_NUMBER)
+      # VCVARS32: C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars32.bat
+      # VCVARS64: C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat
+      SC_BUILD_QT_PLUGIN: 0
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        uses: microsoft/setup-msbuild@v1.1
+        run: appveyor\windows.cmd
