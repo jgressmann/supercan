@@ -25,6 +25,7 @@ jobs:
       - name: Build
         # run: appveyor\windows.cmd
         run: |
+          set
           echo 1 >supercan-win.7z
           echo 2 >supercan_inst.exe
 
@@ -69,7 +70,7 @@ jobs:
   release:
     needs: [build, provenance]
     runs-on: ubuntu-latest
-    # if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download supercan-win.7z
         uses: actions/download-artifact@v3
@@ -84,6 +85,30 @@ jobs:
       - name: Upload assets
         uses: softprops/action-gh-release@v1
         with:
+          files: |
+            supercan-win.7z
+            supercan_inst.exe
+
+
+  latest:
+    needs: [build, provenance]
+    runs-on: ubuntu-latest
+    if: !startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download supercan-win.7z
+        uses: actions/download-artifact@v3
+        with:
+          name: supercan-win.7z
+
+      - name: Download supercan_inst.exe
+        uses: actions/download-artifact@v3
+        with:
+          name: supercan_inst.exe
+
+      - name: Upload assets
+        uses: softprops/action-gh-release@v1
+        with:
+          name: latest-master
           files: |
             supercan-win.7z
             supercan_inst.exe
