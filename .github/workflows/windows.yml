@@ -69,6 +69,7 @@ jobs:
       base64-subjects: "${{ needs.build.outputs.hashes }}"
       # Upload provenance to a new release
       upload-assets: true
+      provenance-name: windows.intoto.jsonl
 
   # This step calls the generic workflow to generate provenance.
   provenance-latest:
@@ -85,6 +86,7 @@ jobs:
       # Upload provenance to a new release
       upload-assets: true
       upload-tag-name: latest-master
+      provenance-name: windows.intoto.jsonl
 
   # This step uploads our artifacts to the tagged GitHub release.
   release:
