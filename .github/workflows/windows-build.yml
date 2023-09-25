@@ -1,0 +1,17 @@
+name: windows-build
+#run-name: ${{ github.actor }} is learning GitHub Actions
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  run-batch-job:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: appveyor\windows.cmd
