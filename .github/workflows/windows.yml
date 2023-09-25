@@ -87,9 +87,9 @@ jobs:
 
   # This step uploads our artifacts to the tagged GitHub release.
   release:
-    needs: [build, provenance]
+    needs: [build, provenance-release]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    # if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download supercan-win.7z
         uses: actions/download-artifact@v3
@@ -109,9 +109,9 @@ jobs:
             supercan_inst.exe
 
   latest:
-    needs: [build, provenance]
+    needs: [build, provenance-latest]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/heads/')
+    # if: startsWith(github.ref, 'refs/heads/')
     steps:
       - name: Download supercan-win.7z
         uses: actions/download-artifact@v3
