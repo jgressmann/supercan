@@ -85,5 +85,5 @@ xcopy /y /f Windows\Win32\Release\supercan_srv32.pdb pdb\x86\
 xcopy /y /f Windows\x64\Release\supercan_srv64.pdb pdb\x64\
 (7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src pdb LICENSE COMMIT) || exit /b !ERRORLEVEL!
 REM installer
-makensis !NSIS_SC_VERSION_ARGS! Windows\NSIS\supercan.nsi || exit /b !ERRORLEVEL!
+(all "%VCVARS64%" x64 && makensis !NSIS_SC_VERSION_ARGS! Windows\NSIS\supercan.nsi) || exit /b !ERRORLEVEL!
 move Windows\NSIS\supercan_inst.exe .
