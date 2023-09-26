@@ -141,9 +141,9 @@ jobs:
         id: build
         run: |
           uname -a
-          export SUPERCAN_DIR=$(find "$APPVEYOR_BUILD_FOLDER/Linux" -type d -name 'supercan_usb-*' | head)
+          export SUPERCAN_DIR=$(find "$GITHUB_WORKSPACE/Linux" -type d -name 'supercan_usb-*' | head)
           env
-          $GITHUB_WORKSPACE/Linux/dkms-init.sh
+          $SUPERCAN_DIR/Linux/dkms-init.sh
           make V=1 KERNELRELEASE=$(uname -r) -C /lib/modules/$(uname -r)/build M=$SUPERCAN_DIR
 
 
