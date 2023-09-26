@@ -118,6 +118,20 @@ jobs:
       upload-assets: true
       provenance-name: windows.intoto.jsonl
 
+  provenance:
+    needs: [build-win, build-firmware]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
+    with:
+      base64-subjects: "${{ needs.build-win.outputs.hashes }} ${{ needs.build-firmware.outputs.hashes }}"
+      # Upload provenance to a new release
+      upload-assets: true
+      provenance-name: supercan.intoto.jsonl
+
   # # This step calls the generic workflow to generate provenance.
   # provenance-latest:
   #   if: startsWith(github.ref, 'refs/heads/')
@@ -183,7 +197,7 @@ jobs:
   #           supercan_inst.exe
 
   latest:
-    needs: [build-win, build-firmware, provenance-win]
+    needs: [build-win, build-firmware, provenance]
     runs-on: ubuntu-latest
     # if: startsWith(github.ref, 'refs/heads/')
     steps:
@@ -201,5 +215,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: latest-master
-          files: ${{ steps.download.outputs.download-path }}/artifact/*
+          files: |
+            ${{ steps.download.outputs.download-path }}/artifact/*
+            ${{ steps.download.outputs.download-path }}/*.jsonl
           # if-no-files-found: error
