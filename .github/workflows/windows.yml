@@ -169,26 +169,26 @@ jobs:
   #           supercan-win.7z
   #           supercan_inst.exe
 
-  latest:
-    needs: [build]
-    runs-on: ubuntu-latest
-    # if: startsWith(github.ref, 'refs/heads/')
-    steps:
-      - name: Download supercan-win.7z
-        uses: actions/download-artifact@v3
-        with:
-          name: supercan-win.7z
+  # latest:
+  #   needs: [build]
+  #   runs-on: ubuntu-latest
+  #   # if: startsWith(github.ref, 'refs/heads/')
+  #   steps:
+  #     - name: Download supercan-win.7z
+  #       uses: actions/download-artifact@v3
+  #       with:
+  #         name: supercan-win.7z
 
-      - name: Download supercan_inst.exe
-        uses: actions/download-artifact@v3
-        with:
-          name: supercan_inst.exe
+  #     - name: Download supercan_inst.exe
+  #       uses: actions/download-artifact@v3
+  #       with:
+  #         name: supercan_inst.exe
 
-      - name: Upload assets
-        uses: softprops/action-gh-release@v1
-        with:
-          # name: latest-master
-          tag_name: latest-master
-          files: |
-            supercan-win.7z
-            supercan_inst.exe
+  #     - name: Upload assets
+  #       uses: softprops/action-gh-release@v1
+  #       with:
+  #         # name: latest-master
+  #         tag_name: latest-master
+  #         files: |
+  #           supercan-win.7z
+  #           supercan_inst.exe
