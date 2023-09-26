@@ -202,4 +202,4 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: latest-master
-          files: $${{ needs.build-win.outputs.artifiacts }} $${{ needs.build-firmware.outputs.artifiacts }}
+          files: ${{ needs.build-win.outputs.artifiacts }} ${{ needs.build-firmware.outputs.artifiacts }}
