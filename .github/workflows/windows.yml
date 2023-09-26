@@ -58,12 +58,12 @@ jobs:
       - name: Build
         id: build
         shell: cmd
-        # run: appveyor\windows.cmd
+        run: appveyor\windows.cmd
 
-        run: |
-          set
-          echo 1 >supercan-win.7z
-          echo 2 >supercan_inst.exe
+        # run: |
+        #   set
+        #   echo 1 >supercan-win.7z
+        #   echo 2 >supercan_inst.exe
 
       - name: Generate hashes
         shell: bash
@@ -85,7 +85,7 @@ jobs:
   build-firmware:
     outputs:
       hashes: ${{ steps.hash.outputs.hashes }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     env:
       DEBIAN_FRONTEND: noninteractive
       APPVEYOR_BUILD_FOLDER: $(env.GITHUB_WORKSPACE)
@@ -93,12 +93,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - name: Setup
+        run: |
+          sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz python3
+          git submodule update --init --depth 1 --recursive
+
       - name: Build
         id: build
         run: |
           env
-          sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz python3
-          git submodule update --init --depth 1 --recursive
           $GITHUB_WORKSPACE/Boards/examples/device/supercan/build.sh
           mv $GITHUB_WORKSPACE/Boards/examples/device/supercan/firmware/supercan-firmware.tar.xz $GITHUB_WORKSPACE
 
@@ -109,7 +112,6 @@ jobs:
 
 
       - name: Generate hashes
-        shell: bash
         id: hash
         run: |
           # sha256sum generates sha256 hash for all artifacts.
