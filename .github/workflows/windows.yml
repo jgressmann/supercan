@@ -64,7 +64,6 @@ jobs:
       - name: Build
         id: build
 
-        # run: appveyor\windows.cmd
 
         run: |
           set
@@ -212,5 +211,4 @@ jobs:
           tag_name: latest-master
           files: |
             ${{ steps.download.outputs.download-path }}/artifact/*
-            ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl
-          # if-no-files-found: error
+            ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
