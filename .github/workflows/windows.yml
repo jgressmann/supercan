@@ -1,5 +1,4 @@
-name: Windows
-#run-name: ${{ github.actor }} is learning GitHub Actions
+name: SuperCAN
 on:
   workflow_dispatch:
   push:
@@ -10,7 +9,6 @@ jobs:
   build-win:
     outputs:
       hashes: ${{ steps.hash.outputs.hashes }}
-      artifiacts:  ${{ steps.build.outputs.artifacts }}
     runs-on: windows-2019
     env:
       SOLUTION: Windows\supercan.sln
@@ -19,7 +17,9 @@ jobs:
       VCVARS32: C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars32.bat
       VCVARS64: C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat
       SC_BUILD_QT_PLUGIN: 0
-      ARTIFACTS: supercan-win.7z supercan_inst.exe
+      ARTIFACT_7z: supercan-win.7z
+      ARTIFACT_INSTALLER: supercan_inst.exe
+
 
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +33,6 @@ jobs:
           set
           echo 1 >supercan-win.7z
           echo 2 >supercan_inst.exe
-          echo "artifacts=%ARTIFACTS%" >> "%GITHUB_OUTPUT%"
 
       - name: Generate hashes
         shell: bash
@@ -42,40 +41,23 @@ jobs:
           # sha256sum generates sha256 hash for all artifacts.
           # base64 -w0 encodes to base64 and outputs on a single line.
           # sha256sum artifact1 artifact2 ... | base64 -w0
-          echo "hashes=$(sha256sum $ARTIFACTS | base64 -w0)" >> "$GITHUB_OUTPUT"
-          # $(sha256sum $ARTIFACTS | base64 -w0) >"$GITHUB_OUTPUT"
-
-
-      # - name: Upload supercan-win.7z
-      #   uses: actions/upload-artifact@v3
-      #   with:
-      #     path: supercan-win.7z
-      #     name: supercan-win.7z
-      #     if-no-files-found: error
-
-      # - name: Upload supercan_inst.exe
-      #   uses: actions/upload-artifact@v3
-      #   with:
-      #     path: supercan_inst.exe
-      #     name: supercan_inst.exe
-      #     if-no-files-found: error
+          echo "hashes=$(sha256sum $ARTIFACT_7z $ARTIFACT_INSTALLER | base64 -w0)" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           path: |
-            supercan-win.7z
-            supercan_inst.exe
+            ${{env.ARTIFACT_7z}}
+            ${{env.ARTIFACT_INSTALLER}}
           if-no-files-found: error
 
   build-firmware:
     outputs:
       hashes: ${{ steps.hash.outputs.hashes }}
-      artifiacts:  ${{ steps.build.outputs.artifacts }}
     runs-on: ubuntu-latest
     env:
       APPVEYOR_BUILD_FOLDER: $(env.GITHUB_WORKSPACE)
-      ARTIFACTS: supercan-firmware.tar.xz
+      ARTIFACT_FIRMWARE: supercan-firmware.tar.xz
 
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +69,7 @@ jobs:
         run: |
           set
           echo 1 >supercan-firmware.tar.xz
-          echo "artifacts=%ARTIFACTS%" >> "%GITHUB_OUTPUT%"
+
 
       - name: Generate hashes
         shell: bash
@@ -96,13 +78,12 @@ jobs:
           # sha256sum generates sha256 hash for all artifacts.
           # base64 -w0 encodes to base64 and outputs on a single line.
           # sha256sum artifact1 artifact2 ... | base64 -w0
-          echo "hashes=$(sha256sum $ARTIFACTS | base64 -w0)" >> "$GITHUB_OUTPUT"
-          # $(sha256sum $ARTIFACTS | base64 -w0) >"$GITHUB_OUTPUT"
+          echo "hashes=$(sha256sum $ARTIFACT_FIRMWARE | base64 -w0)" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          path: ${{ env.ARTIFACTS }}
+          path: ${{ env.ARTIFACT_FIRMWARE }}
           if-no-files-found: error
 
   collect:
@@ -114,27 +95,25 @@ jobs:
       - name: Collect hashes
         id: sum
         run: |
-          echo ${{needs.build-win.outputs.hashes}}
-          echo ${{needs.build-win.outputs.hashes}} | base64 -d
           echo ${{needs.build-win.outputs.hashes}} | base64 -d >>${{ runner.temp }}/hashes
           echo ${{needs.build-firmware.outputs.hashes}} | base64 -d >>${{ runner.temp }}/hashes
           echo "hashes=$(cat ${{ runner.temp }}/hashes | base64 -w0)" >> "$GITHUB_OUTPUT"
 
 
-  provenance-win:
-    # if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-win]
-    permissions:
-      actions: read
-      id-token: write
-      contents: write
+  # provenance-win:
+  #   # if: startsWith(github.ref, 'refs/tags/')
+  #   needs: [build-win]
+  #   permissions:
+  #     actions: read
+  #     id-token: write
+  #     contents: write
 
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
-    with:
-      base64-subjects: "${{ needs.build-win.outputs.hashes }}"
-      # Upload provenance to a new release
-      upload-assets: true
-      provenance-name: windows.intoto.jsonl
+  #   uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
+  #   with:
+  #     base64-subjects: "${{ needs.build-win.outputs.hashes }}"
+  #     # Upload provenance to a new release
+  #     upload-assets: true
+  #     provenance-name: windows.intoto.jsonl
 
   provenance:
     needs: [collect]
@@ -222,8 +201,6 @@ jobs:
       - name: Download artifacts
         id: download
         uses: actions/download-artifact@v3
-        # with:
-        #   name: supercan-win.7z
 
       - name: Debugging
         run: |
@@ -235,5 +212,5 @@ jobs:
           tag_name: latest-master
           files: |
             ${{ steps.download.outputs.download-path }}/artifact/*
-            ${{ steps.download.outputs.download-path }}/*.jsonl
+            ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl
           # if-no-files-found: error
