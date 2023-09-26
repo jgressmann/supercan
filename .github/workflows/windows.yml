@@ -62,7 +62,9 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          path: ${{ env.ARTIFACTS }}
+          path: |
+            supercan-win.7z
+            supercan_inst.exe
           if-no-files-found: error
 
   build-firmware:
