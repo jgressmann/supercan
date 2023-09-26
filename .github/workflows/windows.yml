@@ -65,7 +65,7 @@ jobs:
       artifiacts:  ${{ steps.build.outputs.artifacts }}
     runs-on: ubuntu-latest
     env:
-      APPVEYOR_BUILD_FOLDER: ${{ env.GITHUB_WORKSPACE }}
+      APPVEYOR_BUILD_FOLDER: $(env.GITHUB_WORKSPACE)
       ARTIFACTS: supercan-firmware.tar.xz
 
     steps:
