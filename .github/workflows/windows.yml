@@ -147,25 +147,6 @@ jobs:
           make V=1 KERNELRELEASE=$(uname -r) -C /lib/modules/$(uname -r)/build M=$SUPERCAN_DIR
 
 
-        # run: |
-        #   set
-        #   echo 1 >supercan-firmware.tar.xz
-
-
-      - name: Generate hashes
-        id: hash
-        run: |
-          # sha256sum generates sha256 hash for all artifacts.
-          # base64 -w0 encodes to base64 and outputs on a single line.
-          # sha256sum artifact1 artifact2 ... | base64 -w0
-          echo "hashes=$(sha256sum $ARTIFACT_FIRMWARE | base64 -w0)" >> "$GITHUB_OUTPUT"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          path: ${{ env.ARTIFACT_FIRMWARE }}
-          if-no-files-found: error
-
   collect:
     needs: [build-win, build-firmware, package-sources]
     runs-on: ubuntu-latest
