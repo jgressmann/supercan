@@ -194,10 +194,9 @@ jobs:
         # with:
         #   name: supercan-win.7z
 
-      # - name: Download supercan_inst.exe
-      #   uses: actions/download-artifact@v3
-      #   with:
-      #     name: supercan_inst.exe
+      - name: Debugging
+        run: |
+          find ${{ steps.download.outputs.download-path }}
 
       - name: Upload artifacts to release
         uses: softprops/action-gh-release@v1
