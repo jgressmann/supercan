@@ -87,6 +87,7 @@ jobs:
       hashes: ${{ steps.hash.outputs.hashes }}
     runs-on: ubuntu-latest
     env:
+      DEBIAN_FRONTEND: noninteractive
       APPVEYOR_BUILD_FOLDER: $(env.GITHUB_WORKSPACE)
       ARTIFACT_FIRMWARE: supercan-firmware.tar.xz
 
@@ -94,11 +95,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build
         id: build
-
-
         run: |
-          set
-          echo 1 >supercan-firmware.tar.xz
+          env
+          sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz python3
+          git submodule update --init --depth 1 --recursive
+          $GITHUB_WORKSPACE/Boards/examples/device/supercan/build.sh
+          mv $GITHUB_WORKSPACE/Boards/examples/device/supercan/firmware/supercan-firmware.tar.xz $GITHUB_WORKSPACE
+
+
+        # run: |
+        #   set
+        #   echo 1 >supercan-firmware.tar.xz
 
 
       - name: Generate hashes
@@ -131,21 +138,6 @@ jobs:
           echo "hashes=$(cat ${{ runner.temp }}/hashes | base64 -w0)" >> "$GITHUB_OUTPUT"
 
 
-  # provenance-win:
-  #   # if: startsWith(github.ref, 'refs/tags/')
-  #   needs: [build-win]
-  #   permissions:
-  #     actions: read
-  #     id-token: write
-  #     contents: write
-
-  #   uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
-  #   with:
-  #     base64-subjects: "${{ needs.build-win.outputs.hashes }}"
-  #     # Upload provenance to a new release
-  #     upload-assets: true
-  #     provenance-name: windows.intoto.jsonl
-
   provenance:
     needs: [collect]
     permissions:
@@ -160,69 +152,6 @@ jobs:
       upload-assets: true
       provenance-name: supercan.intoto.jsonl
 
-  # # This step calls the generic workflow to generate provenance.
-  # provenance-latest:
-  #   if: startsWith(github.ref, 'refs/heads/')
-  #   needs: [build]
-  #   permissions:
-  #     actions: read
-  #     id-token: write
-  #     contents: write
-
-  #   uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
-  #   with:
-  #     base64-subjects: "${{ needs.build.outputs.hashes }}"
-  #     # Upload provenance to a new release
-  #     upload-assets: true
-  #     upload-tag-name: latest-master
-  #     provenance-name: windows.intoto.jsonl
-
-  # # This step uploads our artifacts to the tagged GitHub release.
-  # release:
-  #   needs: [build, provenance-release]
-  #   runs-on: ubuntu-latest
-  #   # if: startsWith(github.ref, 'refs/tags/')
-  #   steps:
-  #     - name: Download supercan-win.7z
-  #       uses: actions/download-artifact@v3
-  #       with:
-  #         name: supercan-win.7z
-
-  #     - name: Download supercan_inst.exe
-  #       uses: actions/download-artifact@v3
-  #       with:
-  #         name: supercan_inst.exe
-
-  #     - name: Upload assets
-  #       uses: softprops/action-gh-release@v1
-  #       with:
-  #         files: |
-  #           supercan-win.7z
-  #           supercan_inst.exe
-
-  # latest:
-  #   needs: [build, provenance-latest]
-  #   runs-on: ubuntu-latest
-  #   # if: startsWith(github.ref, 'refs/heads/')
-  #   steps:
-  #     - name: Download supercan-win.7z
-  #       uses: actions/download-artifact@v3
-  #       with:
-  #         name: supercan-win.7z
-
-  #     - name: Download supercan_inst.exe
-  #       uses: actions/download-artifact@v3
-  #       with:
-  #         name: supercan_inst.exe
-
-  #     - name: Upload assets
-  #       uses: softprops/action-gh-release@v1
-  #       with:
-  #         # name: latest-master
-  #         tag_name: latest-master
-  #         files: |
-  #           supercan-win.7z
-  #           supercan_inst.exe
 
   latest:
     needs: [provenance]
