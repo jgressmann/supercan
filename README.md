@@ -10,14 +10,7 @@ SuperCAN works with [these devices](doc/README.devices.rst) to form an USB to CA
 
 ## Builds
 
-Build        | Status
------------- | -------------
-*Firmware*   | [![Build status](https://ci.appveyor.com/api/projects/status/i398eskxl418rwf9?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-firmware)
-*Linux*      | [![Build status](https://ci.appveyor.com/api/projects/status/knw9udgvlal4u3b0?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-linux)
-*Windows Appveyor*    | [![Build status](https://ci.appveyor.com/api/projects/status/p25qholxtadg71ej?svg=true)](https://ci.appveyor.com/project/jgressmann/supercan-windows)
-*Windows Github Actions*    | [![Build status](https://github.com/jgressmann/supercan/actions/workflows/windows.yml/badge.svg)
-
-
+[![Build status](https://github.com/jgressmann/supercan/actions/workflows/build.yml/badge.svg)
 
 ## Supported Devices
 
