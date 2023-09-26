@@ -88,7 +88,6 @@ jobs:
     runs-on: ubuntu-20.04
     env:
       DEBIAN_FRONTEND: noninteractive
-      APPVEYOR_BUILD_FOLDER: $(env.GITHUB_WORKSPACE)
       ARTIFACT_FIRMWARE: supercan-firmware.tar.xz
 
     steps:
@@ -104,6 +103,48 @@ jobs:
           env
           $GITHUB_WORKSPACE/Boards/examples/device/supercan/build.sh
           mv $GITHUB_WORKSPACE/Boards/examples/device/supercan/firmware/supercan-firmware.tar.xz $GITHUB_WORKSPACE
+
+
+        # run: |
+        #   set
+        #   echo 1 >supercan-firmware.tar.xz
+
+
+      - name: Generate hashes
+        id: hash
+        run: |
+          # sha256sum generates sha256 hash for all artifacts.
+          # base64 -w0 encodes to base64 and outputs on a single line.
+          # sha256sum artifact1 artifact2 ... | base64 -w0
+          echo "hashes=$(sha256sum $ARTIFACT_FIRMWARE | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          path: ${{ env.ARTIFACT_FIRMWARE }}
+          if-no-files-found: error
+
+
+  build-linux:
+    runs-on: ubuntu-latest
+    env:
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup
+        run: |
+          sudo apt-get update && sudo apt-get install -y dkms
+          git submodule update --init --recursive Linux
+
+      - name: Build
+        id: build
+        run: |
+          uname -a
+          export SUPERCAN_DIR=$(find "$APPVEYOR_BUILD_FOLDER/Linux" -type d -name 'supercan_usb-*' | head)
+          env
+          $GITHUB_WORKSPACE/Linux/dkms-init.sh
+          make V=1 KERNELRELEASE=$(uname -r) -C /lib/modules/$(uname -r)/build M=$SUPERCAN_DIR
 
 
         # run: |
@@ -160,12 +201,6 @@ jobs:
     runs-on: ubuntu-latest
     # if: startsWith(github.ref, 'refs/heads/')
     steps:
-      - uses: actions/checkout@v4
-      - name: Package sources
-        run: |
-          git archive -o src.zip HEAD
-          git archive -o src.tar.gz HEAD
-
       - name: Download artifacts
         id: download
         uses: actions/download-artifact@v3
