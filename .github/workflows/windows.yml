@@ -6,6 +6,37 @@ on:
       - master
 
 jobs:
+  package-sources:
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
+    runs-on: ubuntu-latest
+    env:
+      ARTIFACT_ZIP: src.zip
+      ARTIFACT_TAR: src.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package sources
+        run: |
+          git archive -o $ARTIFACT_ZIP HEAD
+          git archive -o $ARTIFACT_TAR HEAD
+
+      - name: Generate hashes
+        id: hash
+        run: |
+          # sha256sum generates sha256 hash for all artifacts.
+          # base64 -w0 encodes to base64 and outputs on a single line.
+          # sha256sum artifact1 artifact2 ... | base64 -w0
+          echo "hashes=$(sha256sum $ARTIFACT_ZIP $ARTIFACT_TAR | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          path: |
+            ${{env.ARTIFACT_ZIP}}
+            ${{env.ARTIFACT_TAR}}
+          if-no-files-found: error
+
+
   build-win:
     outputs:
       hashes: ${{ steps.hash.outputs.hashes }}
@@ -86,7 +117,7 @@ jobs:
           if-no-files-found: error
 
   collect:
-    needs: [build-win, build-firmware]
+    needs: [build-win, build-firmware, package-sources]
     runs-on: ubuntu-latest
     outputs:
       hashes: ${{ steps.sum.outputs.hashes }}
@@ -94,6 +125,7 @@ jobs:
       - name: Collect hashes
         id: sum
         run: |
+          echo ${{needs.package-sources.outputs.hashes}} | base64 -d >>${{ runner.temp }}/hashes
           echo ${{needs.build-win.outputs.hashes}} | base64 -d >>${{ runner.temp }}/hashes
           echo ${{needs.build-firmware.outputs.hashes}} | base64 -d >>${{ runner.temp }}/hashes
           echo "hashes=$(cat ${{ runner.temp }}/hashes | base64 -w0)" >> "$GITHUB_OUTPUT"
@@ -193,7 +225,7 @@ jobs:
   #           supercan_inst.exe
 
   latest:
-    needs: [build-win, build-firmware, provenance]
+    needs: [provenance]
     runs-on: ubuntu-latest
     # if: startsWith(github.ref, 'refs/heads/')
     steps:
@@ -216,7 +248,5 @@ jobs:
         with:
           tag_name: latest-master
           files: |
-            ${{ steps.download.outputs.download-path }}/src.zip
-            ${{ steps.download.outputs.download-path }}/src.tar.gz
             ${{ steps.download.outputs.download-path }}/artifact/*
             ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
