@@ -197,6 +197,12 @@ jobs:
     runs-on: ubuntu-latest
     # if: startsWith(github.ref, 'refs/heads/')
     steps:
+      - uses: actions/checkout@v4
+      - name: Package sources
+        run: |
+          git archive -o src.zip HEAD
+          git archive -o src.tar.gz HEAD
+
       - name: Download artifacts
         id: download
         uses: actions/download-artifact@v3
@@ -210,5 +216,7 @@ jobs:
         with:
           tag_name: latest-master
           files: |
+            ${{ steps.download.outputs.download-path }}/src.zip
+            ${{ steps.download.outputs.download-path }}/src.tar.gz
             ${{ steps.download.outputs.download-path }}/artifact/*
             ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
