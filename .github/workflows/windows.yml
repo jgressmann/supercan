@@ -59,6 +59,12 @@ jobs:
       #     name: supercan_inst.exe
       #     if-no-files-found: error
 
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          path: $${{ env.ARTIFACTS }}
+          if-no-files-found: error
+
   build-firmware:
     outputs:
       hashes: ${{ steps.hash.outputs.hashes }}
@@ -88,6 +94,12 @@ jobs:
           # base64 -w0 encodes to base64 and outputs on a single line.
           # sha256sum artifact1 artifact2 ... | base64 -w0
           echo "hashes=$(sha256sum $ARTIFACTS | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          path: $${{ env.ARTIFACTS }}
+          if-no-files-found: error
 
   # # This step calls the generic workflow to generate provenance.
   # provenance-release:
@@ -169,26 +181,23 @@ jobs:
   #           supercan-win.7z
   #           supercan_inst.exe
 
-  # latest:
-  #   needs: [build]
-  #   runs-on: ubuntu-latest
-  #   # if: startsWith(github.ref, 'refs/heads/')
-  #   steps:
-  #     - name: Download supercan-win.7z
-  #       uses: actions/download-artifact@v3
-  #       with:
-  #         name: supercan-win.7z
+  latest:
+    needs: [build-win, build-firmware]
+    runs-on: ubuntu-latest
+    # if: startsWith(github.ref, 'refs/heads/')
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        # with:
+        #   name: supercan-win.7z
 
-  #     - name: Download supercan_inst.exe
-  #       uses: actions/download-artifact@v3
-  #       with:
-  #         name: supercan_inst.exe
+      # - name: Download supercan_inst.exe
+      #   uses: actions/download-artifact@v3
+      #   with:
+      #     name: supercan_inst.exe
 
-  #     - name: Upload assets
-  #       uses: softprops/action-gh-release@v1
-  #       with:
-  #         # name: latest-master
-  #         tag_name: latest-master
-  #         files: |
-  #           supercan-win.7z
-  #           supercan_inst.exe
+      - name: Upload artifacts to release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: latest-master
+          files: $${{ needs.build-win.outputs.artifiacts }} $${{ needs.build-firmware.outputs.artifiacts }}
