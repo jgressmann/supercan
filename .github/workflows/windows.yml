@@ -183,7 +183,7 @@ jobs:
   #           supercan_inst.exe
 
   latest:
-    needs: [build-win, build-firmware]
+    needs: [build-win, build-firmware, provenance-win]
     runs-on: ubuntu-latest
     # if: startsWith(github.ref, 'refs/heads/')
     steps:
@@ -202,4 +202,4 @@ jobs:
         with:
           tag_name: latest-master
           files: ${{ steps.download.outputs.download-path }}/artifact/*
-          if-no-files-found: error
+          # if-no-files-found: error
