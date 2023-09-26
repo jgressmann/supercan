@@ -62,7 +62,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          path: $${{ env.ARTIFACTS }}
+          path: ${{ env.ARTIFACTS }}
           if-no-files-found: error
 
   build-firmware:
@@ -98,7 +98,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          path: $${{ env.ARTIFACTS }}
+          path: ${{ env.ARTIFACTS }}
           if-no-files-found: error
 
   # # This step calls the generic workflow to generate provenance.
