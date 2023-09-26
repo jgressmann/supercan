@@ -189,6 +189,7 @@ jobs:
     # if: startsWith(github.ref, 'refs/heads/')
     steps:
       - name: Download artifacts
+        id: download
         uses: actions/download-artifact@v3
         # with:
         #   name: supercan-win.7z
@@ -202,4 +203,5 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: latest-master
-          files: ${{ needs.build-win.outputs.artifiacts }} ${{ needs.build-firmware.outputs.artifiacts }}
+          files: ${{ steps.download.outputs.download-path }}/*
+          if-no-files-found: error
