@@ -253,7 +253,7 @@ jobs:
       - name: Upload artifacts to release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref }}
+          tag_name: ${{ github.ref_name }}
           # name: SuperCAN ${{ github.ref_name }}
           # draft: true
           # prerelease: true
