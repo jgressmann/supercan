@@ -283,7 +283,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifact/supercan-firmware.tar.xz
+          asset_path: ./artifact/supercan-firmware.tar.xz
           asset_name: supercan-firmware.tar.xz
           asset_content_type: application/x-xz
 
@@ -293,7 +293,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifact/ supercan-win.7z
+          asset_path: ./artifact/ supercan-win.7z
           asset_name:  supercan-win.7z
           asset_content_type: application/x-7z-compressed
 
@@ -303,6 +303,17 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifact/ supercan_inst.exe
+          asset_path: ./artifact/ supercan_inst.exe
           asset_name:  supercan_inst.exe
           asset_content_type: application/vnd.microsoft.portable-executable
+
+      - name: Upload SLSA provenance
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./supercan.intoto.jsonl/supercan.intoto.jsonl
+          asset_name:  supercan.intoto.jsonl
+          asset_content_type: application/vnd.microsoft.portable-executable
+
