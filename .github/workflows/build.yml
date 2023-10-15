@@ -254,6 +254,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           # tag_name: latest-master
+          draft: true
           files: |
             ${{ steps.download.outputs.download-path }}/artifact/*
             ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
