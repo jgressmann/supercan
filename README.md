@@ -1,16 +1,14 @@
 # SuperCAN
 
 [![License](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
+[![Build status](https://github.com/jgressmann/supercan/actions/workflows/build.yml/badge.svg)
+
 
 
 ## What is this?
 
 This is project SuperCAN. An open source USB to CAN-FD protocol.
 SuperCAN works with [these devices](doc/README.devices.rst) to form an USB to CAN-FD interface.
-
-## Builds
-
-[![Build status](https://github.com/jgressmann/supercan/actions/workflows/build.yml/badge.svg)
 
 ## Supported Devices
 
