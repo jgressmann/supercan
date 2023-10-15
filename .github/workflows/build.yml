@@ -218,9 +218,45 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           # tag_name: latest-master
-          name: SuperCAN ${{ github.ref_name }}
+          name: SuperCAN ${{ github.ref }}
           draft: true
           prerelease: true
+          files: |
+            ${{ steps.download.outputs.download-path }}/artifact/*
+            ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
+
+
+  release2:
+    needs: [provenance]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download artifacts
+        id: download
+        uses: actions/download-artifact@v3
+
+      - name: Debugging
+        run: |
+          find ${{ steps.download.outputs.download-path }}
+
+      - name: Create release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: true
+          prerelease: true
+
+      - name: Upload artifacts to release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          # name: SuperCAN ${{ github.ref_name }}
+          # draft: true
+          # prerelease: true
           files: |
             ${{ steps.download.outputs.download-path }}/artifact/*
             ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
