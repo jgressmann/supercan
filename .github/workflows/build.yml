@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - master
+    tags:
+      - v*
 
 jobs:
   package-sources:
@@ -92,10 +94,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - name: Setup
-        run: |
-          sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz python3
-          git submodule update --init --depth 1 --recursive
+      # - name: Setup
+      #   run: |
+      #     sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz python3
+      #     git submodule update --init --depth 1 --recursive
 
       - name: Build
         id: build
