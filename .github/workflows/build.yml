@@ -60,12 +60,12 @@ jobs:
       - name: Build
         id: build
         shell: cmd
-        # run: appveyor\windows.cmd
+        run: appveyor\windows.cmd
 
-        run: |
-          set
-          echo 1 >supercan-win.7z
-          echo 2 >supercan_inst.exe
+        # run: |
+        #   set
+        #   echo 1 >supercan-win.7z
+        #   echo 2 >supercan_inst.exe
 
       - name: Generate hashes
         shell: bash
@@ -94,22 +94,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      # - name: Setup
-      #   run: |
-      #     sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz python3
-      #     git submodule update --init --depth 1 --recursive
+      - name: Setup
+        run: |
+          sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz python3
+          git submodule update --init --depth 1 --recursive
 
       - name: Build
         id: build
-        # run: |
-        #   env
-        #   $GITHUB_WORKSPACE/Boards/examples/device/supercan/build.sh
-        #   mv $GITHUB_WORKSPACE/Boards/examples/device/supercan/firmware/supercan-firmware.tar.xz $GITHUB_WORKSPACE
-
-
         run: |
-          set
-          echo 1 >supercan-firmware.tar.xz
+          env
+          $GITHUB_WORKSPACE/Boards/examples/device/supercan/build.sh
+          mv $GITHUB_WORKSPACE/Boards/examples/device/supercan/firmware/supercan-firmware.tar.xz $GITHUB_WORKSPACE
+
+
+        # run: |
+        #   set
+        #   echo 1 >supercan-firmware.tar.xz
 
 
       - name: Generate hashes
@@ -201,32 +201,7 @@ jobs:
             ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
 
 
-  # release:
-  #   needs: [provenance]
-  #   runs-on: ubuntu-latest
-  #   if: startsWith(github.ref, 'refs/tags/')
-  #   steps:
-  #     - name: Download artifacts
-  #       id: download
-  #       uses: actions/download-artifact@v3
-
-  #     - name: Debugging
-  #       run: |
-  #         find ${{ steps.download.outputs.download-path }}
-
-  #     - name: Upload artifacts to release
-  #       uses: softprops/action-gh-release@v1
-  #       with:
-  #         # tag_name: latest-master
-  #         name: SuperCAN ${{ github.ref }}
-  #         draft: true
-  #         prerelease: true
-  #         files: |
-  #           ${{ steps.download.outputs.download-path }}/artifact/*
-  #           ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
-
-
-  release2:
+  release:
     needs: [provenance]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
@@ -251,31 +226,6 @@ jobs:
           release_name: SuperCAN ${{ github.ref }}
           draft: true
           prerelease: true
-
-      # - name: Upload artifacts to release
-      #   uses: softprops/action-gh-release@v1
-      #   with:
-      #     # tag_name: ${{ github.ref_name }}
-      #     # tag_name: ${{ github.ref }}
-      #     # name: SuperCAN ${{ github.ref_name }}
-      #     draft: true
-      #     prerelease: true
-      #     files: |
-      #       ${{ steps.download.outputs.download-path }}/artifact/*
-      #       ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
-      #     body: ${{ github.ref_name }}
-
-      # - name: Upload Release Asset
-      #   id: upload-release-asset
-      #   uses: actions/upload-release-asset@v1
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #   with:
-      #     upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
-      #     asset_path: ./my-artifact.zip
-      #     asset_name: my-artifact.zip
-      #     asset_content_type: application/zip
-
 
       - name: Upload firmware asset
         uses: actions/upload-release-asset@v1
@@ -315,5 +265,5 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
           asset_name:  supercan.intoto.jsonl
-          asset_content_type: application/vnd.microsoft.portable-executable
+          asset_content_type: application/octet-stream
 
