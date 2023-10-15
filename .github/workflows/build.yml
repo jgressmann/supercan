@@ -256,8 +256,9 @@ jobs:
           # tag_name: ${{ github.ref_name }}
           # tag_name: ${{ github.ref }}
           # name: SuperCAN ${{ github.ref_name }}
-          # draft: true
-          # prerelease: true
+          draft: true
+          prerelease: true
           files: |
             ${{ steps.download.outputs.download-path }}/artifact/*
             ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
+          body: ${{ github.ref_name }}
