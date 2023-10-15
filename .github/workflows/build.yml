@@ -285,4 +285,24 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: artifact/supercan-firmware.tar.xz
           asset_name: supercan-firmware.tar.xz
-          # asset_content_type: application/zip
+          asset_content_type: application/x-xz
+
+      - name: Upload Windows binaries asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifact/ supercan-win.7z
+          asset_name:  supercan-win.7z
+          asset_content_type: application/x-7z-compressed
+
+      - name: Upload Windows installer asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifact/ supercan_inst.exe
+          asset_name:  supercan_inst.exe
+          asset_content_type: application/vnd.microsoft.portable-executable
