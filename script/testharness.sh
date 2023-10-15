@@ -244,7 +244,7 @@ if [ $test_error_recovery -ne 0 ]; then
 		errors=$((errors+1))
 	fi
 
-	echo "INFO: Bringing both devices up to same bitrate" | tee -a "$meta_log_path"
+	echo "INFO: Bringing $can_good to $error_recovery_test_can_bitrate bps, expecting rx/tx to work in both directions." | tee -a "$meta_log_path"
 	ip link set down $can_good
 	ip link set $can_good type can bitrate $error_recovery_test_can_bitrate fd off
 	ip link set up $can_good
@@ -350,7 +350,7 @@ if [ $test_error_recovery -ne 0 ]; then
 
 	set -e
 
-	echo "INFO: Bringing both devices up to same bitrate" | tee -a "$meta_log_path"
+	echo "INFO: Taking down both devices and bringing them to $error_recovery_test_can_bitrate bps, expecting rx/tx to work in both directions." | tee -a "$meta_log_path"
 	for can in $cans; do
 		ip link set down $can || true
 	done
@@ -379,7 +379,7 @@ if [ $test_error_recovery -ne 0 ]; then
 
 	lines=$(cat "$error_recovery_bus_off_log_test_can_tx_path" | wc -l)
 	if [ $lines -ne $error_recovery_tx_frames ]; then
-		echo "ERROR: TEST log file messages contains $lines/$error_recovery_tx_frames!" | tee -a "$meta_log_path"
+		echo "ERROR: TEST log file contains $lines/$error_recovery_tx_frames!" | tee -a "$meta_log_path"
 		errors=$((errors+1))
 	else
 		echo INFO: TEST log file contains $lines/$error_recovery_tx_frames messages, bus-off recovery OK! | tee -a "$meta_log_path"
@@ -387,7 +387,7 @@ if [ $test_error_recovery -ne 0 ]; then
 
 	lines=$(cat "$error_recovery_error_passive_log_test_can_rx_path" | wc -l)
 	if [ $lines -ne $error_recovery_tx_frames ]; then
-		echo ERROR: GOOD log file messages $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
+		echo ERROR: GOOD log file $lines/$error_recovery_tx_frames! | tee -a "$meta_log_path"
 		errors=$((errors+1))
 	else
 		echo INFO: GOOD log file $lines/$error_recovery_tx_frames messages OK! | tee -a "$meta_log_path"
