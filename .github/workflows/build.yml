@@ -201,42 +201,6 @@ jobs:
             ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
 
 
-  # release:
-  #   needs: [provenance]
-  #   runs-on: ubuntu-latest
-  #   # if: startsWith(github.ref, 'refs/heads/')
-  #   steps:
-  #     - name: Download artifacts
-  #       id: download
-  #       uses: actions/download-artifact@v3
-
-  #     - name: Debugging
-  #       run: |
-  #         find ${{ steps.download.outputs.download-path }}
-
-  #     - name: Upload artifacts to release
-  #       uses: softprops/action-gh-release@v1
-  #       with:
-  #         tag_name: latest-master
-  #         files: |
-  #           ${{ steps.download.outputs.download-path }}/artifact/*
-  #           ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
-
-
-  #           - name: release
-  #           uses: actions/create-release@v1
-  #           id: create_release
-  #           with:
-  #             draft: false
-  #             prerelease: false
-  #             release_name: ${{ steps.version.outputs.version }}
-  #             tag_name: ${{ github.ref }}
-  #             body_path: CHANGELOG.md
-  #           env:
-  #             GITHUB_TOKEN: ${{ github.token }}
-
-
-  # This step uploads our artifacts to the tagged GitHub release.
   release:
     needs: [provenance]
     runs-on: ubuntu-latest
@@ -254,7 +218,9 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           # tag_name: latest-master
+          name: SuperCAN ${{ github.ref_name }}
           draft: true
+          prerelease: true
           files: |
             ${{ steps.download.outputs.download-path }}/artifact/*
             ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
