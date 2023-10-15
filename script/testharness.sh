@@ -983,10 +983,12 @@ function one_each()
 
 }
 
-# Run tests for each setting
-for ((i=0; i<${#settings[@]}; i++)); do
-	one_each ${settings[$i]} ${nominal_bitrates[$i]} ${data_bitrates[$i]}
-done
+if [ $seconds -gt 0 ]; then
+	# Run tests for each setting
+	for ((i=0; i<${#settings[@]}; i++)); do
+		one_each ${settings[$i]} ${nominal_bitrates[$i]} ${data_bitrates[$i]}
+	done
+fi
 
 
 #######################
