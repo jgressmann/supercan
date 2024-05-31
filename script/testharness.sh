@@ -14,6 +14,7 @@ test_error_recovery=1
 level=${default_level}
 sort=1
 data_bitrate=${default_data_bitrate}
+can_fd=1
 
 usage()
 {
@@ -25,6 +26,7 @@ usage()
 	echo "   --comp-level LEVEL       compress with LEVEL (default ${default_level})"
 	echo "   --no-sort                don't sort output by timestamp prior to comparision"
 	echo "   --data-bitrate           set bitrate for data phase (default ${default_data_bitrate})"
+	echo "   --no-fd                  disable CAN-FD tests"
 	echo
 }
 
@@ -66,6 +68,10 @@ while [ $# -gt 0 ]; do
 			data_bitrate=$2
 			shift # past argument
 			shift # past value
+			;;
+		--no-fd)
+			can_fd=0
+			shift # past argument
 			;;
 # 		--default)
 # 		DEFAULT=YES
@@ -185,6 +191,36 @@ same_messages()
 
 	# return $rc
 	return $?
+}
+
+wait_for_file_to_stop_growing()
+{
+	local file_path=$1
+
+	shift
+
+	local last_size=-1
+	local counter=0
+
+
+	while true; do
+		local curr_size=$(ls -l "$file_path" | awk '{print $5}')
+
+		echo "${file_path}: $curr_size"
+
+		if [ $curr_size -eq $last_size ]; then
+			counter=$((counter+1))
+			if [ $counter -ge 3 ]; then
+				break
+			fi
+		else
+			counter=0
+		fi
+
+		last_size=$curr_size
+
+		sleep 1
+	done
 }
 
 
@@ -445,31 +481,49 @@ function one_each()
 	local setting_nominal_bitrate=$2
 	local setting_data_bitrate=$3
 
+	shift
+	shift
+	shift
+
 	echo
-	echo "INFO: Setting $setting_name ($setting_nominal_bitrate/$setting_data_bitrate bps)"
+	if [ $can_fd -ne 0 ]; then
+		echo "INFO: Setting $setting_name ($setting_nominal_bitrate/$setting_data_bitrate bps)"
+	else
+		echo "INFO: Setting $setting_name ($setting_nominal_bitrate bps)"
+	fi
 
 	max_frames=$((seconds*$setting_nominal_bitrate/200))
 	echo INFO[$setting_name]: max frames $max_frames
 
-	#-I 42 -L 8 -D i -g 1 -b -n $max_frames
-	local single_sender_can_gen_flags="-e -I r -L $frame_len -D i -g 0 -p 1 -b -n $max_frames"
 
-
-	shift
-	shift
-	shift
 
 	local lines=0
 	local setting_log_dir=$log_dir/$setting_name
 
 	mkdir -p "$setting_log_dir"
 
-	echo INFO[$setting_name]: Configure CANs for nominal $setting_nominal_bitrate bps, data $setting_data_bitrate bps | tee -a "$meta_log_path"
+	#-I 42 -L 8 -D i -g 1 -b -n $max_frames
+	local single_sender_can_gen_flags="-e -I r -L $frame_len -D i -g 0 -p 1 -n $max_frames"
+
+	if [ $can_fd -ne 0 ]; then
+		echo INFO[$setting_name]: Configure CANs for nominal $setting_nominal_bitrate bps, data $setting_data_bitrate bps | tee -a "$meta_log_path"
+		single_sender_can_gen_flags="$single_sender_can_gen_flags -b"
+	else
+		echo INFO[$setting_name]: Configure CANs for nominal $setting_nominal_bitrate bps | tee -a "$meta_log_path"
+	fi
 
 	for can in $cans; do
 		ip link set down $can || true
-		ip link set $can type can bitrate $setting_nominal_bitrate dbitrate ${setting_data_bitrate} fd on
+		if [ $can_fd -ne 0 ]; then
+			ip link set $can type can bitrate $setting_nominal_bitrate dbitrate ${setting_data_bitrate} fd on
+		else
+			ip link set $can type can bitrate $setting_nominal_bitrate fd off
+		fi
+
+		# ip link set up $can
 	done
+
+
 
 
 	#########################
@@ -609,6 +663,32 @@ function one_each()
 		echo INFO[$setting_name]: good -\> test TEST log file \(RX\) has found non-zero time stamp, OK! | tee -a "$meta_log_path"
 	fi
 
+	local good_to_test_seq_file_name=good_to_test_seq.log
+	local good_to_test_seq_file_path=$setting_log_dir/$good_to_test_seq_file_name
+
+	echo
+	echo INFO[$setting_name]: Sequence test sender good -\> test | tee -a "$meta_log_path"
+	stdbuf -oL cansequence -r $can_test 2>&1 | tee "$good_to_test_seq_file_path" &
+	cansequence $can_good -p --loop=1024
+	killall -9 cansequence || true
+
+
+	local seq_lines=$(cat "$good_to_test_seq_file_path" | wc -l)
+
+	if [ $seq_lines -eq 0 ]; then
+		echo ERROR[$setting_name]: good -\> test seq log file empty! | tee -a "$meta_log_path"
+		errors=$((errors+1))
+	else
+		# remove initial line
+		seq_lines=$((seq_lines-1))
+		if [ $seq_lines -eq 0 ]; then
+			echo INFO[$setting_name]: good -\> test seq log file no entries, OK! | tee -a "$meta_log_path"
+		else
+			echo ERROR[$setting_name]: good -\> test seq log file $seq_lines entries! | tee -a "$meta_log_path"
+			errors=$((errors+1))
+		fi
+	fi
+
 	set -e
 
 	#######################
@@ -688,13 +768,43 @@ function one_each()
 		echo INFO[$setting_name]: good -\> test TEST log file \(TX\) has found non-zero time stamp, OK! | tee -a "$meta_log_path"
 	fi
 
+	local test_to_good_seq_file_name=test_to_good_seq.log
+	local test_to_good_seq_file_path=$setting_log_dir/$test_to_good_seq_file_name
+
+	echo
+	echo INFO[$setting_name]: Sequence test sender test -\> good | tee -a "$meta_log_path"
+	stdbuf -oL cansequence -r $can_good 2>&1 | tee "$test_to_good_seq_file_path" &
+	cansequence $can_test -p --loop=1024
+	killall -9 cansequence || true
+
+	seq_lines=$(cat "$test_to_good_seq_file_path" | wc -l)
+
+	if [ $seq_lines -eq 0 ]; then
+		echo ERROR[$setting_name]: test -\> good seq log file empty! | tee -a "$meta_log_path"
+		errors=$((errors+1))
+	else
+		# remove initial line
+		seq_lines=$((seq_lines-1))
+		if [ $seq_lines -eq 0 ]; then
+			echo INFO[$setting_name]: test -\> good seq log file no entries, OK! | tee -a "$meta_log_path"
+		else
+			echo ERROR[$setting_name]: test -\> good seq log file $seq_lines entries! | tee -a "$meta_log_path"
+			errors=$((errors+1))
+		fi
+	fi
+
 	set -e
 
 
 	#######################
 	# both test <-> good
 	#######################
-	local both_sender_can_gen_flags="-L $frame_len -D i -b -g 0 -p 1 -n $max_frames"
+	local both_sender_can_gen_flags="-L $frame_len -D i -g 0 -p 1 -n $max_frames"
+
+	if [ $can_fd -ne 0 ]; then
+		both_sender_can_gen_flags="$both_sender_can_gen_flags -b"
+	fi
+
 	echo
 	echo INFO[$setting_name]: Sending from both devices | tee -a "$meta_log_path"
 
@@ -726,7 +836,11 @@ function one_each()
 	wait $both_test_cangen_pid
 
 	# brittle!
-	sleep $candump_wait_s
+	# sleep $candump_wait_s
+
+	wait_for_file_to_stop_growing "$both_file_test_path"
+	wait_for_file_to_stop_growing "$both_file_good_path"
+
 	kill $both_test_candump_pid $both_good_candump_pid 2>/dev/null || true
 
 	if [ $sort -ne 0 ]; then
@@ -736,15 +850,16 @@ function one_each()
 		both_file_good_path="$both_file_good_path.sorted"
 	fi
 
-	cat "$both_file_test_path" | awk '{ print $3; }' | grep "2##" | sed -E 's/0*(1|2)##//g' >"$setting_log_dir/both_test_send_by_good_content.log"
-	cat "$both_file_test_path" | awk '{ print $3; }' | grep "1##" | sed -E 's/0*(1|2)##//g' >"$setting_log_dir/both_test_send_by_test_content.log"
 
-	cat "$both_file_good_path" | awk '{ print $3; }' | grep "2##" | sed -E 's/0*(1|2)##//g' >"$setting_log_dir/both_good_send_by_good_content.log"
-	cat "$both_file_good_path" | awk '{ print $3; }' | grep "1##" | sed -E 's/0*(1|2)##//g' >"$setting_log_dir/both_good_send_by_test_content.log"
+	cat "$both_file_test_path" | awk '{ print $3; }' | grep "2#" | sed -E 's/0*(1|2)#+//g' >"$setting_log_dir/both_test_send_by_good_content.log"
+	cat "$both_file_test_path" | awk '{ print $3; }' | grep "1#" | sed -E 's/0*(1|2)#+//g' >"$setting_log_dir/both_test_send_by_test_content.log"
+
+	cat "$both_file_good_path" | awk '{ print $3; }' | grep "2#" | sed -E 's/0*(1|2)#+//g' >"$setting_log_dir/both_good_send_by_good_content.log"
+	cat "$both_file_good_path" | awk '{ print $3; }' | grep "1#" | sed -E 's/0*(1|2)#+//g' >"$setting_log_dir/both_good_send_by_test_content.log"
 
 
-	cat "$both_file_test_path" | grep "2##" | >"$setting_log_dir/both_test_send_by_good_timestamps.log"
-	cat "$both_file_test_path" | grep "1##" | >"$setting_log_dir/both_test_send_by_test_timestamps.log"
+	cat "$both_file_test_path" | grep "2#" | >"$setting_log_dir/both_test_send_by_good_timestamps.log"
+	cat "$both_file_test_path" | grep "1#" | >"$setting_log_dir/both_test_send_by_test_timestamps.log"
 
 
 
