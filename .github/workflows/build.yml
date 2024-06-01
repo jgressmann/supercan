@@ -37,6 +37,7 @@ jobs:
             ${{env.ARTIFACT_ZIP}}
             ${{env.ARTIFACT_TAR}}
           if-no-files-found: error
+          name: sources
 
 
   build-win:
@@ -83,6 +84,7 @@ jobs:
             ${{env.ARTIFACT_7z}}
             ${{env.ARTIFACT_INSTALLER}}
           if-no-files-found: error
+          name: windows
 
   build-firmware:
     outputs:
@@ -125,6 +127,7 @@ jobs:
         with:
           path: ${{ env.ARTIFACT_FIRMWARE }}
           if-no-files-found: error
+          name: firmware
 
 
   build-linux:
