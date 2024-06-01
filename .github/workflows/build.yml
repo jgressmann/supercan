@@ -57,7 +57,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: microsoft/setup-msbuild@v1.1
+      - uses: microsoft/setup-msbuild@v2
       - name: Build
         id: build
         shell: cmd
@@ -213,7 +213,7 @@ jobs:
     steps:
       - name: Download artifacts
         id: download
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
 
       - name: Debugging
         run: |
@@ -238,7 +238,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ steps.download.outputs.download-path }}/artifact/supercan-firmware.tar.xz
+          asset_path: ${{ steps.download.outputs.download-path }}/firmware/supercan-firmware.tar.xz
           asset_name: supercan-firmware.tar.xz
           asset_content_type: application/x-xz
 
@@ -248,7 +248,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ steps.download.outputs.download-path }}/artifact/supercan-win.7z
+          asset_path: ${{ steps.download.outputs.download-path }}/windows/supercan-win.7z
           asset_name:  supercan-win.7z
           asset_content_type: application/x-7z-compressed
 
@@ -258,7 +258,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ steps.download.outputs.download-path }}/artifact/supercan_inst.exe
+          asset_path: ${{ steps.download.outputs.download-path }}/windows/supercan_inst.exe
           asset_name:  supercan_inst.exe
           asset_content_type: application/vnd.microsoft.portable-executable
 
