@@ -191,12 +191,6 @@ jobs:
         id: download
         uses: actions/download-artifact@v4
 
-      - name: Download provenance
-        id: download2
-        uses: actions/download-artifact@v4
-        with:
-          name: supercan.intoto.jsonl
-
       - name: Debugging
         run: |
           find ${{ steps.download.outputs.download-path }}
@@ -209,7 +203,7 @@ jobs:
             ${{ steps.download.outputs.download-path }}/sources/*
             ${{ steps.download.outputs.download-path }}/windows/*
             ${{ steps.download.outputs.download-path }}/firmware/*
-            ${{ steps.download2.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
+            ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/*
 
 
   release:
