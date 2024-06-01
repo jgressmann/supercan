@@ -169,17 +169,27 @@ jobs:
 
   provenance:
     needs: [collect]
+    runs-on: ubuntu-latest
     permissions:
       actions: read
       id-token: write
       contents: write
 
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.10.0
-    with:
-      base64-subjects: "${{ needs.collect.outputs.hashes }}"
-      # Upload provenance to a new release
-      upload-assets: false
-      provenance-name: supercan.intoto.jsonl
+    steps:
+      - name: Create provenance
+        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.10.0
+        with:
+          base64-subjects: "${{ needs.collect.outputs.hashes }}"
+          # Upload provenance to a new release
+          upload-assets: false
+          provenance-name: supercan.intoto.jsonl
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          path: supercan.intoto.jsonl
+          if-no-files-found: error
+          name: provenance
 
 
   latest:
