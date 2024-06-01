@@ -61,12 +61,12 @@ jobs:
       - name: Build
         id: build
         shell: cmd
-        # run: appveyor\windows.cmd
+        run: appveyor\windows.cmd
 
-        run: |
-          set
-          echo 1 >supercan-win.7z
-          echo 2 >supercan_inst.exe
+        # run: |
+        #   set
+        #   echo 1 >supercan-win.7z
+        #   echo 2 >supercan_inst.exe
 
       - name: Generate hashes
         shell: bash
