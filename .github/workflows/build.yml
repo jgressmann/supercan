@@ -169,27 +169,17 @@ jobs:
 
   provenance:
     needs: [collect]
-    runs-on: ubuntu-latest
     permissions:
       actions: read
       id-token: write
       contents: write
 
-    steps:
-      - name: Create provenance
-        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.10.0
-        with:
-          base64-subjects: "${{ needs.collect.outputs.hashes }}"
-          # Upload provenance to a new release
-          upload-assets: false
-          provenance-name: supercan.intoto.jsonl
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          path: supercan.intoto.jsonl
-          if-no-files-found: error
-          name: provenance
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.10.0
+    with:
+      base64-subjects: "${{ needs.collect.outputs.hashes }}"
+      # Upload provenance to a new release
+      upload-assets: false
+      provenance-name: supercan.intoto.jsonl
 
 
   latest:
@@ -200,8 +190,12 @@ jobs:
       - name: Download artifacts
         id: download
         uses: actions/download-artifact@v4
-        # with:
-        #   path: artifact
+
+      - name: Download provenance
+        id: download2
+        uses: actions/download-artifact@v4
+        with:
+          name: supercan.intoto.jsonl
 
       - name: Debugging
         run: |
@@ -212,14 +206,10 @@ jobs:
         with:
           tag_name: latest-master
           files: |
-            # ${{ steps.download.outputs.download-path }}/artifact/sources/*
-            # ${{ steps.download.outputs.download-path }}/artifact/windows/*
-            # ${{ steps.download.outputs.download-path }}/artifact/firmware/*
-            # ${{ steps.download.outputs.download-path }}/artifact/supercan.intoto.jsonl/supercan.intoto.jsonl
             ${{ steps.download.outputs.download-path }}/sources/*
             ${{ steps.download.outputs.download-path }}/windows/*
             ${{ steps.download.outputs.download-path }}/firmware/*
-            ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
+            ${{ steps.download2.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
 
 
   release:
