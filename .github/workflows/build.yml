@@ -95,11 +95,11 @@ jobs:
       ARTIFACT_FIRMWARE: supercan-firmware.tar.xz
 
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup
-        run: |
-          sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz python3
-          git submodule update --init --depth 1 --recursive
+      # - uses: actions/checkout@v4
+      # - name: Setup
+      #   run: |
+      #     sudo apt-get update && sudo apt-get install -y dfu-util gcc-arm-none-eabi pixz python3
+      #     git submodule update --init --depth 1 --recursive
 
       - name: Build
         id: build
@@ -190,8 +190,8 @@ jobs:
       - name: Download artifacts
         id: download
         uses: actions/download-artifact@v4
-        with:
-          path: artifact
+        # with:
+        #   path: artifact
 
       - name: Debugging
         run: |
@@ -202,7 +202,13 @@ jobs:
         with:
           tag_name: latest-master
           files: |
-            ${{ steps.download.outputs.download-path }}/artifact/*
+            # ${{ steps.download.outputs.download-path }}/artifact/sources/*
+            # ${{ steps.download.outputs.download-path }}/artifact/windows/*
+            # ${{ steps.download.outputs.download-path }}/artifact/firmware/*
+            # ${{ steps.download.outputs.download-path }}/artifact/supercan.intoto.jsonl/supercan.intoto.jsonl
+            ${{ steps.download.outputs.download-path }}/sources/*
+            ${{ steps.download.outputs.download-path }}/windows/*
+            ${{ steps.download.outputs.download-path }}/firmware/*
             ${{ steps.download.outputs.download-path }}/supercan.intoto.jsonl/supercan.intoto.jsonl
 
 
