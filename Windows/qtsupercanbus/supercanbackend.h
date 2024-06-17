@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2021 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2024 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,14 +34,12 @@
 #include <QtCore/qlist.h>
 #include <QtCore/qtimer.h>
 
-#ifndef _MSC_VER
-    #error Please use a Microsoft compiler to build this project
-#endif
 
 #include <qt_windows.h>
 #include <supercan_srv.h>
 #include <supercan_winapi.h>
-#import <supercan_srv.tlb> raw_interfaces_only
+#include "supercan_srv.tlh.h"
+
 
 
 QT_BEGIN_NAMESPACE
@@ -107,10 +105,10 @@ class SuperCanBackend : public QCanBusDevice
 public:
     enum SuperCanConfigKey {
         DontConfigureKey = UserKey, // Don't attempt to configure the bus
-        NominalSamplePoint,         // defaults to CiA recommendataion
-        DataSamplePoint,            // defaults to CiA recommendataion
-        NominalSjw,                 // defaults to CiA recommendataion
-        DataSjw,                    // defaults to CiA recommendataion
+        NominalSamplePoint,         // defaults to CiA recommendation
+        DataSamplePoint,            // defaults to CiA recommendation
+        NominalSjw,                 // defaults to CiA recommendation
+        DataSjw,                    // defaults to CiA recommendation
     };
     Q_ENUM(SuperCanConfigKey)
 

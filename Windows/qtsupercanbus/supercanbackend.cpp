@@ -1,7 +1,7 @@
 ﻿/*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2024 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -83,9 +83,6 @@ inline uint8_t len_to_dlc(uint8_t len)
 
 bool SuperCanBackend::canCreate(QString *errorReason)
 {
-//    *errorReason = tr("SuperCAN COM server not registered");
-//    return false;
-
     ComScope cs;
 
     if (cs) {
@@ -116,8 +113,7 @@ QList<QCanBusDeviceInfo> SuperCanBackend::interfaces()
 
             hr = sc->DeviceScan(&count);
             if (SUCCEEDED(hr)) {
-
-                for ( unsigned long i = 0; i < count; ++i) {
+                for (unsigned long i = 0; i < count; ++i) {
 
                     SuperCAN::ISuperCANDevicePtr dev;
                     SuperCAN::SuperCANDeviceData devData;
@@ -150,10 +146,10 @@ QList<QCanBusDeviceInfo> SuperCanBackend::interfaces()
                             result << devInfo;
 
                         } else {
-                            qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "Failed to get device data for device index %zu (hr=%lx).", i, hr);
+                            qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "Failed to get device data for device index %lu (hr=%lx).", i, hr);
                         }
                     } else {
-                        qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "Failed to open device index %zu (hr=%lx).", i, hr);
+                        qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "Failed to open device index %lu (hr=%lx).", i, hr);
                     }
                 }
             } else {
@@ -509,13 +505,13 @@ void SuperCanBackend::expired()
                 }
 
                 if (log_data.level < SC_DLL_LOG_LEVEL_WARNING) {
-                    qCCritical(QT_CANBUS_PLUGINS_SUPERCAN, "%s: %s\n", log_data.data);
+                    qCCritical(QT_CANBUS_PLUGINS_SUPERCAN, "%s: %s\n", src, log_data.data);
                 } else if (log_data.level < SC_DLL_LOG_LEVEL_INFO) {
-                    qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "%s: %s\n", log_data.data);
+                    qCWarning(QT_CANBUS_PLUGINS_SUPERCAN, "%s: %s\n", src, log_data.data);
                 } else if (log_data.level < SC_DLL_LOG_LEVEL_DEBUG) {
-                    qCInfo(QT_CANBUS_PLUGINS_SUPERCAN, "%s: %s\n", log_data.data);
+                    qCInfo(QT_CANBUS_PLUGINS_SUPERCAN, "%s: %s\n", src, log_data.data);
                 } else {
-                    qCDebug(QT_CANBUS_PLUGINS_SUPERCAN, "%s: %s\n", log_data.data);
+                    qCDebug(QT_CANBUS_PLUGINS_SUPERCAN, "%s: %s\n", src, log_data.data);
                 }
             } break;
             default:

@@ -3,9 +3,8 @@ TARGET = qtsupercanbus
 QT = core serialbus
 
 HEADERS += \
-    supercanbackend.h
-
-
+    supercanbackend.h \
+    supercan_srv.tlh.h
 
 SOURCES += \
     main.cpp \
@@ -13,11 +12,12 @@ SOURCES += \
     ../../src/can_bit_timing.c
 
 INCLUDEPATH += ../inc ../../src
-
-
+DEFINES += SC_STATIC
+*-g++ {
+    LIBS += -lole32 -loleaut32 -static
+}
 
 DISTFILES = plugin.json
-
 
 PLUGIN_TYPE = canbus
 PLUGIN_EXTENDS = serialbus
