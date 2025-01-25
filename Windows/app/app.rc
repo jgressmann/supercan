@@ -9,7 +9,7 @@
 
 #define SC_APP_VERSION_MAJOR 1
 #define SC_APP_VERSION_MINOR 5
-#define SC_APP_VERSION_PATCH 9
+#define SC_APP_VERSION_PATCH 10
 
 
 #ifndef SC_BUILD_NUMBER
@@ -83,7 +83,7 @@ BEGIN
         BEGIN
             VALUE "FileVersion", STR(SC_APP_VERSION_MAJOR) "." STR(SC_APP_VERSION_MINOR) "." STR(SC_APP_VERSION_PATCH) "." STR(SC_BUILD_NUMBER)
             VALUE "InternalName", "supercan_app.exe"
-            VALUE "LegalCopyright", "Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>"
+            VALUE "LegalCopyright", "Copyright (c) 2020-2025 Jean Gressmann <jean@0x42.de>"
             VALUE "OriginalFilename", "supercan_app.exe"
             VALUE "ProductName", "SuperCAN demo application"
             VALUE "ProductVersion", STR(SC_APP_VERSION_MAJOR) "." STR(SC_APP_VERSION_MINOR) "." STR(SC_APP_VERSION_PATCH) "." STR(SC_BUILD_NUMBER) "-" SC_COMMIT
