@@ -547,8 +547,11 @@ int run_single(struct app_ctx* ac)
         can_info.msg_buffer_size = can_state.dev->dev_to_host16(can_info.msg_buffer_size);
         can_info.nmbt_brp_max = can_state.dev->dev_to_host16(can_info.nmbt_brp_max);
         can_info.nmbt_tseg1_max = can_state.dev->dev_to_host16(can_info.nmbt_tseg1_max);
+    }
 
-
+    // limit track ids to device tx fifo range
+    if (can_state.available_track_id_count > can_info.tx_fifo_size) {
+        can_state.available_track_id_count = can_info.tx_fifo_size;
     }
 
     // compute hw settings
