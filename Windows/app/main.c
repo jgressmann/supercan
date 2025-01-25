@@ -248,6 +248,8 @@ int main(int argc, char** argv)
 
     cia_fd_cbt_init_default_real(&ac.nominal_user_constraints, &ac.data_user_constraints);
 
+    app_init();
+
     for (int i = 1; i < argc; ) {
         if (0 == strcmp("-h", argv[i]) ||
             0 == strcmp("--help", argv[i]) ||

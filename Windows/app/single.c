@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2023 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2025 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -695,7 +695,11 @@ int run_single(struct app_ctx* ac)
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
     while (1) {
+        uint64_t const wait_start_time = mono_millis();
         error = sc_can_stream_rx(can_state.stream, timeout_ms);
+        uint64_t const now = mono_millis();
+        DWORD const elapsed_ms = (DWORD)(now - wait_start_time);
+
         if (error) {
             if (SC_DLL_ERROR_USER_HANDLE_SIGNALED == error) {
                 break;
@@ -710,8 +714,12 @@ int run_single(struct app_ctx* ac)
         }
 
         if (ac->tx_job_count) {
-            timeout_ms = 0xffffffff;
-            ULONGLONG now = GetTickCount64();
+            if (elapsed_ms >= timeout_ms) {
+                timeout_ms = 0xffffffff;
+            }
+            else {
+                timeout_ms -= elapsed_ms;
+            }
             
             error = sc_can_stream_tx_batch_begin(can_state.stream);
             if (error) {

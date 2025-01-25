@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2025 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -156,6 +156,11 @@ void log_candump(
     uint8_t flags,
     uint8_t dlc,
     uint8_t const* data);
+
+uint64_t mono_ticks();
+uint64_t mono_millis();
+
+void app_init();
 
 #ifdef __cplusplus
 } // extern "C"
