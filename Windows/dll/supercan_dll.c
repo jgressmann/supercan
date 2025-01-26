@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2023 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020-2025 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -466,7 +466,7 @@ SC_DLL_API int sc_dev_open_by_id(wchar_t const* id, sc_dev_t** _dev)
         goto error_exit_win_error;
     }
 
-    dev->dev_handle = CreateFile(
+    dev->dev_handle = CreateFileW(
         id,
         GENERIC_WRITE | GENERIC_READ,
         FILE_SHARE_WRITE | FILE_SHARE_READ,
