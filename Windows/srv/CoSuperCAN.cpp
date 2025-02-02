@@ -2084,13 +2084,21 @@ void ScDev::TxMain()
 {
 	const unsigned TX_HANDLE_OFFSET = 1;
 	HANDLE handles[TX_HANDLE_OFFSET + MAX_COM_DEVICES_PER_SC_DEVICE];
-	uint32_t aligned_sc_msg_can_tx_buffer[24];
+	uint32_t aligned_sc_msg_can_tx_buffer[25];
 	sc_msg_can_tx* tx = reinterpret_cast<sc_msg_can_tx*>(aligned_sc_msg_can_tx_buffer);
+	uint8_t* sc_msg_can_tx_data;
 	sc_com_dev_index_t live_com_dev_buffer[MAX_COM_DEVICES_PER_SC_DEVICE];
 	sc_com_dev_index_t live_com_dev_count = 0;
 	auto stream_error = false;
 
-	tx->id = SC_MSG_CAN_TX;
+	if (dev_info.fw_ver_major > 1 || dev_info.fw_ver_minor >= 6) {
+		tx->id = SC_MSG_CAN_TX4;
+		sc_msg_can_tx_data = &tx->data[3];
+	}
+	else {
+		tx->id = SC_MSG_CAN_TX;
+		sc_msg_can_tx_data = tx->data;
+	}
 
 	assert(m_TxThreadNotificationEvent);
 	handles[0] = m_TxThreadNotificationEvent;
@@ -2225,7 +2233,7 @@ void ScDev::TxMain()
 
 							if (!(slot->tx.flags & SC_CAN_FRAME_FLAG_RTR)) {
 								len += data_len;
-								memcpy(tx->data, slot->tx.data, data_len);
+								memcpy(sc_msg_can_tx_data, slot->tx.data, data_len);
 							}
 
 							if (len & (SC_MSG_CAN_LEN_MULTIPLE - 1)) {
@@ -2253,7 +2261,7 @@ void ScDev::TxMain()
 							echo->dlc = slot->tx.dlc;
 							echo->can_id = slot->tx.can_id;
 							echo->track_id = slot->tx.track_id;
-							memcpy(echo->data, tx->data, data_len);
+							memcpy(echo->data, sc_msg_can_tx_data, data_len);
 
 							m_TxrMap[txr_slot].index.store(static_cast<uint32_t>(com_dev_index), std::memory_order_release);
 
