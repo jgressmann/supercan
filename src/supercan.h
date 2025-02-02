@@ -94,6 +94,7 @@ extern "C" {
 #define SC_MSG_CAN_TX           0x22    ///< Host -> Device. Send CAN frame.
 #define SC_MSG_CAN_TXR          0x23    ///< Device -> Host. CAN frame transmission receipt.
 #define SC_MSG_CAN_ERROR        0x24    ///< Device -> Host. CAN frame error.
+#define SC_MSG_CAN_TX4          0x25    ///< Host -> Host. Send 4 byte aligned CAN frame (since fw 0.6.0).
 
 
 #define SC_MSG_USER_OFFSET      0x80    ///< Custom device messages
@@ -120,6 +121,7 @@ extern "C" {
 #define SC_CAN_FRAME_FLAG_BRS         0x08 ///< CAN-FD bitrate switching (set zero to transmit at arbitration rate)
 #define SC_CAN_FRAME_FLAG_ESI         0x10 ///< Set to 1 to transmit with active error state
 #define SC_CAN_FRAME_FLAG_DRP         0x20 ///< CAN frame was dropped due to full tx fifo (only received if TXR feature active)
+#define SC_CAN_FRAME_FLAG_TX4         0x40 ///< TX CAN frame data doesn't start at end of struct sc_msg_can_tx but aligned to 4 byte (sizeof(struct sc_msg_can_tx) + 3)
 
 #define SC_CAN_STATUS_ERROR_ACTIVE          0x0
 #define SC_CAN_STATUS_ERROR_WARNING         0x1
@@ -210,7 +212,7 @@ struct sc_msg_dev_info {
     uint8_t len;
     uint16_t feat_perm;    ///< Features permanently enabled (cannot be be cleared with SC_MSG_FEATURES)
     uint16_t feat_conf;    ///< Features enabled through configuration (SC_MSG_FEATURES)
-    uint8_t unused;
+    uint8_t ch_index;
     uint8_t sn_len;
     uint8_t sn_bytes[16];
     uint8_t fw_ver_major;
@@ -315,6 +317,17 @@ struct sc_msg_can_tx {
     uint8_t data[0];
 } SC_PACKED;
 
+struct sc_msg_can_tx4 {
+    uint8_t id;
+    uint8_t len;            ///< must be a multiple of 4
+    uint8_t dlc;
+    uint8_t flags;
+    uint32_t can_id;
+    uint8_t track_id;
+    uint8_t reserved[3];
+    uint8_t data[0];
+} SC_PACKED;
+
 struct sc_msg_can_txr {
     uint8_t id;
     uint8_t len;
@@ -336,6 +349,7 @@ enum {
     sc_static_assert_sc_msg_can_txr_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_txr) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_can_status_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_status) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_can_error_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_error) & 0x3) == 0 ? 1 : -1]),
+    sc_static_assert_sc_msg_can_tx4_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_tx4) & 0x3) == 0 ? 1 : -1]),
 };
 
 #ifdef __cplusplus
