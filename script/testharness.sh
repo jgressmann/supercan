@@ -202,11 +202,10 @@ wait_for_file_to_stop_growing()
 	local last_size=-1
 	local counter=0
 
-
 	while true; do
 		local curr_size=$(ls -l "$file_path" | awk '{print $5}')
 
-		echo "${file_path}: $curr_size"
+		echo "${file_path}: $curr_size bytes"
 
 		if [ $curr_size -eq $last_size ]; then
 			counter=$((counter+1))
@@ -670,6 +669,7 @@ function one_each()
 	echo INFO[$setting_name]: Sequence test sender good -\> test | tee -a "$meta_log_path"
 	stdbuf -oL cansequence -r $can_test 2>&1 | tee "$good_to_test_seq_file_path" &
 	cansequence $can_good -p --loop=1024
+	sleep $candump_wait_s  # wait for queued transmits to finish
 	killall -9 cansequence || true
 
 
@@ -775,6 +775,7 @@ function one_each()
 	echo INFO[$setting_name]: Sequence test sender test -\> good | tee -a "$meta_log_path"
 	stdbuf -oL cansequence -r $can_good 2>&1 | tee "$test_to_good_seq_file_path" &
 	cansequence $can_test -p --loop=1024
+	sleep $candump_wait_s  # wait for queued transmits to finish
 	killall -9 cansequence || true
 
 	seq_lines=$(cat "$test_to_good_seq_file_path" | wc -l)
