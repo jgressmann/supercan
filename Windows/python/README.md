@@ -2,16 +2,28 @@
 
 ## Installation
 
-Assuming you have Visual Studio (Build Tools) installed, navigate
-to this directory and then run
+### Visual Studio (Build Tools)
 
-```console
-python -m pip install setuptools
-```
+Open a native command prompt.
 
-```console
-python -m pip install .
-```
+### MingGW / MSYS2
+
+1. Open a MinGW shell suitable for your system (MinGW64, typically).
+2. Ensure you have the necessary packages installed, i.e
+
+    ```sh
+    pacman -S mingw-w64-x86_64-toolchain mingw64/mingw-w64-x86_64-python-pip
+    ``` 
+
+### Common Steps
+
+1. Navigate to this directory
+
+2. Run
+
+    ```console
+    python -m pip install .
+    ```
 
 ## Usage from Python
 
