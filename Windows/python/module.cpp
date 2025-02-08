@@ -94,18 +94,18 @@ PyPtr can_bus_state_passive;
 
 std::atomic_int s_exclusive_object_count;
 
-#define SetCanInitializationError(format, ...) \
+#define SetCanInitializationError(...) \
     do { \
-        PyPtr msg(PyUnicode_FromFormat(format, __VA_ARGS__)); \
+        PyPtr msg(PyUnicode_FromFormat(__VA_ARGS__)); \
         PyPtr args(Py_BuildValue("O", msg.get())); \
         /* create exception object */ \
         PyPtr exc(PyObject_CallObject(can_exceptions_can_initialization_error_type.get(), args.get())); \
         PyErr_SetObject(exc.get(), msg.get()); \
     } while (0)
 
-#define SetCanOperationError(format, ...) \
+#define SetCanOperationError(...) \
     do { \
-        PyPtr msg(PyUnicode_FromFormat(format, __VA_ARGS__)); \
+        PyPtr msg(PyUnicode_FromFormat(__VA_ARGS__)); \
         PyPtr args(Py_BuildValue("O", msg.get())); \
         /* create exception object */ \
         PyPtr exc(PyObject_CallObject(can_exceptions_can_operation_error_type.get(), args.get())); \
@@ -976,8 +976,8 @@ static PyGetSetDef sc_exclusive_getset[] = {
 
 PyType_Slot sc_exclusive_type_spec_slots[] = {
     { Py_tp_doc, (void*)"SuperCAN exclusive channel access" },
-    { Py_tp_init, &sc_exclusive_init },
-    { Py_tp_dealloc, &sc_exclusive_dealloc },
+    { Py_tp_init, (void*)&sc_exclusive_init },
+    { Py_tp_dealloc, (void*)&sc_exclusive_dealloc },
     { Py_tp_methods, sc_exclusive_methods },
     { Py_tp_getset, sc_exclusive_getset },
     {0, NULL} // sentinel
@@ -1081,8 +1081,7 @@ error:
 
 int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
 {
-    //sc_exclusive* sc = new ((sc_exclusive *)(((uint8_t*)self) + can_bus_abc_size)) sc_exclusive();
-    sc_exclusive* sc = NULL;
+    sc_exclusive* sc = new ((sc_exclusive *)(((uint8_t*)self) + can_bus_abc_size)) sc_exclusive();
 
     PyObject* channel_object = NULL;
     PyObject* filters = NULL;
@@ -1316,7 +1315,7 @@ int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
                         memcpy(name_str, dev_info.name_bytes, dev_info.name_len);
                         name_str[dev_info.name_len] = 0;
 
-                        fprintf(stdout, "device identifies as %s, serial no %s, firmware version %u.% u.% u\n",
+                        fprintf(stdout, "device identifies as %s, serial no %s, firmware version %u.%u.%u\n",
                             name_str, serial_str, dev_info.fw_ver_major, dev_info.fw_ver_minor, dev_info.fw_ver_patch);
 
                         if (_stricmp(serial_str, serial_ptr) == 0) {
@@ -1400,7 +1399,7 @@ int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
         }
 
         if (rep_len < sizeof(can_info)) {
-            SetCanInitializationError("failed to get can info (short reponse)\n");
+            SetCanInitializationError("failed to get CAN info (short reponse)\n");
             goto cleanup;
         }
 
@@ -1412,7 +1411,7 @@ int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
         can_info.nmbt_tseg1_max = sc->dev->dev_to_host16(can_info.nmbt_tseg1_max);
 
         // limit track ids to device tx fifo range
-        sc->available_track_id_count = std::min<size_t>(sc->available_track_id_count, can_info.tx_fifo_size);
+        sc->available_track_id_count = std::min(sc->available_track_id_count, (size_t)can_info.tx_fifo_size);
     }
 
     // compute hw settings
