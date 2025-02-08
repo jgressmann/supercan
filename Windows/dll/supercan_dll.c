@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2025 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -100,7 +100,7 @@ DEFINE_GUID(GUID_DEVINTERFACE_supercan,
 #define SC_CMD_TIMEOUT_MS 3000
 #define SC_STREAM_TIMEOUT_MS 5000
 
-static void Nop(sc_dev_t * dev, int level, char const* msg, size_t size)
+static void Nop(void * dev, int level, char const* msg, size_t size)
 {
     (void)dev;
     (void)level;
@@ -138,11 +138,6 @@ static inline uint16_t Swap16(uint16_t value)
 static inline uint32_t Swap32(uint32_t value)
 {
     return _byteswap_ulong(value);
-}
-
-static uint16_t dev_swap16(void* ctx, uint16_t value)
-{
-    return ((sc_dev_t*)ctx)->dev_to_host16(value);
 }
 
 struct sc_dev_ex {
