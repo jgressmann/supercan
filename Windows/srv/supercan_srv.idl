@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2020-2022 Jean Gressmann <jean@0x42.de>
+ * Copyright (c) 2020 Jean Gressmann <jean@0x42.de>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -66,6 +66,21 @@ library SuperCAN
 		byte sn_length;
 	};
 
+	struct SuperCANDeviceData2
+	{
+		BSTR name;
+		struct SuperCANBitTimingParams nm_min, nm_max, dt_min, dt_max;
+		unsigned long can_clock_hz;
+		unsigned short feat_perm;
+		unsigned short feat_conf;
+		byte fw_ver_major;
+		byte fw_ver_minor;
+		byte fw_ver_patch;
+		byte sn_bytes[16];
+		byte sn_length;
+		byte ch_index;
+	};
+
 	struct SuperCANVersion
 	{
 		BSTR commit;
@@ -107,6 +122,17 @@ library SuperCAN
 	interface ISuperCANDevice2 : ISuperCANDevice
 	{
 		HRESULT SetLogLevel(int level);
+	};
+
+	[
+		object,
+		uuid(FA2FAA9D-960D-49BF-8261-1F07BD0C9D69),
+		pointer_default(unique),
+		oleautomation,
+	]
+	interface ISuperCANDevice3 : ISuperCANDevice2
+	{
+		HRESULT GetDeviceData2([out] struct SuperCANDeviceData2* data);
 	};
 
 	[
