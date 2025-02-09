@@ -7,7 +7,7 @@ import sys
 try:
     debug = int(os.environ.get("SUPERCAN_DEBUG", "0")) != 0
 except:
-    default = False
+    debug = False
 
 class BuildExt(build_ext):
     def build_extensions(self):
@@ -53,7 +53,7 @@ def main():
                 include_dirs=["../inc", "../../src"],
                 define_macros=[("SC_STATIC", "1")],
                 undef_macros=["NDEBUG"] if debug else [],
-                libraries=["winusb", "Cfgmgr32"],
+                libraries=["winusb", "Cfgmgr32", "Ole32"],
             )
         ],
         cmdclass={"build_ext": BuildExt},
