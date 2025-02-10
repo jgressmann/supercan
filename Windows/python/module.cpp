@@ -118,22 +118,23 @@ PyPtr can_bus_state_passive;
 
 
 std::atomic_int s_exclusive_object_count;
+uint64_t system_time_to_epoch_offset_100ns;
 
 #define SetCanInitializationError(...) \
     do { \
         PyPtr msg(PyUnicode_FromFormat(__VA_ARGS__)); \
-        PyPtr args(Py_BuildValue("O", msg.get())); \
+        PyPtr args(Py_BuildValue("OO", msg.get(), Py_None)); \
         /* create exception object */ \
-        PyPtr exc(PyObject_CallObject(can_exceptions_can_initialization_error_type.get(), args.get())); \
+        PyPtr exc(PyObject_Call(can_exceptions_can_initialization_error_type.get(), args.get(), nullptr)); \
         PyErr_SetObject(exc.get(), msg.get()); \
     } while (0)
 
 #define SetCanOperationError(...) \
     do { \
         PyPtr msg(PyUnicode_FromFormat(__VA_ARGS__)); \
-        PyPtr args(Py_BuildValue("O", msg.get())); \
+        PyPtr args(Py_BuildValue("OO", msg.get(), Py_None)); \
         /* create exception object */ \
-        PyPtr exc(PyObject_CallObject(can_exceptions_can_operation_error_type.get(), args.get())); \
+        PyPtr exc(PyObject_Call(can_exceptions_can_operation_error_type.get(), args.get(), nullptr)); \
         PyErr_SetObject(exc.get(), msg.get()); \
     } while (0)
 
@@ -204,8 +205,260 @@ PyObject* sc_create_can_message(bool is_rx, double timestamp, uint32_t can_id, u
     // create can.Message
     PyPtr args(PyTuple_New(0));
     PyPtr msg(PyObject_Call(can_message_type.get(), args.get(), kwargs.get()));
+    
+    // create tuple [msg, Filtered=False]
+    PyObject* ret = PyTuple_New(2);
 
-    return msg.release();
+    PyTuple_SET_ITEM(ret, 0, msg.release()); // steals referenc
+    PyTuple_SET_ITEM(ret, 1, Py_NewRef(Py_False));
+    
+    return ret;
+}
+
+
+struct sc_config
+{
+    can_bit_timing_constraints_real nominal_user_constraints, data_user_constraints;
+    std::string serial;
+    PyObject* filters;
+    int channel_index;
+    bool fdf;
+    bool receive_own_messages;
+};
+
+
+bool get_bool_arg(PyObject* arg, char const* name, bool* in_out_arg)
+{
+    if (!arg || Py_None == arg) {
+
+    }
+    else if (Py_True == arg) {
+        *in_out_arg = true;
+    }
+    else if (Py_False == arg) {
+        *in_out_arg = false;
+    }
+    else if (PyLong_Check(arg)) {
+        *in_out_arg = PyLong_AsLong(arg) != 0;
+    }
+    else {
+        PyErr_Format(PyExc_ValueError, "%s must be a boolean value [True, False]", name);
+        return false;
+    }
+
+    return true;
+}
+
+bool get_int_arg(PyObject* arg, char const* name, int* in_out_arg)
+{
+    if (!arg || Py_None == arg) {
+
+    }
+    else if (PyLong_Check(arg)) {
+        *in_out_arg = (int)PyLong_AsLong(arg);
+    }
+    else {
+        PyErr_Format(PyExc_ValueError, "%s must be an integer value", name);
+        return false;
+    }
+
+    return true;
+}
+
+bool get_sample_point_arg(PyObject* arg, char const* name, float* in_out_arg)
+{
+    if (!arg || Py_None == arg) {
+
+    }
+    else if (PyFloat_Check(arg)) {
+        float sample_point = (float)PyFloat_AsDouble(arg);
+
+        if (sample_point != sample_point || sample_point <= 0 || sample_point >= 1) {
+            goto error;
+        }
+
+        *in_out_arg = sample_point;
+    }
+    else {
+error:
+        PyErr_Format(PyExc_ValueError, "%s must be in range (0, 1)", name);
+        return false;
+    }
+
+    return true;
+}
+
+bool sc_parse_args(PyObject* args, PyObject* kwargs, sc_config& config)
+{
+    PyObject* py_channel = NULL;
+    PyObject* py_serial = NULL;
+    PyObject* py_fd = NULL;
+    PyObject* py_nbitrate = NULL;
+    PyObject* py_dbitrate = NULL;
+    PyObject* py_nsample_point = NULL;
+    PyObject* py_dsample_point = NULL;
+    PyObject* py_nsjw = NULL;
+    PyObject* py_dsjw = NULL;
+    PyObject* py_receive_own_messages = NULL;
+
+    ZeroMemory(&config.nominal_user_constraints, sizeof(config.nominal_user_constraints));
+    ZeroMemory(&config.data_user_constraints, sizeof(config.data_user_constraints));
+
+    config.nominal_user_constraints.bitrate = 500000;
+    config.nominal_user_constraints.sample_point = 0.8f;
+    config.nominal_user_constraints.sjw = CAN_SJW_TSEG2;
+    config.data_user_constraints.bitrate = 500000;
+    config.data_user_constraints.sample_point = 0.7f;
+    config.data_user_constraints.sjw = CAN_SJW_TSEG2;
+    config.channel_index = -1;
+    config.receive_own_messages = false;
+    config.fdf = false;
+    config.filters = nullptr;
+    
+    const char* serial_ptr = NULL;
+    Py_ssize_t serial_len = 0;
+    char python_converts_strings_to_numbers[16];
+
+    char const * const kwlist[] = {
+        "channel",
+        "filters",
+        "serial",
+        "bitrate",
+        "data_bitrate",
+        "fd",
+        "sample_point",
+        "data_sample_point",
+        "sjw_abr",
+        "sjw_dbr",
+        "receive_own_messages",
+        NULL,
+    };
+
+    if (!PyArg_ParseTupleAndKeywords(
+        args,
+        kwargs,
+        "OO|OOOOOOOOOO",
+        (char**)kwlist,
+        &py_channel,
+        &config.filters,
+        &py_serial,
+        &py_nbitrate,
+        &py_dbitrate,
+        &py_fd,
+        &py_nsample_point,
+        &py_dsample_point,
+        &py_nsjw,
+        &py_dsjw,
+        &py_receive_own_messages
+    )) {
+        return false;
+    }
+
+    if (PyLong_Check(py_channel)) {
+        config.channel_index = (int)PyLong_AsLong(py_channel);
+    } else if (PyUnicode_Check(py_channel)) {
+        Py_ssize_t wlen = 0;
+        wchar_t* wstr = PyUnicode_AsWideCharString(py_channel, &wlen);
+
+        if (wstr) {
+            config.channel_index = (int)wcstol(wstr, NULL, 10);
+            PyMem_Free(wstr);
+        } else {
+            return false;
+        }
+    } else if (Py_None == py_channel) {
+
+    }
+    else {
+        PyErr_SetString(PyExc_ValueError, "channel must be an integer argument or None");
+        return false;
+    }
+
+    if (!py_serial || Py_None == py_serial) {
+
+    }
+    else if (PyLong_Check(py_serial)) {
+        // if we pass serial="123456" we end up here, sigh
+        serial_len = snprintf(python_converts_strings_to_numbers, sizeof(python_converts_strings_to_numbers), "%llu", PyLong_AsUnsignedLongLong(py_serial));
+        serial_ptr = python_converts_strings_to_numbers;
+    }
+    else if (PyUnicode_Check(py_serial)) {
+        serial_ptr = PyUnicode_AsUTF8AndSize(py_serial, &serial_len);
+    }
+    else {
+        PyErr_SetString(PyExc_ValueError, "serial must be a hex string like '92fe20c6'");
+        return false;
+    }
+
+    config.serial.assign(serial_ptr, serial_ptr + serial_len);
+
+    if (!py_nbitrate || Py_None == py_nbitrate) {
+
+    }
+    else if (PyLong_Check(py_nbitrate)) {
+        config.nominal_user_constraints.bitrate = PyLong_AsUnsignedLong(py_nbitrate);
+    }
+    else {
+        PyErr_SetString(PyExc_ValueError, "bitrate must be a positive integer <= 1000000");
+        return false;
+    }
+
+    if (!py_dbitrate || Py_None == py_dbitrate) {
+
+    }
+    else if (PyLong_Check(py_dbitrate)) {
+        config.data_user_constraints.bitrate = PyLong_AsUnsignedLong(py_dbitrate);
+    }
+    else {
+        PyErr_SetString(PyExc_ValueError, "data_bitrate must be a positive integer");
+        return false;
+    }
+    
+    if (!get_int_arg(py_nsjw, "sjw_abr", &config.nominal_user_constraints.sjw)) {
+        return false;
+    }
+
+    if (!get_int_arg(py_dsjw, "sjw_dbr", &config.data_user_constraints.sjw)) {
+        return false;
+    }
+
+    if (!get_bool_arg(py_fd, "fd", &config.fdf)) {
+        return false;
+    }
+
+    if (!get_bool_arg(py_receive_own_messages, "receive_own_messages", &config.receive_own_messages)) {
+        return false;
+    }
+
+    if (!get_sample_point_arg(py_nsample_point, "sample_point", &config.nominal_user_constraints.sample_point)) {
+        return false;
+    }
+
+    if (config.fdf && !get_sample_point_arg(py_dsample_point, "data_sample_point", &config.data_user_constraints.sample_point)) {
+        return false;
+    }
+
+    if (config.nominal_user_constraints.bitrate > 1000000) {
+        PyErr_SetString(PyExc_ValueError, "bitrate must be in range (0-1000000]");
+        return false;
+    }
+
+    if (config.fdf && config.data_user_constraints.bitrate < config.nominal_user_constraints.bitrate) {
+        PyErr_SetString(PyExc_ValueError, "data_bitrate must not be less than bitrate");
+        return false;
+    }
+
+    //{
+    //    PyPtr msg(PyUnicode_FromFormat("asdfasdf"));
+    //    PyPtr args(Py_BuildValue("OO", msg.get(), Py_None));
+    //    //PyPtr kwargs(PyDict_New());
+    //    /* create exception object */
+    //    //PyPtr exc(PyObject_CallObject(can_exceptions_can_initialization_error_type.get(), args.get(), nullptr));
+    //    PyPtr exc(PyObject_Call(can_exceptions_can_initialization_error_type.get(), args.get(), nullptr));
+    //    PyErr_SetObject(exc.get(), msg.get());
+    //}
+
+    return true;
 }
 
 struct filter_spec
@@ -234,10 +487,8 @@ struct sc_exclusive
     uint8_t tx_errors;
     uint64_t rx_lost;
     uint64_t tx_dropped;
-    uint64_t time_since_the_epoch_100ns;
     uint64_t initial_device_time_us;
     uint64_t initial_system_time_100ns;
-    uint64_t system_time_to_epoch_offset_100ns;
     std::deque<PyObject*> rx_queue;
     //std::vector<filter_spec> filters;
 
@@ -270,7 +521,7 @@ struct sc_exclusive
         receive_own_messages = false;
         fdf = false;
         fw_ge_060 = false;
-        time_since_the_epoch_100ns = 0;
+        initial_device_time_us = 0;
         initial_device_time_us = 0;
         bus_status = SC_CAN_STATUS_ERROR_ACTIVE;
         rx_errors = 0;
@@ -289,22 +540,6 @@ struct sc_exclusive
         if (0 == s_exclusive_object_count++) {
             sc_init();
         }
-
-        FILETIME tf_epoch_start;
-        SYSTEMTIME st_epoch_start;
-        st_epoch_start.wYear = 1970;
-        st_epoch_start.wMonth = 1;
-        st_epoch_start.wDay = 1;
-        st_epoch_start.wDayOfWeek = 4;
-        st_epoch_start.wHour = 0;
-        st_epoch_start.wMilliseconds = 0;
-        st_epoch_start.wMinute = 0;
-        st_epoch_start.wSecond = 0;
-        SystemTimeToFileTime(&st_epoch_start, &tf_epoch_start);
-
-        system_time_to_epoch_offset_100ns = tf_epoch_start.dwHighDateTime;
-        system_time_to_epoch_offset_100ns <<= 32;
-        system_time_to_epoch_offset_100ns |= tf_epoch_start.dwLowDateTime;
 
         rx_event = CreateEvent(NULL, TRUE, FALSE, NULL);
     }
@@ -1040,7 +1275,6 @@ PyObject *sc_exclusive_state_get(PyObject* self, void*)
         break;
     case SC_CAN_STATUS_BUS_OFF:
         result = can_bus_state_error.get();
-        PyObject_SetAttrString(self, "state", can_bus_state_error.get());
         break;
     default:
         result = can_bus_state_active.get();
@@ -1106,237 +1340,23 @@ bool sc_exclusive_get_device_info(sc_exclusive* sc, struct sc_msg_dev_info* dev_
     return true;
 }
 
-bool get_bool_arg(PyObject* arg, char const* name, bool* in_out_arg)
-{
-    if (!arg || Py_None == arg) {
-
-    }
-    else if (Py_True == arg) {
-        *in_out_arg = true;
-    }
-    else if (Py_False == arg) {
-        *in_out_arg = false;
-    }
-    else if (PyLong_Check(arg)) {
-        *in_out_arg = PyLong_AsLong(arg) != 0;
-    }
-    else {
-        PyErr_Format(PyExc_ValueError, "%s must be a boolean value [True, False]", name);
-        return false;
-    }
-
-    return true;
-}
-
-bool get_int_arg(PyObject* arg, char const* name, int* in_out_arg)
-{
-    if (!arg || Py_None == arg) {
-
-    }
-    else if (PyLong_Check(arg)) {
-        *in_out_arg = (int)PyLong_AsLong(arg);
-    }
-    else {
-        PyErr_Format(PyExc_ValueError, "%s must be an integer value", name);
-        return false;
-    }
-
-    return true;
-}
-
-bool get_sample_point_arg(PyObject* arg, char const* name, float* in_out_arg)
-{
-    if (!arg || Py_None == arg) {
-
-    }
-    else if (PyFloat_Check(arg)) {
-        float sample_point = (float)PyFloat_AsDouble(arg);
-
-        if (sample_point != sample_point || sample_point <= 0 || sample_point >= 1) {
-            goto error;
-        }
-
-        *in_out_arg = sample_point;
-    }
-    else {
-error:
-        PyErr_Format(PyExc_ValueError, "%s must be in range (0, 1)", name);
-        return false;
-    }
-
-    return true;
-}
 
 int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     sc_exclusive* sc = new ((sc_exclusive *)(((uint8_t*)self) + can_bus_abc_size)) sc_exclusive();
+    sc_config config;
 
-    PyObject* channel_object = NULL;
-    PyObject* filters = NULL;
-    PyObject* py_serial = NULL;
-    PyObject* py_fd = NULL;
-    PyObject* py_nbitrate = NULL;
-    PyObject* py_dbitrate = NULL;
-    PyObject* py_nsample_point = NULL;
-    PyObject* py_dsample_point = NULL;
-    PyObject* py_nsjw = NULL;
-    PyObject* py_dsjw = NULL;
-    PyObject* py_receive_own_messages = NULL;
-    //PyObject* py_shared = NULL;
-    //PyObject* py_init_access = NULL;
-    
-    const char* serial_ptr = NULL;
-    Py_ssize_t serial_len = 0;
-    unsigned long nbitrate = 500000;
-    unsigned long dbitrate = 500000;
-    bool fd = false;
-    float nsample_point = 0.8f;
-    float dsample_point = 0.7f;
-    int nsjw = 1;
-    int dsjw = 1;
-    bool receive_own_messages = false;
-    int channel_index = -1;
-    char python_converts_strings_to_numbers[16];
-
-    char const * const kwlist[] = {
-        "channel",
-        "filters",
-        "serial",
-        "bitrate",
-        "data_bitrate",
-        "fd",
-        "sample_point",
-        "data_sample_point",
-        "sjw_abr",
-        "sjw_dbr",
-        "receive_own_messages",
-        // "shared",
-        // "init_access",
-        NULL,
-    };
-
-    if (!PyArg_ParseTupleAndKeywords(
-        args,
-        kwargs,
-        "OO|OOOOOOOOOO",
-        (char**)kwlist,
-        &channel_object,
-        &filters,
-        &py_serial,
-        &py_nbitrate,
-        &py_dbitrate,
-        &py_fd,
-        &py_nsample_point,
-        &py_dsample_point,
-        &py_nsjw,
-        &py_dsjw,
-        &py_receive_own_messages
-        // &py_shared,
-        // &py_init_access
-    )) {
-        goto cleanup;
-    }
-
-    if (PyLong_Check(channel_object)) {
-        channel_index = (int)PyLong_AsLong(channel_object);
-    } else if (PyUnicode_Check(channel_object)) {
-        Py_ssize_t wlen = 0;
-        wchar_t* wstr = PyUnicode_AsWideCharString(channel_object, &wlen);
-
-        if (wstr) {
-            channel_index = (int)wcstol(wstr, NULL, 10);
-            PyMem_Free(wstr);
-        } else {
-            goto cleanup;
-        }
-    } else if (Py_None == channel_object) {
-
-    }
-    else {
-        PyErr_SetString(PyExc_ValueError, "channel must be an integer argument or None");
-        goto cleanup;
-    }
-
-    if (!py_serial || Py_None == py_serial) {
-
-    }
-    else if (PyLong_Check(py_serial)) {
-        // if we pass serial="123456" we end up here, sigh
-        serial_len = snprintf(python_converts_strings_to_numbers, sizeof(python_converts_strings_to_numbers), "%llu", PyLong_AsUnsignedLongLong(py_serial));
-        serial_ptr = python_converts_strings_to_numbers;
-    }
-    else if (PyUnicode_Check(py_serial)) {
-        serial_ptr = PyUnicode_AsUTF8AndSize(py_serial, &serial_len);
-    }
-    else {
-        PyErr_SetString(PyExc_ValueError, "serial must be a hex string like '92fe20c6'");
-        goto cleanup;
-    }
-
-    if (!py_nbitrate || Py_None == py_nbitrate) {
-
-    }
-    else if (PyLong_Check(py_nbitrate)) {
-        nbitrate = PyLong_AsUnsignedLong(py_nbitrate);
-    }
-    else {
-        PyErr_SetString(PyExc_ValueError, "bitrate must be a positive integer <= 1000000");
-        goto cleanup;
-    }
-
-    if (!py_dbitrate || Py_None == py_dbitrate) {
-
-    }
-    else if (PyLong_Check(py_dbitrate)) {
-        dbitrate = PyLong_AsUnsignedLong(py_dbitrate);
-    }
-    else {
-        PyErr_SetString(PyExc_ValueError, "data_bitrate must be a positive integer");
-        goto cleanup;
-    }
-    
-    if (!get_int_arg(py_nsjw, "sjw_abr", &nsjw)) {
-        goto cleanup;
-    }
-
-    if (!get_int_arg(py_dsjw, "sjw_dbr", &dsjw)) {
-        goto cleanup;
-    }
-
-    if (!get_bool_arg(py_fd, "fd", &fd)) {
-        goto cleanup;
-    }
-
-    if (!get_bool_arg(py_receive_own_messages, "receive_own_messages", &receive_own_messages)) {
-        goto cleanup;
-    }
-
-    if (!get_sample_point_arg(py_nsample_point, "sample_point", &nsample_point)) {
-        goto cleanup;
-    }
-
-    if (fd && !get_sample_point_arg(py_dsample_point, "data_sample_point", &dsample_point)) {
-        goto cleanup;
-    }
-
-    if (nbitrate > 1000000) {
-        PyErr_SetString(PyExc_ValueError, "bitrate must be in range (0-1000000]");
-        goto cleanup;
-    }
-
-    if (fd && dbitrate < nbitrate) {
-        PyErr_SetString(PyExc_ValueError, "data_bitrate must not be less than bitrate");
-        goto cleanup;
+    if (!sc_parse_args(args, kwargs, config)) {
+        return -1;
     }
 
     // ok
     int error;
     uint32_t count;
     uint32_t best_index;
-    sc_version_t version;
+    // sc_version_t version;
     struct can_bit_timing_settings nominal_settings, data_settings;
     struct can_bit_timing_hw_contraints nominal_hw_constraints, data_hw_constraints;
-    can_bit_timing_constraints_real nominal_user_constraints, data_user_constraints;
     struct sc_msg_dev_info dev_info;
     struct sc_msg_can_info can_info;
     char serial_str[1 + sizeof(dev_info.sn_bytes) * 2];
@@ -1348,25 +1368,7 @@ int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
     serial_str[0] = 0;
     name_str[0] = 0;
 
-    memset(&version, 0, sizeof(version));
-    memset(&nominal_user_constraints, 0, sizeof(nominal_user_constraints));
-    memset(&data_user_constraints, 0, sizeof(data_user_constraints));
-
-    nominal_user_constraints.bitrate = nbitrate;
-    nominal_user_constraints.sample_point = nsample_point;
-    if (nsjw <= 0) {
-        nominal_user_constraints.sjw = CAN_SJW_TSEG2;
-    } else {
-        nominal_user_constraints.sjw = nsjw;
-    }
-
-    data_user_constraints.bitrate = fd ? dbitrate : nbitrate;
-    data_user_constraints.sample_point = fd ? dsample_point : nsample_point;
-    if (dsjw <= 0) {
-        data_user_constraints.sjw = CAN_SJW_TSEG2;
-    } else {
-        data_user_constraints.sjw = dsjw;
-    }
+    // memset(&version, 0, sizeof(version));
 
     error = sc_dev_scan();
     if (error) {
@@ -1398,7 +1400,7 @@ int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
             error = sc_cmd_ctx_init(&sc->cmd_ctx, sc->dev);
             if (SC_DLL_ERROR_NONE == error) {
                 close_cmd_ctx = true;
-                if (serial_len) {
+                if (!config.serial.empty()) {
                     if (sc_exclusive_get_device_info(sc, &dev_info)) {
                         //fprintf(stdout, "device features perm=%#04x conf=%#04x\n", dev_info.feat_perm, dev_info.feat_conf);
 
@@ -1413,8 +1415,8 @@ int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
                         //fprintf(stdout, "device identifies as %s, serial no %s, firmware version %u.%u.%u\n",
                         //   name_str, serial_str, dev_info.fw_ver_major, dev_info.fw_ver_minor, dev_info.fw_ver_patch);
 
-                        if (_stricmp(serial_str, serial_ptr) == 0) {
-                            if (channel_index < 0 || channel_index == dev_info.ch_index) {
+                        if (_stricmp(serial_str, config.serial.c_str()) == 0) {
+                            if (config.channel_index < 0 || (unsigned)config.channel_index == dev_info.ch_index) {
                                 best_index = i;
                                 i = count;
                             }
@@ -1439,7 +1441,7 @@ int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
     }
 
     if (count == best_index) {
-        PyPtr msg(PyUnicode_FromFormat("failed to find device matching serial '%s', channel index %d", serial_ptr, channel_index));
+        PyPtr msg(PyUnicode_FromFormat("failed to find device matching serial '%s', channel index %d", config.serial.c_str(), config.channel_index));
         PyErr_SetObject(PyExc_ValueError, msg.get());
 
         goto cleanup;
@@ -1457,7 +1459,7 @@ int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
         goto cleanup;
     }
     // fetch device info (for CAN-FD support)
-    if (fd)
+    if (config.fdf)
     {
         if (!sc_exclusive_get_device_info(sc, &dev_info)) {
             SetCanInitializationError("failed to get device info: %s (%d)\n", sc_strerror(error), error);
@@ -1534,8 +1536,8 @@ int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
         error = cia_fd_cbt_real(
             &nominal_hw_constraints,
             &data_hw_constraints,
-            &nominal_user_constraints,
-            &data_user_constraints,
+            &config.nominal_user_constraints,
+            &config.data_user_constraints,
             &nominal_settings,
             &data_settings);
         switch (error) {
@@ -1572,7 +1574,7 @@ int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
         feat->op = SC_FEAT_OP_OR;
         // try to enable CAN-FD and TXR
         feat->arg = (dev_info.feat_perm | dev_info.feat_conf) &
-            ((fd ? SC_FEATURE_FLAG_FDF : 0) | SC_FEATURE_FLAG_TXR);
+            ((config.fdf ? SC_FEATURE_FLAG_FDF : 0) | SC_FEATURE_FLAG_TXR);
         cmd_tx_ptr += feat->len;
         ++cmd_count;
 
@@ -1589,7 +1591,7 @@ int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
         cmd_tx_ptr += bt->len;
         ++cmd_count;
 
-        if (fd) {
+        if (config.fdf) {
             // CAN-FD capable & configured -> set data bitrate
 
             bt = (struct sc_msg_bittiming*)cmd_tx_ptr;
@@ -1648,20 +1650,20 @@ int sc_exclusive_init(PyObject *self, PyObject *args, PyObject *kwargs)
     }
 
     sc->stream->user_handle = sc->rx_event;
-    sc->receive_own_messages = receive_own_messages != 0;
-    sc->fdf = fd;
+    sc->receive_own_messages = config.receive_own_messages;
+    sc->fdf = config.fdf;
     sc->fw_ge_060 = (
         dev_info.fw_ver_major > 0 ||
         dev_info.fw_ver_minor >= 6);
 
     // set filters on base class
     {
-        PyObject* args[] = { self, filters };
+        PyObject* args[] = { self, config.filters };
         PyPtr set_filters(PyObject_GetAttrString((PyObject*)Py_TYPE(self)->tp_base, "set_filters"));
         PyPtr ret(PyObject_Vectorcall(set_filters.get(), args, _countof(args), NULL));
     }
 
-    if (fd)
+    if (config.fdf)
     {
         PyPtr ev(PyObject_GetAttrString(can_bus_can_protocol_type.get(), "CAN_FD"));
         PyObject_SetAttrString(self, "_can_protocol", ev.get());
@@ -1678,13 +1680,6 @@ cleanup:
     return -1;
 }
 
-struct sc_config
-{
-    can_bit_timing_constraints_real nominal_user_constraints, data_user_constraints;
-    std::string serial;
-    int channel_index;
-    bool fdf;
-};
 
 struct sc_mm_data {
     sc_can_mm_header* hdr;
@@ -1743,7 +1738,7 @@ struct sc_mm_data {
             FALSE,
             y->EventName);
 
-        if (event) {
+        if (!event) {
             auto e = GetLastError();
 
             SetCanInitializationError("OpenEventW failed: %lu\n", e);
@@ -1774,7 +1769,10 @@ struct sc_shared {
     SuperCAN::ISuperCANDevice3Ptr dev;
     sc_mm_data rx;
     sc_mm_data tx;
+    uint64_t initial_device_time_us;
+    uint64_t initial_system_time_100ns;
     uint32_t track_id;
+    uint8_t bus_status;
     bool com_initialized;
     bool dev_initialized;
     bool fdf;
@@ -1799,14 +1797,17 @@ struct sc_shared {
         track_id = 0;
         fdf = false;
         receive_own_messages = false;
+        initial_device_time_us = 0;
+        initial_device_time_us = 0;
+        bus_status = SC_CAN_STATUS_ERROR_ACTIVE;
     }
 
-    bool init(PyObject* args, PyObject* kwargs, sc_config& config)
+    bool init(PyObject* self, PyObject* kwargs, sc_config& config)
     {
-        PyObject* py_init_access = nullptr;
+        PyObject* py_init_access = PyDict_GetItemString(kwargs, "init_access"); // borrowed
         bool init_access = true;
 
-        char const * const kwlist[] = {
+        /*char const * const kwlist[] = {
             "init_access",
             nullptr,
         };
@@ -1814,12 +1815,12 @@ struct sc_shared {
         if (!PyArg_ParseTupleAndKeywords(
             args,
             kwargs,
-            "|O",
+            "|$O",
             (char**)kwlist,
             &py_init_access
         )) {
             return false;
-        }
+        }*/
 
         if (!get_bool_arg(py_init_access, "init_access", &init_access)) {
             return false;
@@ -1862,6 +1863,7 @@ struct sc_shared {
         unsigned long best_index = dev_count;
         SuperCAN::SuperCANDeviceData2 dev_data;
         SuperCAN::SuperCANRingBufferMapping rx_mm_data, tx_mm_data;
+        char serial_str[1 + sizeof(dev_data.sn_bytes) * 2];
 
         ZeroMemory(&dev_data, sizeof(dev_data));
         ZeroMemory(&rx_mm_data, sizeof(rx_mm_data));
@@ -1870,9 +1872,7 @@ struct sc_shared {
         for (unsigned long i = 0; i < best_index; ++i) {
             SuperCAN::ISuperCANDevicePtr device_ptr;
             SuperCAN::ISuperCANDevice3Ptr device_ptr3;
-            
-            char serial_str[_countof(dev_data.sn_bytes)*2+1];
-            
+                       
             hr = sc->DeviceOpen(i, (SuperCAN::ISuperCANDevice**)&device_ptr);
             if (FAILED(hr)) {
                 continue;
@@ -1937,9 +1937,14 @@ struct sc_shared {
             return false;
         }
 
+        std::wstring dev_name = dev_data.name;
+
         SysFreeString(dev_data.name); // free BSTR
         dev_data.name = nullptr;
 
+        for (size_t i = 0; i < std::min((size_t)dev_data.sn_length, _countof(serial_str) - 1); ++i) {
+            snprintf(&serial_str[i * 2], 3, "%02x", dev_data.sn_bytes[i]);
+        }
 
 
         hr = dev->GetRingBufferMappings(&rx_mm_data, &tx_mm_data);
@@ -1949,7 +1954,7 @@ struct sc_shared {
         }
 
         auto rx_map_ok = rx.map(&rx_mm_data);
-        auto tx_map_ok = rx.map(&tx_mm_data);
+        auto tx_map_ok = tx.map(&tx_mm_data);
 
         SysFreeString(tx_mm_data.EventName); // free BSTR
         SysFreeString(tx_mm_data.MemoryName); // free BSTR
@@ -1974,7 +1979,7 @@ struct sc_shared {
     
             hr = dev->AcquireConfigurationAccess(&config_access, &access_timeout_ms);
             if (FAILED(hr)) {
-                SetCanInitializationError("failed acquire config access (hr=%lx)\n", hr);
+                SetCanInitializationError("failed to acquire config access (hr=%lx)\n", hr);
                 return false;
             }
     
@@ -2068,7 +2073,7 @@ struct sc_shared {
                 params.sjw = static_cast<unsigned char>(data_settings.sjw);
                 params.tseg1 = static_cast<unsigned short>(data_settings.tseg1);
                 params.tseg2 = static_cast<unsigned char>(data_settings.tseg2);
-            hr = dev->SetDataBitTiming(params);
+                hr = dev->SetDataBitTiming(params);
                 if (FAILED(hr)) {
                     SetCanInitializationError("failed to set data bit timing (hr=%lx)\n", hr);
                     return false;
@@ -2081,15 +2086,35 @@ struct sc_shared {
                 return false;
             }
     
-    
             hr = dev->SetBus(1);
             if (FAILED(hr)) {
                 SetCanInitializationError("failed to go on bus (hr=%lx)\n", hr);
                 return false;
             }
+
+            dev_initialized = true;
         }
 
         fdf = config.fdf;
+        receive_own_messages = config.receive_own_messages;
+
+        // set filters on base class
+        {
+            PyObject* args[] = { self, config.filters };
+            PyPtr set_filters(PyObject_GetAttrString((PyObject*)Py_TYPE(self)->tp_base, "set_filters"));
+            PyPtr ret(PyObject_Vectorcall(set_filters.get(), args, _countof(args), NULL));
+        }
+
+        if (fdf)
+        {
+            PyPtr ev(PyObject_GetAttrString(can_bus_can_protocol_type.get(), "CAN_FD"));
+            PyObject_SetAttrString(self, "_can_protocol", ev.get());
+        }
+
+        {
+            PyPtr desc(PyUnicode_FromFormat("%ls (%s) CH%u", dev_name.c_str(), serial_str, dev_data.ch_index));
+            PyObject_SetAttrString(self, "channel_info", desc.get());
+        }
       
         return true;
     }
@@ -2107,7 +2132,27 @@ struct sc_shared {
         }
     }
 
-    
+    double track_device_time(uint64_t device_time_us) {
+        uint64_t now_100ns;
+        
+        if (initial_device_time_us == 0) {
+            FILETIME now;
+
+            GetSystemTimeAsFileTime(&now);
+
+            initial_system_time_100ns = now.dwHighDateTime;
+            initial_system_time_100ns <<= 32;
+            initial_system_time_100ns |= now.dwLowDateTime;
+
+            initial_device_time_us = device_time_us;
+        }
+
+        now_100ns = initial_system_time_100ns;
+        now_100ns += (device_time_us - initial_device_time_us) * UINT64_C(10);
+        now_100ns -= system_time_to_epoch_offset_100ns;
+
+        return now_100ns * 1e-7;
+    }
 };
 
 void sc_shared_dealloc(PyObject*self)
@@ -2135,10 +2180,13 @@ PyObject* sc_shared_shutdown(PyObject* self, PyObject* /* args = NULL */)
 int sc_shared_init(PyObject*self, PyObject *args, PyObject *kwargs)
 {
     sc_shared* sc = new ((sc_shared *)(((uint8_t*)self) + can_bus_abc_size)) sc_shared();   
-
     sc_config config;
 
-    return sc->init(args, kwargs, config) ? 0 : -1;
+    if (!sc_parse_args(args, kwargs, config)) {
+        return -1;
+    }
+
+    return sc->init(self, kwargs, config) ? 0 : -1;
 }
 
 PyObject *sc_shared_send(PyObject*self, PyObject *args, PyObject *kwargs)
@@ -2345,13 +2393,16 @@ PyObject *sc_shared__recv_internal(PyObject*self, PyObject *args, PyObject *kwar
         }
 
         if (used) {
+            PyObject* result = nullptr;
+
             for (uint32_t i = 0; i < used; ++i, ++gi) {
-                auto index = gi % sc->rx.elements;
+                auto const index = gi % sc->rx.elements;
                 auto* hdr = &sc->rx.hdr->elements[index].hdr;
     
                 switch (hdr->type) {
                 case SC_MM_DATA_TYPE_CAN_STATUS: {
-                    // auto* status = &sc->rx.hdr->elements[index].status;
+                    auto* status = &sc->rx.hdr->elements[index].status;
+                    sc->bus_status = status->bus_status;
                     
                     // if (!ac->candump && (ac->log_flags & LOG_FLAG_CAN_STATE)) {
                     //     bool log = false;
@@ -2417,15 +2468,20 @@ PyObject *sc_shared__recv_internal(PyObject*self, PyObject *args, PyObject *kwar
                 } break;
                 case SC_MM_DATA_TYPE_CAN_RX: {
                     auto* rx = &sc->rx.hdr->elements[index].rx;
+                    auto timestamp = sc->track_device_time(rx->timestamp_us);
     
-                    return sc_create_can_message(true, 0, rx->can_id, rx->flags, rx->dlc, rx->data);
+                    result = sc_create_can_message(true, timestamp, rx->can_id, rx->flags, rx->dlc, rx->data);
+                    i = used;
                 } break;
                 case SC_MM_DATA_TYPE_CAN_TX: {
                     if (sc->receive_own_messages) {
                         auto* tx = &sc->rx.hdr->elements[index].tx;
-
+                        
                         if (!tx->echo && !(tx->flags & SC_CAN_FRAME_FLAG_DRP)) {
-                            return sc_create_can_message(false, 0, tx->can_id, tx->flags, tx->dlc, tx->data);
+                            auto timestamp = sc->track_device_time(tx->timestamp_us);
+
+                            result = sc_create_can_message(false, timestamp, tx->can_id, tx->flags, tx->dlc, tx->data);
+                            i = used;
                         }
                     }
                 } break;
@@ -2477,6 +2533,10 @@ PyObject *sc_shared__recv_internal(PyObject*self, PyObject *args, PyObject *kwar
             }
 
             sc->rx.hdr->get_index = gi;
+
+            if (result) {
+                return result;
+            }
         } else {
             DWORD wait_result = WAIT_OBJECT_0;
 
@@ -2509,6 +2569,27 @@ PyObject *sc_shared__recv_internal(PyObject*self, PyObject *args, PyObject *kwar
     return ret;
 }
 
+
+PyObject *sc_shared_state_get(PyObject* self, void*)
+{
+    sc_shared* sc = (sc_shared *)(((uint8_t*)self) + can_bus_abc_size);
+    PyObject* result = NULL;
+
+    switch (sc->bus_status) {
+    case SC_CAN_STATUS_ERROR_PASSIVE:
+        result = can_bus_state_passive.get();
+        break;
+    case SC_CAN_STATUS_BUS_OFF:
+        result = can_bus_state_error.get();
+        break;
+    default:
+        result = can_bus_state_active.get();
+        break;
+    }
+
+    return Py_NewRef(result);
+}
+
 PyMethodDef sc_shared_methods[] = {
     {"send", (PyCFunction) sc_shared_send, METH_VARARGS | METH_KEYWORDS, PyDoc_STR("transmit CAN frame")},
     {"_recv_internal", (PyCFunction) sc_shared__recv_internal, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -2517,7 +2598,7 @@ PyMethodDef sc_shared_methods[] = {
 };
 
 PyGetSetDef sc_shared_getset[] = {
-    {"state", sc_exclusive_state_get, NULL, PyDoc_STR("Return the current state of the hardware"), NULL},
+    {"state", sc_shared_state_get, NULL, PyDoc_STR("Return the current state of the hardware"), NULL},
     {NULL, NULL, NULL, NULL, NULL},
 };
 
@@ -2554,6 +2635,23 @@ PyInit_supercan(void)
     if (!QueryPerformanceFrequency((LARGE_INTEGER*)&s_perf_counter_freq)) {
         return NULL;
     }
+
+    // convert timestamps to UNIX epoch
+    FILETIME tf_epoch_start;
+    SYSTEMTIME st_epoch_start;
+    st_epoch_start.wYear = 1970;
+    st_epoch_start.wMonth = 1;
+    st_epoch_start.wDay = 1;
+    st_epoch_start.wDayOfWeek = 4;
+    st_epoch_start.wHour = 0;
+    st_epoch_start.wMilliseconds = 0;
+    st_epoch_start.wMinute = 0;
+    st_epoch_start.wSecond = 0;
+    SystemTimeToFileTime(&st_epoch_start, &tf_epoch_start);
+
+    system_time_to_epoch_offset_100ns = tf_epoch_start.dwHighDateTime;
+    system_time_to_epoch_offset_100ns <<= 32;
+    system_time_to_epoch_offset_100ns |= tf_epoch_start.dwLowDateTime;
 
     // returns new ref
     PyPtr can_module(PyImport_ImportModule("can"));

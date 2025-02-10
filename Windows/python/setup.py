@@ -59,7 +59,8 @@ def main():
         cmdclass={"build_ext": BuildExt},
         entry_points = {
             "can.interface": [
-                "supercan-exclusive = supercan:Exclusive"
+                "supercan-exclusive = supercan:Exclusive",
+                "supercan-shared = supercan:Shared",
             ]
         },
         license="MIT",
