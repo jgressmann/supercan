@@ -39,8 +39,8 @@ REM Store commit
 git rev-parse HEAD >COMMIT
 
 REM Visual Studio Build
-REM msbuild %MSBUILD_OPTIONS% -p:Platform=x86 %SOLUTION% || exit /b !ERRORLEVEL!
-REM msbuild %MSBUILD_OPTIONS% -p:Platform=x64 %SOLUTION% || exit /b !ERRORLEVEL!
+msbuild %MSBUILD_OPTIONS% -p:Platform=x86 %SOLUTION% || exit /b !ERRORLEVEL!
+msbuild %MSBUILD_OPTIONS% -p:Platform=x64 %SOLUTION% || exit /b !ERRORLEVEL!
 
 if "%SC_BUILD_QT_PLUGIN%" NEQ "" (
     if "%SC_BUILD_QT_PLUGIN%" NEQ "0" (
