@@ -4,6 +4,8 @@ from setuptools.command.build_ext import build_ext
 import subprocess
 import sys
 
+
+
 try:
     debug = int(os.environ.get("SUPERCAN_DEBUG", "0")) != 0
 except:
@@ -23,20 +25,34 @@ class BuildExt(build_ext):
 def main():
     global debug
 
-    try:
-        commit = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
-    except:
-        commit = "<unknown>"
+    if not os.path.exists("commit.h"):
+        # source tree 
+        try:
+            commit = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
+        except:
+            commit = "<unknown>"
 
-    try:
-        with open("../dll/commit.h", "x") as f:  # 'x' enables you to place your own file
-            f.write(f"#define SC_COMMIT \"{commit}\"\n")
-    except FileExistsError:
-        pass
+        try:
+            with open("commit.h", "x") as f:  # 'x' enables you to place your own file
+                f.write(f"#define SC_COMMIT \"{commit}\"\n")
+        except FileExistsError:
+            pass
 
     if "--sc-debug-build" in sys.argv:
         debug = True
         sys.argv.remove("--sc-debug-build")
+
+    sources=["module.cpp"]
+    include_dirs=["../inc"]
+
+    # running from source or installer tree?
+    if os.path.exists("supercan_dll.c"):
+        # installer tree
+        sources.extend(["supercan_dll.c", "../src/can_bit_timing.c"])
+        include_dirs.extend(["../src"])
+    else:
+        sources.extend(["../dll/supercan_dll.c", "../../src/can_bit_timing.c"])
+        include_dirs.extend(["../../src"])
 
     setup(
         name="python-can-supercan",
@@ -49,8 +65,8 @@ def main():
         ext_modules=[
             Extension(
                 name="supercan",
-                sources=["module.cpp", "../dll/supercan_dll.c", "../../src/can_bit_timing.c"],
-                include_dirs=["../inc", "../../src"],
+                sources=sources,
+                include_dirs=include_dirs,
                 define_macros=[("SC_STATIC", "1")],
                 undef_macros=["NDEBUG"] if debug else [],
                 libraries=["winusb", "Cfgmgr32", "Ole32"],

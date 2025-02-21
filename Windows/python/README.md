@@ -19,9 +19,11 @@ Open a native command prompt.
 
 ### Common Steps
 
-1. Navigate to this directory
+1. Copy the content of the `SuperCAN` directory to a writable location.
 
-2. Run
+2. Navigate to this directory
+
+3. Run
 
     ```console
     python -m pip install .

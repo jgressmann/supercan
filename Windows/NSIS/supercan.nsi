@@ -35,7 +35,7 @@
 
 !define INSTALLER_MAJOR 1
 !define INSTALLER_MINOR 1
-!define INSTALLER_PATCH 0
+!define INSTALLER_PATCH 1
 !define INSTALLER_BUILD ${SC_VERSION_BUILD}
 
 
@@ -258,6 +258,14 @@ Section /o "$(sec_dev_name)" sec_dev
 	File ..\..\src\supercan_misc.h
 	File ..\..\src\can_bit_timing.*
 
+	SetOutPath "$INSTDIR\python"
+	File ..\dll\supercan_dll.c
+	File ..\dll\commit.h
+	File ..\python\supercan_srv.tlh.h
+	File ..\python\module.cpp
+	File ..\python\README.md
+	File ..\python\setup.py
+
 SectionEnd
 
 Section /o "$(sec_dbg_name)" sec_dbg
@@ -299,6 +307,7 @@ Section "Uninstall"
 	RMDir /r "$INSTDIR\lib"
 	RMDir /r "$INSTDIR\src"
 	RMDir /r "$INSTDIR\pdb"
+	RMDir /r "$INSTDIR\python"
 
 	RMDir "$INSTDIR"
 
