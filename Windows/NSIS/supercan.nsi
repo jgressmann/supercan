@@ -260,7 +260,7 @@ Section /o "$(sec_dev_name)" sec_dev
 
 	SetOutPath "$INSTDIR\python"
 	File ..\dll\supercan_dll.c
-	File ..\x64\Release\commit.h
+	File ..\python\commit.h
 	File ..\python\supercan_srv.tlh.h
 	File ..\python\module.cpp
 	File ..\python\README.md
