@@ -39,19 +39,21 @@ REM Store commit
 git rev-parse HEAD >COMMIT
 
 REM Visual Studio Build
-msbuild %MSBUILD_OPTIONS% -p:Platform=x86 %SOLUTION% || exit /b !ERRORLEVEL!
-msbuild %MSBUILD_OPTIONS% -p:Platform=x64 %SOLUTION% || exit /b !ERRORLEVEL!
+REM msbuild %MSBUILD_OPTIONS% -p:Platform=x86 %SOLUTION% || exit /b !ERRORLEVEL!
+REM msbuild %MSBUILD_OPTIONS% -p:Platform=x64 %SOLUTION% || exit /b !ERRORLEVEL!
 
-if "%SC_BUILD_QT_PLUGIN%" NEQ "0" (
-    REM Qt Build
-    mkdir qt\32
-    cd qt\32
-    (call "%VCVARS32%" x86 && "%QT_BASE_DIR32%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler" && nmake qmake_all && nmake) || exit /b !ERRORLEVEL!
-    cd ..\..
-    mkdir qt\64
-    cd qt\64
-    (call "%VCVARS64%" x64 && "%QT_BASE_DIR64%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler" && nmake qmake_all && nmake) || exit /b !ERRORLEVEL!
-    cd ..\..
+if "%SC_BUILD_QT_PLUGIN%" NEQ "" (
+    if "%SC_BUILD_QT_PLUGIN%" NEQ "0" (
+        REM Qt Build
+        mkdir qt\32
+        cd qt\32
+        (call "%VCVARS32%" x86 && "%QT_BASE_DIR32%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler" && nmake qmake_all && nmake) || exit /b !ERRORLEVEL!
+        cd ..\..
+        mkdir qt\64
+        cd qt\64
+        (call "%VCVARS64%" x64 && "%QT_BASE_DIR64%\bin\qmake.exe" ..\..\Windows\qtsupercanbus\supercan.pro -spec win32-msvc "CONFIG+=qtquickcompiler" && nmake qmake_all && nmake) || exit /b !ERRORLEVEL!
+        cd ..\..
+    )
 )
 
 REM package
@@ -84,10 +86,9 @@ xcopy /y /f Windows\x64\Release\supercan64.pdb pdb\x64\
 xcopy /y /f Windows\Win32\Release\supercan_srv32.pdb pdb\x86\
 xcopy /y /f Windows\x64\Release\supercan_srv64.pdb pdb\x64\
 xcopy /y /f /s Windows\python python\
-pushd python
-..\Windows\commit.cmd >commit.h
-popd
 xcopy /y /f Windows\dll\supercan_dll.c python\
+FOR /F "delims=" %%i IN ('git rev-parse --short HEAD') DO echo #define SC_COMMIT "%%i" >python\commit.h
+
 (7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src pdb python LICENSE COMMIT) || exit /b !ERRORLEVEL!
 REM installer
 (call "%VCVARS64%" x64 && makensis !NSIS_SC_VERSION_ARGS! Windows\NSIS\supercan.nsi) || exit /b !ERRORLEVEL!
