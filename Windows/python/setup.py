@@ -59,6 +59,7 @@ def main():
         cmdclass={"build_ext": BuildExt},
         entry_points = {
             "can.interface": [
+                "supercan = supercan:Bus",
                 "supercan-exclusive = supercan:Exclusive",
                 "supercan-shared = supercan:Shared",
             ]

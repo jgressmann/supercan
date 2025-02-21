@@ -106,6 +106,7 @@ PyPtr can_message_type;
 PyPtr can_can_operation_error;
 PyPtr sc_exclusive_type;
 PyPtr sc_shared_type;
+PyPtr sc_bus_type;
 PyPtr can_bus_state_type;
 PyPtr can_bus_can_protocol_type;
 size_t can_bus_abc_size;
@@ -450,16 +451,6 @@ bool sc_parse_args(PyObject* args, PyObject* kwargs, sc_config& config)
         return false;
     }
 
-    //{
-    //    PyPtr msg(PyUnicode_FromFormat("asdfasdf"));
-    //    PyPtr args(Py_BuildValue("OO", msg.get(), Py_None));
-    //    //PyPtr kwargs(PyDict_New());
-    //    /* create exception object */
-    //    //PyPtr exc(PyObject_CallObject(can_exceptions_can_initialization_error_type.get(), args.get(), nullptr));
-    //    PyPtr exc(PyObject_Call(can_exceptions_can_initialization_error_type.get(), args.get(), nullptr));
-    //    PyErr_SetObject(exc.get(), msg.get());
-    //}
-
     return true;
 }
 
@@ -491,14 +482,6 @@ bool sc_to_timeout(PyObject* timeout, DWORD* out_timeout_ms)
 
     return true;
 }
-
-struct filter_spec
-{
-    uint32_t can_id;
-    uint32_t mask;
-    uint32_t extended;
-};
-
 
 class sc_base 
 {
@@ -538,7 +521,6 @@ struct sc_exclusive : public sc_base
     uint64_t initial_device_time_us;
     uint64_t initial_system_time_100ns;
     std::deque<PyObject*> rx_queue;
-    //std::vector<filter_spec> filters;
 
     ~sc_exclusive()
     {
@@ -1507,15 +1489,14 @@ struct sc_exclusive : public sc_base
                 }
 
                 if (!rx_queue.empty()) {
+                    PyObject* ret = PyTuple_New(2);
                     PyObject* o = rx_queue.front();
 
                     rx_queue.pop_front();
-
-                    assert(o);
-
-                    PyObject* ret = PyTuple_New(2);
+                    
                     PyTuple_SET_ITEM(ret, 0, o);
                     PyTuple_SET_ITEM(ret, 1, Py_NewRef(Py_False));
+
                     return ret;
                 }
             }
@@ -1722,7 +1703,12 @@ PyGetSetDef sc_exclusive_getset[] = {
 };
 
 PyType_Slot sc_exclusive_type_spec_slots[] = {
-    { Py_tp_doc, (void*)"SuperCAN exclusive channel access" },
+    { Py_tp_doc, (void*)
+        "SuperCAN device exclusive CAN bus access\n" 
+        "\n"
+        "For parameter description, see :class: supercan.Bus"
+        "\n"
+    },
     { Py_tp_init, (void*)&sc_exclusive_init },
     { Py_tp_dealloc, (void*)&sc_exclusive_dealloc },
     { Py_tp_methods, sc_exclusive_methods },
@@ -2698,7 +2684,12 @@ PyGetSetDef sc_shared_getset[] = {
 };
 
 PyType_Slot sc_shared_type_spec_slots[] = {
-    { Py_tp_doc, (void*)"SuperCAN shared channel access" },
+    { Py_tp_doc, (void*)
+        "SuperCAN device shared CAN bus access\n" 
+        "\n"
+        "For parameter description, see :class: supercan.Bus"
+        "\n"
+    },
     { Py_tp_init, (void*)&sc_shared_init },
     { Py_tp_dealloc, (void*)&sc_shared_dealloc },
     { Py_tp_methods, sc_shared_methods },
@@ -2924,7 +2915,32 @@ PyGetSetDef sc_bus_getset[] = {
 };
 
 PyType_Slot sc_bus_type_spec_slots[] = {
-    { Py_tp_doc, (void*)"SuperCAN channel access" },
+    { Py_tp_doc, (void*)
+        "SuperCAN device CAN bus access\n"
+        "\n"
+        "SuperCAN device channels can be accessed in _exclusive_ or _shared_ mode.\n"
+        "Exclusive mode gives your application exclusive access over the chosen CAN bus channel. No one else can send or receive on that channel.\n"
+        "On the other hand shared access allows multiple applications to concurrently make use of a CAN bus channel. This can be useful for channel monitoring or to simulate multiple bus participants. Only one application can initialize the bus, however. That application needs to request `init_access`.\n"
+        "\n"
+        "Common keyword parameters:\n"
+        ":param int channel: Channel index, optional, defaults to 0\n" 
+        ":param filters: CAN frame filters, optional, defaults to None\n"
+        ":param str serial: Device serial number hex string, defaults to the empty string which means the first device found is used\n"
+        ":param int bitrate: Arbitration bitrate\n"
+        ":param int data_bitrate: CAN-FD data bitrate\n"
+        ":param bool fd: Request CAN-FD mode\n"
+        ":param float sample_point: Sample point during arbitration, defaults to 0.8\n"
+        ":param float data_sample_point: Sample point during CAN-FD data phase, defaults to 0.7\n"
+        ":param int sjw_abr: SJW during arbitration, optional\n"
+        ":param int sjw_dbr: SJW during CAN-FD data phase, optional\n"
+        ":param bool receive_own_messages: Echo back messages transmitted by this instance on receive path, defaults to False\n"
+        "\n"
+        "Shared keyword parameters:\n"
+        ":param bool init_access: Shared bus instances only, request to initialize the bus, else assume the bus is already initialized.\n"
+        "\n"
+        "Bus keyword parameters:\n"
+        ":param shared: Request shared (True) or exclusive (False) bus instance. If this keyword parameter is omitted, a shared instance will be created if 1. COM is available and 2. the COM server has been registered. Otherwise an exclusive instance will be created.\n"
+    },
     { Py_tp_init, (void*)&sc_bus_init },
     { Py_tp_dealloc, (void*)&sc_bus_dealloc },
     { Py_tp_methods, sc_bus_methods },
@@ -2937,10 +2953,8 @@ PyType_Spec sc_bus_type_spec = {
     .basicsize = -(int)sizeof(sc_bus),
     .itemsize = 0,
     .flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_IMMUTABLETYPE,
-    .slots = sc_shared_type_spec_slots,
+    .slots = sc_bus_type_spec_slots,
 };
-
-
 
 PyModuleDef module_definition = {
     .m_base = PyModuleDef_HEAD_INIT,
@@ -3100,19 +3114,19 @@ PyInit_supercan(void)
         return nullptr;
     }
 
-    // sc_bus_type.reset(PyType_FromSpecWithBases(&sc_bus_type_spec, bus_abc_type.get()));
+    sc_bus_type.reset(PyType_FromSpecWithBases(&sc_bus_type_spec, bus_abc_type.get()));
 
-    // if (!sc_shared_type) {
-    //     return nullptr;
-    // }
+    if (!sc_bus_type) {
+        return nullptr;
+    }
 
-    // if (PyType_Ready((PyTypeObject*)sc_bus_type.get()) < 0) {
-    //     return nullptr;
-    // }
+    if (PyType_Ready((PyTypeObject*)sc_bus_type.get()) < 0) {
+        return nullptr;
+    }
 
-    // if (PyModule_AddObjectRef(module.get(), "Bus", sc_type.get()) < 0) {
-    //     return nullptr;
-    // }
+    if (PyModule_AddObjectRef(module.get(), "Bus", sc_bus_type.get()) < 0) {
+        return nullptr;
+    }
 
     return module.release();
 }
