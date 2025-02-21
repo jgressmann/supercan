@@ -89,7 +89,7 @@ jobs:
   build-firmware:
     outputs:
       hashes: ${{ steps.hash.outputs.hashes }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     env:
       DEBIAN_FRONTEND: noninteractive
       ARTIFACT_FIRMWARE: supercan-firmware.tar.xz
