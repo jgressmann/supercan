@@ -1376,7 +1376,7 @@ struct sc_exclusive : public sc_base
             }
         }
 
-        tx->id = fw_ge_060 ? 0x25 : SC_MSG_CAN_TX;
+        tx->id = fw_ge_060 ? SC_MSG_CAN_TX4 : SC_MSG_CAN_TX;
         tx->len = (uint8_t)(sizeof(*tx) + data_len + extra_len);
 
         // align
