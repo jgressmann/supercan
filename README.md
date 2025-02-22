@@ -42,6 +42,10 @@ Build the Visual Studio solution in the Windows folder. I use Visual Studio Comm
 
 The solution contains code for a demo application that sends and dumps CAN traffic.
 
+### Python
+
+A [python-can](https://python-can.readthedocs.io/en/stable/) plugin is available. See [here](Windows/python/README.md) for details.
+
 ## Linux SocketCAN driver
 
 To build the Linux kernel module, please follow [these instructions](https://github.com/jgressmann/supercan-linux).
