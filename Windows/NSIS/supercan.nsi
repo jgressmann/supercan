@@ -35,7 +35,7 @@
 
 !define INSTALLER_MAJOR 1
 !define INSTALLER_MINOR 1
-!define INSTALLER_PATCH 1
+!define INSTALLER_PATCH 2
 !define INSTALLER_BUILD ${SC_VERSION_BUILD}
 
 
@@ -191,6 +191,8 @@ InstType "$(it_max)" it_max
 		DetailPrint $2
 		${If} $0 == 3010 ; restart required
 			IntOp $Reboot $Reboot | 1
+		${ElseIf} $0 == 1638 ; newer version already installed
+			Nop
 		${Else}
 			MessageBox MB_ICONQUESTION|MB_YESNO "$(mb_query_continue_after_vc_redist_failed)" /SD IDNO IDYES next_${arch} ;IDNO exit_abort_${arch}
 ;exit_abort_${arch}:
