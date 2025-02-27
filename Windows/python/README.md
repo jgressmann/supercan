@@ -1,4 +1,4 @@
-# SuperCAN plugin for python-can
+# SuperCAN plugin for [python-can](https://python-can.readthedocs.io/en/stable/)
 
 This plugin is required on Windows to get access to SuperCAN devices from Python. On Linux, simply use `can.Bus(interface='socketcan', ...)`.
 
@@ -15,7 +15,7 @@ Open a native command prompt.
 
     ```sh
     pacman -S mingw-w64-x86_64-toolchain mingw64/mingw-w64-x86_64-python-pip
-    ``` 
+    ```
 
 ### Common Steps
 
@@ -33,6 +33,7 @@ Open a native command prompt.
 
 1. Ensure your device is upgraded to firmware version 0.6.0 or better.
 2. Optionally, register the COM server (`supercan_srv64.exe`) for shared channel access. If you used the installer, this step is already done. Otherwise, from an _admin_ console, run
+
      ```console
     supercan_srv64.exe /RegServer
     ```
