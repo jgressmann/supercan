@@ -3,7 +3,11 @@ SET
 
 REM Try to set version string from AppVeyor, Github Action
 if "%GITHUB_ACTION%" NEQ "" (
-    set VERSION_STR=!GITHUB_REF_NAME:~1!.%GITHUB_RUN_NUMBER%
+    if "%GITHUB_REF_TYPE%" EQU "tag" (
+        set VERSION_STR=!GITHUB_REF_NAME:~1!.%GITHUB_RUN_NUMBER%
+    ) else (
+        set VERSION_STR=0.0.0.0
+    )
 ) else if "%APPVEYOR_REPO_TAG%" EQU "true" (
     set VERSION_STR=!APPVEYOR_REPO_TAG_NAME:~1!.%APPVEYOR_BUILD_NUMBER%
 ) else (
