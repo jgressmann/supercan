@@ -544,7 +544,7 @@ function one_each()
 
 	echo INFO[$setting_name]: Sending CAN frames and expect error indicating no one else is on the bus | tee -a "$meta_log_path"
 	# generate some frames to exceed queue capacity
-	cangen $can_test -b -n 100 >$no_tx_ack_log_cangen_path 2>&1 || true
+	cangen $can_test -n 100 >$no_tx_ack_log_cangen_path 2>&1 || true
 
 	# should fail with "write: No buffer space available"
 	local exhausted_send_queue=`grep "write: No buffer space available" $no_tx_ack_log_cangen_path`
