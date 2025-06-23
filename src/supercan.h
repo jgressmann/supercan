@@ -94,7 +94,7 @@ extern "C" {
 #define SC_MSG_CAN_TX           0x22    ///< Host -> Device. Send CAN frame.
 #define SC_MSG_CAN_TXR          0x23    ///< Device -> Host. CAN frame transmission receipt.
 #define SC_MSG_CAN_ERROR        0x24    ///< Device -> Host. CAN frame error.
-#define SC_MSG_CAN_TX4          0x25    ///< Host -> Host. Send 4 byte aligned CAN frame (since fw 0.6.0).
+#define SC_MSG_CAN_TX4          0x25    ///< Host -> Device. Send 4 byte aligned CAN frame (since fw 0.6.0).
 
 
 #define SC_MSG_USER_OFFSET      0x80    ///< Custom device messages
