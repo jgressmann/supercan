@@ -95,5 +95,8 @@ xcopy /y /f Windows\dll\supercan_dll.c python\
 
 (7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src pdb python LICENSE COMMIT) || exit /b !ERRORLEVEL!
 REM installer
-(call "%VCVARS64%" x64 && set && makensis !NSIS_SC_VERSION_ARGS! Windows\NSIS\supercan.nsi) || exit /b !ERRORLEVEL!
-move Windows\NSIS\supercan_inst.exe .
+set
+call "%VCVARS64%"
+set
+REM (call "%VCVARS64%" x64 && set && makensis !NSIS_SC_VERSION_ARGS! Windows\NSIS\supercan.nsi) || exit /b !ERRORLEVEL!
+REM move Windows\NSIS\supercan_inst.exe .
