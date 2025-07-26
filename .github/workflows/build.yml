@@ -43,7 +43,7 @@ jobs:
   build-win:
     outputs:
       hashes: ${{ steps.hash.outputs.hashes }}
-    runs-on: windows-2022
+    runs-on: windows-2025
     env:
       SOLUTION: Windows\supercan.sln
       MSBUILD_OPTIONS: -noLogo -m -t:Build -p:Configuration=Release
