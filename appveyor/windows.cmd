@@ -100,6 +100,7 @@ echo calling VCVARS64 x64
 call "%VCVARS64%" x64
 set
 where makensis
+set VCINSTALLDIR=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\
 makensis !NSIS_SC_VERSION_ARGS! Windows\NSIS\supercan.nsi
 REM (call "%VCVARS64%" x64 && set && makensis !NSIS_SC_VERSION_ARGS! Windows\NSIS\supercan.nsi) || exit /b !ERRORLEVEL!
 REM move Windows\NSIS\supercan_inst.exe .
