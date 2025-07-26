@@ -43,8 +43,8 @@ REM Store commit
 git rev-parse HEAD >COMMIT
 
 REM Visual Studio Build
-msbuild %MSBUILD_OPTIONS% -p:Platform=x86 %SOLUTION% || exit /b !ERRORLEVEL!
-msbuild %MSBUILD_OPTIONS% -p:Platform=x64 %SOLUTION% || exit /b !ERRORLEVEL!
+REM msbuild %MSBUILD_OPTIONS% -p:Platform=x86 %SOLUTION% || exit /b !ERRORLEVEL!
+REM msbuild %MSBUILD_OPTIONS% -p:Platform=x64 %SOLUTION% || exit /b !ERRORLEVEL!
 
 if "%SC_BUILD_QT_PLUGIN%" NEQ "" (
     if "%SC_BUILD_QT_PLUGIN%" NEQ "0" (
@@ -95,5 +95,5 @@ xcopy /y /f Windows\dll\supercan_dll.c python\
 
 (7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on supercan-win.7z bin lib inc src pdb python LICENSE COMMIT) || exit /b !ERRORLEVEL!
 REM installer
-(call "%VCVARS64%" x64 && makensis !NSIS_SC_VERSION_ARGS! Windows\NSIS\supercan.nsi) || exit /b !ERRORLEVEL!
+(call "%VCVARS64%" x64 && set && makensis !NSIS_SC_VERSION_ARGS! Windows\NSIS\supercan.nsi) || exit /b !ERRORLEVEL!
 move Windows\NSIS\supercan_inst.exe .
