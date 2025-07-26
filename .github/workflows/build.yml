@@ -48,9 +48,8 @@ jobs:
       SOLUTION: Windows\supercan.sln
       MSBUILD_OPTIONS: -noLogo -m -t:Build -p:Configuration=Release
       ResourcesExtraDefines: SC_BUILD_NUMBER=$(GITHUB_RUN_NUMBER)
-      # VCVARS32: C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat
-      # VCVARS64: C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat
-      VCINSTALLDIR: C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\
+      VCVARS32: C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat
+      VCVARS64: C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat
       SC_BUILD_QT_PLUGIN: 0
       ARTIFACT_7z: supercan-win.7z
       ARTIFACT_INSTALLER: supercan_inst.exe

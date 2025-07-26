@@ -176,12 +176,9 @@ LangString mb_install_requires_reboot ${LANG_GERMAN} "${SC_NAME} installiert.$\n
 InstType "$(it_min)" it_min
 InstType "$(it_max)" it_max
 
-; VS2022 %VCINSTALLDIR%Redist\MSVC\v143
-
-
 !define VcRuntimeInstall "!insertmacro _VcRuntimeInstall"
 !macro _VcRuntimeInstall arch
-	File "$%VCINSTALLDIR%Redist\MSVC\v143\vc_redist.${arch}.exe"
+	File "$%VCToolsRedistDir%\vc_redist.${arch}.exe"
 
 	StrCpy $1 "$\"$TEMP\vc_redist.${arch}.exe$\" /install /passive /norestart"
 	IfSilent +1 +2
