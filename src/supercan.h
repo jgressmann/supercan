@@ -304,7 +304,7 @@ struct sc_msg_can_rx {
     uint8_t flags;
     uint32_t can_id;
     uint32_t timestamp_us;
-    uint8_t data[0];
+    uint8_t data[];
 } SC_PACKED;
 
 struct sc_msg_can_tx {
@@ -314,7 +314,7 @@ struct sc_msg_can_tx {
     uint8_t flags;
     uint32_t can_id;
     uint8_t track_id;
-    uint8_t data[0];
+    uint8_t data[];
 } SC_PACKED;
 
 struct sc_msg_can_tx4 {
@@ -325,7 +325,7 @@ struct sc_msg_can_tx4 {
     uint32_t can_id;
     uint8_t track_id;
     uint8_t reserved[3];
-    uint8_t data[0];
+    uint8_t data[];
 } SC_PACKED;
 
 struct sc_msg_can_txr {
@@ -337,7 +337,7 @@ struct sc_msg_can_txr {
 } SC_PACKED;
 
 enum {
-    sc_static_assert_sizeof_sc_msg_header_is_2 = sizeof(int[sizeof(struct sc_msg_header)  == 2 ? 1 : -1]),
+    sc_static_assert_sizeof_sc_msg_header_is_2 = sizeof(int[sizeof(struct sc_msg_header) == 2 ? 1 : -1]),
     sc_static_assert_sc_msg_req_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_req) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_error_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_error) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_hello_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_hello) & 0x3) == 0 ? 1 : -1]),
@@ -350,6 +350,7 @@ enum {
     sc_static_assert_sc_msg_can_status_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_status) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_can_error_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_error) & 0x3) == 0 ? 1 : -1]),
     sc_static_assert_sc_msg_can_tx4_is_a_multiple_of_4 = sizeof(int[(sizeof(struct sc_msg_can_tx4) & 0x3) == 0 ? 1 : -1]),
+    sc_static_assert_sc_msg_can_tx4_size_is_12 = sizeof(int[sizeof(struct sc_msg_can_tx4) == 12 ? 1 : -1]),
 };
 
 #ifdef __cplusplus
