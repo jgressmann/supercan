@@ -48,8 +48,9 @@ jobs:
       SOLUTION: Windows\supercan.sln
       MSBUILD_OPTIONS: -noLogo -m -t:Build -p:Configuration=Release
       ResourcesExtraDefines: SC_BUILD_NUMBER=$(GITHUB_RUN_NUMBER)
-      VCVARS32: C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat
-      VCVARS64: C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat
+      # VCVARS32: C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat
+      # VCVARS64: C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat
+      VCINSTALLDIR: C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\
       SC_BUILD_QT_PLUGIN: 0
       ARTIFACT_7z: supercan-win.7z
       ARTIFACT_INSTALLER: supercan_inst.exe
@@ -57,32 +58,32 @@ jobs:
 
     steps:
       # Fixup broken VS2022 install, see https://github.com/actions/runner-images/issues/9873
-      # - name: Delete components
-      #   run: |
-      #           Set-Location "C:\Program Files (x86)\Microsoft Visual Studio\Installer\"
-      #           $InstallPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
-      #           $componentsToRemove= @(
-      #               "Microsoft.VisualStudio.Component.VC.ATL"
-      #           )
-      #           [string]$workloadArgs = $componentsToRemove | ForEach-Object {" --remove " +  $_}
-      #           $Arguments = ('/c', "vs_installer.exe", 'modify', '--installPath', "`"$InstallPath`"",$workloadArgs, '--quiet', '--norestart', '--nocache')
-      #           # should be run twice
-      #           $process = Start-Process -FilePath cmd.exe -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden
-      #           $process = Start-Process -FilePath cmd.exe -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden
+      - name: Delete components
+        run: |
+                Set-Location "C:\Program Files (x86)\Microsoft Visual Studio\Installer\"
+                $InstallPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
+                $componentsToRemove= @(
+                    "Microsoft.VisualStudio.Component.VC.ATL"
+                )
+                [string]$workloadArgs = $componentsToRemove | ForEach-Object {" --remove " +  $_}
+                $Arguments = ('/c', "vs_installer.exe", 'modify', '--installPath', "`"$InstallPath`"",$workloadArgs, '--quiet', '--norestart', '--nocache')
+                # should be run twice
+                $process = Start-Process -FilePath cmd.exe -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden
+                $process = Start-Process -FilePath cmd.exe -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden
 
-      # - name: Install components
-      #   run: |
-      #           Set-Location "C:\Program Files (x86)\Microsoft Visual Studio\Installer\"
-      #           $InstallPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
-      #           $componentsToRemove= @(
-      #             "Microsoft.VisualStudio.Component.VC.v141.ATL"
-      #             "Microsoft.VisualStudio.Component.VC.14.29.16.11.ATL"
-      #           )
-      #           [string]$workloadArgs = $componentsToRemove | ForEach-Object {" --add " +  $_}
-      #           $Arguments = ('/c', "vs_installer.exe", 'modify', '--installPath', "`"$InstallPath`"",$workloadArgs, '--quiet', '--norestart', '--nocache')
-      #           # should be run twice
-      #           $process = Start-Process -FilePath cmd.exe -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden
-      #           $process = Start-Process -FilePath cmd.exe -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden
+      - name: Install components
+        run: |
+                Set-Location "C:\Program Files (x86)\Microsoft Visual Studio\Installer\"
+                $InstallPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
+                $componentsToRemove= @(
+                  "Microsoft.VisualStudio.Component.VC.v141.ATL"
+                  "Microsoft.VisualStudio.Component.VC.14.29.16.11.ATL"
+                )
+                [string]$workloadArgs = $componentsToRemove | ForEach-Object {" --add " +  $_}
+                $Arguments = ('/c', "vs_installer.exe", 'modify', '--installPath', "`"$InstallPath`"",$workloadArgs, '--quiet', '--norestart', '--nocache')
+                # should be run twice
+                $process = Start-Process -FilePath cmd.exe -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden
+                $process = Start-Process -FilePath cmd.exe -ArgumentList $Arguments -Wait -PassThru -WindowStyle Hidden
 
 
       - uses: actions/checkout@v4
