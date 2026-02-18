@@ -2089,6 +2089,7 @@ void ScDev::TxMain()
 	uint32_t aligned_sc_msg_can_tx_buffer[25];
 	sc_msg_can_tx* tx = reinterpret_cast<sc_msg_can_tx*>(aligned_sc_msg_can_tx_buffer);
 	uint8_t* sc_msg_can_tx_data;
+	uint8_t sc_msg_can_tx_len;
 	sc_com_dev_index_t live_com_dev_buffer[MAX_COM_DEVICES_PER_SC_DEVICE];
 	sc_com_dev_index_t live_com_dev_count = 0;
 	auto stream_error = false;
@@ -2096,10 +2097,12 @@ void ScDev::TxMain()
 	if (dev_info.fw_ver_major > 1 || dev_info.fw_ver_minor >= 6) {
 		tx->id = SC_MSG_CAN_TX4;
 		sc_msg_can_tx_data = &tx->data[3];
+		sc_msg_can_tx_len = sizeof(sc_msg_can_tx4);
 	}
 	else {
 		tx->id = SC_MSG_CAN_TX;
 		sc_msg_can_tx_data = tx->data;
+		sc_msg_can_tx_len = sizeof(sc_msg_can_tx);
 	}
 
 	assert(m_TxThreadNotificationEvent);
@@ -2229,7 +2232,7 @@ void ScDev::TxMain()
 						// wait with a timeout to prevent spinning
 						r = WaitForSingleObject(m_TxFifoAvailable, 1);
 						if (WAIT_OBJECT_0 == r) {
-							uint16_t len = sizeof(*tx);
+							uint16_t len = sc_msg_can_tx_len;
 							uint8_t const dlc = slot->tx.dlc & 0xf;
 							uint8_t const data_len = dlc_to_len(dlc);
 
