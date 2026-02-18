@@ -35,7 +35,7 @@
 
 #define SC_SRV_VERSION_MAJOR 0
 #define SC_SRV_VERSION_MINOR 6
-#define SC_SRV_VERSION_PATCH 2
+#define SC_SRV_VERSION_PATCH 3
 
 #ifdef __cplusplus
 extern "C" {
