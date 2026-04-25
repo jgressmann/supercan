@@ -22,8 +22,10 @@ struct ISuperCANDevice;
 // SC_UUID(ISuperCANDevice, "434a1140-50d8-4c49-ab8f-9fd1a7327ce0");
 struct ISuperCANDevice2;
 // SC_UUID(ISuperCANDevice2, "4cf5e694-1111-4719-b6cb-a9b88985e97a");
-struct ISuperCANDevice2;
+struct ISuperCANDevice3;
 // SC_UUID(ISuperCANDevice3, "fa2faa9d-960d-49bf-8261-1f07bd0c9d69");
+struct ISuperCANDevice4;
+// SC_UUID(ISuperCANDevice4, "5e817090-e1f4-4c64-aeff-88221887d272");
 struct ISuperCAN;
 // SC_UUID(ISuperCAN, "8f8c4375-2dfe-4335-8947-036f965bd927");
 struct ISuperCAN2;
@@ -37,7 +39,7 @@ struct /* coclass */ CSuperCAN;
 // Type library items
 //
 
-#pragma pack(push, 4)
+#pragma pack(push, 8)
 
 struct SuperCANRingBufferMapping
 {
@@ -61,7 +63,7 @@ struct SuperCANBitTimingParams
 
 #pragma pack(pop)
 
-#pragma pack(push, 4)
+#pragma pack(push, 8)
 
 struct SuperCANDeviceData
 {
@@ -79,6 +81,10 @@ struct SuperCANDeviceData
     unsigned char sn_bytes[16];
     unsigned char sn_length;
 };
+
+#pragma pack(pop)
+
+#pragma pack(push, 8)
 
 struct SuperCANDeviceData2
 {
@@ -100,7 +106,7 @@ struct SuperCANDeviceData2
 
 #pragma pack(pop)
 
-#pragma pack(push, 4)
+#pragma pack(push, 8)
 
 struct SuperCANVersion
 {
@@ -109,6 +115,18 @@ struct SuperCANVersion
     unsigned short minor;
     unsigned short patch;
     unsigned short build;
+};
+
+#pragma pack(pop)
+
+#pragma pack(push, 4)
+
+struct SuperCANDeviceConfiguration
+{
+    struct SuperCANBitTimingParams nm;
+    struct SuperCANBitTimingParams dt;
+    unsigned long feat_conf;
+    unsigned long bus;
 };
 
 #pragma pack(pop)
@@ -161,6 +179,17 @@ ISuperCANDevice3 : ISuperCANDevice2
         /*[out]*/ struct SuperCANDeviceData2 * data ) = 0;
 };
 
+struct SC_UUID_INLINE("5e817090-e1f4-4c64-aeff-88221887d272")
+ISuperCANDevice4 : ISuperCANDevice3
+{
+    //
+    // Raw methods provided by interface
+    //
+
+      virtual HRESULT __stdcall GetDeviceConfiguration (
+        /*[out]*/ struct SuperCANDeviceConfiguration * conf ) = 0;
+};
+
 struct SC_UUID_INLINE("8f8c4375-2dfe-4335-8947-036f965bd927")
 ISuperCAN : IUnknown
 {
@@ -200,6 +229,7 @@ SC_UUID_EXTERN(SuperCAN::__SuperCAN, "fd71338b-9533-4785-8c2f-664ece4bebee");
 SC_UUID_EXTERN(SuperCAN::ISuperCANDevice, "434a1140-50d8-4c49-ab8f-9fd1a7327ce0");
 SC_UUID_EXTERN(SuperCAN::ISuperCANDevice2, "4cf5e694-1111-4719-b6cb-a9b88985e97a");
 SC_UUID_EXTERN(SuperCAN::ISuperCANDevice3, "fa2faa9d-960d-49bf-8261-1f07bd0c9d69");
+SC_UUID_EXTERN(SuperCAN::ISuperCANDevice4, "5e817090-e1f4-4c64-aeff-88221887d272");
 SC_UUID_EXTERN(SuperCAN::ISuperCAN, "8f8c4375-2dfe-4335-8947-036f965bd927");
 SC_UUID_EXTERN(SuperCAN::ISuperCAN2, "da4c7005-6d21-4ab7-9933-5eaa959f0621");
 SC_UUID_EXTERN(SuperCAN::CSuperCAN, "e6214ab1-56ad-4215-8688-095d3816f260");
@@ -213,6 +243,7 @@ namespace SuperCAN {
 _COM_SMARTPTR_TYPEDEF(ISuperCANDevice, __uuidof(ISuperCANDevice));
 _COM_SMARTPTR_TYPEDEF(ISuperCANDevice2, __uuidof(ISuperCANDevice2));
 _COM_SMARTPTR_TYPEDEF(ISuperCANDevice3, __uuidof(ISuperCANDevice3));
+_COM_SMARTPTR_TYPEDEF(ISuperCANDevice4, __uuidof(ISuperCANDevice4));
 _COM_SMARTPTR_TYPEDEF(ISuperCAN, __uuidof(ISuperCAN));
 _COM_SMARTPTR_TYPEDEF(ISuperCAN2, __uuidof(ISuperCAN2));
 

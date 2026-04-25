@@ -43,7 +43,7 @@ def main():
         sys.argv.remove("--sc-debug-build")
 
     sources=["module.cpp"]
-    include_dirs=["../inc"]
+    include_dirs=["../inc", "."]
 
     # running from source or installer tree?
     if os.path.exists("supercan_dll.c"):

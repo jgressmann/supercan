@@ -151,6 +151,7 @@ public:
 	int SetFeatureFlags(sc_com_dev_index_t index, uint32_t flags);
 	int SetNominalBitTiming(sc_com_dev_index_t index, SuperCANBitTimingParams params);
 	int SetDataBitTiming(sc_com_dev_index_t index, SuperCANBitTimingParams params);
+	void GetConfiguration(SuperCANDeviceConfiguration* conf) const;
 
 public:
 	const std::wstring& name() const { return m_Name; }
@@ -258,7 +259,7 @@ private:
 	HANDLE m_TxThread;
 	HANDLE m_TxFifoAvailable;
 	HANDLE m_LogEvent;
-	CRITICAL_SECTION m_Lock;
+	mutable CRITICAL_SECTION m_Lock;
 	CRITICAL_SECTION m_LogLock;
 	com_device_data m_ComDeviceData[MAX_COM_DEVICES_PER_SC_DEVICE];
 	com_device_data_private m_ComDeviceDataPrivate[MAX_COM_DEVICES_PER_SC_DEVICE];
@@ -294,13 +295,14 @@ using ScDevPtr = std::shared_ptr<ScDev>;
 
 class ATL_NO_VTABLE XSuperCANDevice :
 	public ATL::CComObjectRoot, // need lock for ScDev
-	public ISuperCANDevice3
+	public ISuperCANDevice4
 {
 public:
 	BEGIN_COM_MAP(XSuperCANDevice)
 		COM_INTERFACE_ENTRY(ISuperCANDevice)
 		COM_INTERFACE_ENTRY(ISuperCANDevice2)
 		COM_INTERFACE_ENTRY(ISuperCANDevice3)
+		COM_INTERFACE_ENTRY(ISuperCANDevice4)
 	END_COM_MAP()
 public:
 	~XSuperCANDevice();
@@ -319,6 +321,7 @@ public:
 	STDMETHOD(GetDeviceData)(SuperCANDeviceData* data);
 	STDMETHOD(SetLogLevel)(int level);
 	STDMETHOD(GetDeviceData2)(SuperCANDeviceData2* data);
+	STDMETHOD(GetDeviceConfiguration)(SuperCANDeviceConfiguration* config);
 	void Init(const ScDevPtr& dev, sc_com_dev_index_t index, com_device_data* mm);
 	void SetSuperCAN(ISuperCAN2* sc);
 
@@ -2378,6 +2381,25 @@ void ScDev::SetDeviceError(int error)
 	}
 }
 
+void ScDev::GetConfiguration(SuperCANDeviceConfiguration* conf) const
+{
+	assert(m_Initialized);
+	assert(conf);
+
+	Guard g(m_Lock);
+
+	conf->nm.brp = m_Nm.brp;
+	conf->nm.sjw = m_Nm.sjw;
+	conf->nm.tseg1 = m_Nm.tseg1;
+	conf->nm.tseg2 = m_Nm.tseg2;
+	conf->dt.brp = m_Dt.brp;
+	conf->dt.sjw = m_Dt.sjw;
+	conf->dt.tseg1 = m_Dt.tseg1;
+	conf->dt.tseg2 = m_Dt.tseg2;
+	conf->feat_conf = m_FeatureFlags;
+	conf->bus = m_OnBus;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
@@ -2580,6 +2602,15 @@ STDMETHODIMP XSuperCANDevice::SetLogLevel(int level)
 	if (error) {
 		SC_HRESULT_FROM_ERROR(error);
 	}
+
+	return S_OK;
+}
+
+STDMETHODIMP XSuperCANDevice::GetDeviceConfiguration(SuperCANDeviceConfiguration* conf)
+{
+	ObjectLock g(this);
+
+	m_SharedDevice->GetConfiguration(conf);
 
 	return S_OK;
 }

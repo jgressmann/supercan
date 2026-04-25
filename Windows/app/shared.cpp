@@ -482,6 +482,35 @@ int run(app_ctx* ac)
             fprintf(stderr, "ERROR: failed to go on bus (hr=%lx)\n", hr);
             return map_hr_to_error(hr);
         }
+    } else {
+        ISuperCANDevice4Ptr dev4;
+
+        hr = dev->QueryInterface(&dev4);
+        if (SUCCEEDED(hr)) {
+            SuperCANDeviceConfiguration conf;
+
+            hr = dev4->GetDeviceConfiguration(&conf);
+            if (FAILED(hr)) {
+                fprintf(stderr, "ERROR: failed to get device configuration (hr=%lx)\n", hr);
+                return map_hr_to_error(hr);
+            }
+            else {
+                if (!ac->candump) {
+                    // print device configuration
+                    fprintf(stdout, "nm_brp=%u nm_sjw=%u nm_tseg1=%u nm_tseg2=%u\n", conf.nm.brp, conf.nm.sjw, conf.nm.tseg1, conf.nm.tseg2);
+                    fprintf(stdout, "dt_brp=%u dt_sjw=%u dt_tseg1=%u dt_tseg2=%u\n", conf.dt.brp, conf.dt.sjw, conf.dt.tseg1, conf.dt.tseg2);
+                    fprintf(stdout, "feat_flags=%08X\n", conf.feat_conf);
+                    fprintf(stdout, "bus=%u\n", conf.bus);
+                }
+            }
+        }
+        else if (E_NOINTERFACE == hr) {
+            // ok, unsupported
+        }
+        else {
+            fprintf(stderr, "ERROR: failed to query interface for ISuperCANDevice4 (hr=%lx)\n", hr);
+            return map_hr_to_error(hr);
+        }
     }
 
     HANDLE handles[] = {

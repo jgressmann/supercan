@@ -90,6 +90,13 @@ library SuperCAN
 		unsigned short build;
 	};
 
+	struct SuperCANDeviceConfiguration
+	{
+		struct SuperCANBitTimingParams nm, dt;
+		unsigned long feat_conf;
+		unsigned long bus;
+	};
+
 	[
 		object,
 		uuid(434A1140-50D8-4C49-AB8F-9FD1A7327CE0),
@@ -133,6 +140,17 @@ library SuperCAN
 	interface ISuperCANDevice3 : ISuperCANDevice2
 	{
 		HRESULT GetDeviceData2([out] struct SuperCANDeviceData2* data);
+	};
+
+	[
+		object,
+		uuid(5E817090-E1F4-4C64-AEFF-88221887D272),
+		pointer_default(unique),
+		oleautomation,
+	]
+	interface ISuperCANDevice4 : ISuperCANDevice3
+	{
+		HRESULT GetDeviceConfiguration([out] struct SuperCANDeviceConfiguration* conf);
 	};
 
 	[
