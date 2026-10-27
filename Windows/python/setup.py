@@ -26,7 +26,7 @@ def main():
     global debug
 
     if not os.path.exists("commit.h"):
-        # source tree 
+        # source tree
         try:
             commit = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
         except:
@@ -56,7 +56,7 @@ def main():
 
     setup(
         name="python-can-supercan",
-        version="0.1.0",
+        version="0.1.1",
         description="Python interface for SuperCAN",
         author="Jean Gressmann",
         author_email="jean@0x42.de",
@@ -75,9 +75,9 @@ def main():
         cmdclass={"build_ext": BuildExt},
         entry_points = {
             "can.interface": [
-                "supercan = supercan:Bus",
-                "supercan-exclusive = supercan:Exclusive",
-                "supercan-shared = supercan:Shared",
+                "supercan = supercan:SuperCANBus",
+                "supercan-exclusive = supercan:SuperCANBusExclusive",
+                "supercan-shared = supercan:SuperCANBusShared",
             ]
         },
         license="MIT",

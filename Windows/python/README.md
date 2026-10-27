@@ -45,8 +45,6 @@ Open a native command prompt.
     import can
 
     e = can.Bus(
-        channel=0,  # channel index (0-based)
-        filters=None,
         interface="supercan",
         serial="12345678",  # device serial
         bitrate=500000)
@@ -58,8 +56,6 @@ Open a native command prompt.
     import can
 
     e = can.Bus(
-        channel=0,  # channel index (0-based)
-        filters=None,
         interface="supercan",
         serial="12345678",  # device serial
         bitrate=500000,
@@ -72,10 +68,38 @@ Open a native command prompt.
     import can
 
     e = can.Bus(
-        channel=0,  # channel index (0-based)
-        filters=None,
         interface="supercan",
         serial="12345678",  # device serial
         bitrate=500000,
         shared=False)  # request exclusive mode
     ```
+
+# Debugging
+
+Setup a virtual env and install / build the module with debug symbols:
+
+```
+(.venv) supercan\Windows\python>python setup.py build --sc-debug-build
+(.venv) supercan\Windows\python>python setup.py install
+```
+
+```json
+{
+    "name": "Python C",
+    "type": "cppvsdbg",
+    "request": "launch",
+    "program": "C:\\Program Files\\Python312\\python.exe",
+    "args": [
+        "<PATH TO PYTHON SCRIPT>\\test.py"
+    ],
+    "stopAtEntry": false,
+    "cwd": "${fileDirname}",
+    "environment": [
+        {
+            "name": "PYTHONPATH",
+            "value": "<PATH TO PYTHON VENV SITE-PACKAGES"
+        }
+    ],
+    "console": "externalTerminal",
+}
+```
